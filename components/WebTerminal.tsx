@@ -979,7 +979,9 @@ const MemoTerminalPane = memo(function TerminalPane({
       };
     }
 
-    connect();
+    // NOTE: connect() is called inside initTerminal() — do NOT call it here.
+    // Calling it both here and in initTerminal() causes duplicate WebSocket
+    // connections to the same tmux session, resulting in doubled output.
 
     term.onData((data) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
