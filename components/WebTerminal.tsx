@@ -966,13 +966,25 @@ const MemoTerminalPane = memo(function TerminalPane({
 
     // ── Cleanup ──
 
+    const mountTime = Date.now();
+
     return () => {
       disposed = true;
       clearTimeout(resizeTimer);
       clearTimeout(reconnectTimer);
       window.removeEventListener('terminal-drag-end', onDragEnd);
       resizeObserver.disconnect();
-      if (ws) { ws.onclose = null; ws.close(); }
+      // Strict Mode cleanup: if disposed within 2s of mount and we created a
+      // new session (not attaching), kill the orphaned tmux session
+      const isStrictModeCleanup = Date.now() - mountTime < 2000;
+      const isNewSession = !sessionNameRef.current && connectedSession;
+      if (ws) {
+        if (isStrictModeCleanup && isNewSession && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'kill', sessionName: connectedSession }));
+        }
+        ws.onclose = null;
+        ws.close();
+      }
       term.dispose();
     };
   }, [id, onSessionConnected]);

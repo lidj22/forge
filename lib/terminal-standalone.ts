@@ -95,7 +95,7 @@ function listTmuxSessions(): { name: string; created: string; attached: boolean;
   }
 }
 
-const MAX_SESSIONS = 20;
+const MAX_SESSIONS = 10;
 
 function createTmuxSession(cols: number, rows: number): string {
   // Auto-cleanup: if too many sessions, kill the oldest idle ones
