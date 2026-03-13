@@ -11,12 +11,15 @@
  *     { type: 'input', data }                  — stdin
  *     { type: 'resize', cols, rows }           — resize
  *     { type: 'kill', sessionName }            — kill a session
+ *     { type: 'load-state' }                   — load shared terminal state
+ *     { type: 'save-state', data }             — save shared terminal state
  *
  *   Server → Client:
  *     { type: 'sessions', sessions: [{name, created, attached, windows}] }
  *     { type: 'connected', sessionName }
  *     { type: 'output', data }
  *     { type: 'exit', code }
+ *     { type: 'terminal-state', data }         — loaded state (or null)
  *
  * Usage: npx tsx lib/terminal-standalone.ts
  */
@@ -25,12 +28,36 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 3001;
 const SESSION_PREFIX = 'mw-';
 
 // Remove CLAUDECODE env so Claude Code can run inside terminal sessions
 delete process.env.CLAUDECODE;
+
+// ─── Shared state persistence ─────────────────────────────────
+
+const STATE_DIR = join(homedir(), '.my-workflow');
+const STATE_FILE = join(STATE_DIR, 'terminal-state.json');
+
+function loadTerminalState(): unknown {
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+function saveTerminalState(data: unknown): void {
+  try {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('[terminal] Failed to save state:', e);
+  }
+}
 
 // ─── tmux helpers ──────────────────────────────────────────────
 
@@ -209,8 +236,20 @@ wss.on('connection', (ws: WebSocket) => {
         case 'kill': {
           if (parsed.sessionName) {
             killTmuxSession(parsed.sessionName);
-            // Refresh list
             ws.send(JSON.stringify({ type: 'sessions', sessions: listTmuxSessions() }));
+          }
+          break;
+        }
+
+        case 'load-state': {
+          const state = loadTerminalState();
+          ws.send(JSON.stringify({ type: 'terminal-state', data: state }));
+          break;
+        }
+
+        case 'save-state': {
+          if (parsed.data) {
+            saveTerminalState(parsed.data);
           }
           break;
         }

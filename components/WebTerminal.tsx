@@ -34,50 +34,54 @@ interface TabState {
 
 // ─── Layout persistence ──────────────────────────────────────
 
-const STORAGE_KEY = 'mw-terminal-tabs';
-const LABELS_KEY = 'mw-session-labels';
-
-function saveTabs(tabs: TabState[], activeTabId: number) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabs, activeTabId }));
-  } catch {}
+function getWsUrl() {
+  if (typeof window === 'undefined') return 'ws://localhost:3001';
+  const wsHost = window.location.hostname;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProtocol}//${wsHost}:3001`;
 }
 
-/** Persist session name → user-assigned label mapping */
-function saveSessionLabels(labels: Record<string, string>) {
-  try {
-    localStorage.setItem(LABELS_KEY, JSON.stringify(labels));
-  } catch {}
-}
-
-function loadSessionLabels(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LABELS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return {};
-}
-
-function loadTabs(): { tabs: TabState[]; activeTabId: number } | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      // Validate structure to avoid crashes from stale data
-      if (data && Array.isArray(data.tabs) && data.tabs.length > 0 && typeof data.activeTabId === 'number') {
-        // Verify each tab has required fields
-        const valid = data.tabs.every((t: Record<string, unknown>) =>
-          t && typeof t.id === 'number' && typeof t.label === 'string' && t.tree
-        );
-        if (valid) return data;
-      }
-      // Invalid data, clear it
-      localStorage.removeItem(STORAGE_KEY);
+/** Load shared terminal state from server */
+function loadSharedState(): Promise<{ tabs: TabState[]; activeTabId: number; sessionLabels: Record<string, string> } | null> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(null), 3000);
+    try {
+      const ws = new WebSocket(getWsUrl());
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'load-state' }));
+      ws.onmessage = (e) => {
+        clearTimeout(timeout);
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'terminal-state' && msg.data) {
+            const d = msg.data;
+            if (Array.isArray(d.tabs) && d.tabs.length > 0 && typeof d.activeTabId === 'number') {
+              resolve({ tabs: d.tabs, activeTabId: d.activeTabId, sessionLabels: d.sessionLabels || {} });
+              ws.close();
+              return;
+            }
+          }
+        } catch {}
+        resolve(null);
+        ws.close();
+      };
+      ws.onerror = () => { clearTimeout(timeout); resolve(null); };
+    } catch {
+      clearTimeout(timeout);
+      resolve(null);
     }
-  } catch {
-    try { localStorage.removeItem(STORAGE_KEY); } catch {}
-  }
-  return null;
+  });
+}
+
+/** Save shared terminal state to server (fire-and-forget) */
+function saveSharedState(tabs: TabState[], activeTabId: number, sessionLabels: Record<string, string>) {
+  try {
+    const ws = new WebSocket(getWsUrl());
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'save-state', data: { tabs, activeTabId, sessionLabels } }));
+      setTimeout(() => ws.close(), 200);
+    };
+    ws.onerror = () => ws.close();
+  } catch {}
 }
 
 // ─── Split tree helpers ──────────────────────────────────────
@@ -175,36 +179,39 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
   const [editingTabId, setEditingTabId] = useState<number | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [closeConfirm, setCloseConfirm] = useState<{ tabId: number; sessions: string[] } | null>(null);
-  const [sessionLabels, setSessionLabels] = useState<Record<string, string>>({});
+  const sessionLabelsRef = useRef<Record<string, string>>({});
   const dragTabRef = useRef<number | null>(null);
 
-  // Restore from localStorage after mount (avoids hydration mismatch)
+  // Restore shared state from server after mount
   useEffect(() => {
-    const saved = loadTabs();
-    if (saved && saved.tabs.length > 0) {
-      initNextIdFromTabs(saved.tabs);
-      setTabs(saved.tabs);
-      setActiveTabId(saved.activeTabId);
-    }
-    setSessionLabels(loadSessionLabels());
-    setHydrated(true);
+    loadSharedState().then(saved => {
+      if (saved && saved.tabs.length > 0) {
+        initNextIdFromTabs(saved.tabs);
+        setTabs(saved.tabs);
+        setActiveTabId(saved.activeTabId);
+        sessionLabelsRef.current = saved.sessionLabels || {};
+      }
+      setHydrated(true);
+    });
   }, []);
 
-  // Persist on changes (only after hydration)
+  // Persist to server on changes (debounced, only after hydration)
+  const saveTimerRef = useRef(0);
   useEffect(() => {
     if (!hydrated) return;
-    saveTabs(tabs, activeTabId);
-    // Sync session name → tab label mapping
-    setSessionLabels(prev => {
-      const next = { ...prev };
-      for (const tab of tabs) {
-        for (const sn of collectSessionNames(tab.tree)) {
-          next[sn] = tab.label;
-        }
+    // Sync session labels ref
+    const labels = { ...sessionLabelsRef.current };
+    for (const tab of tabs) {
+      for (const sn of collectSessionNames(tab.tree)) {
+        labels[sn] = tab.label;
       }
-      saveSessionLabels(next);
-      return next;
-    });
+    }
+    sessionLabelsRef.current = labels;
+    // Debounced save to server
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveSharedState(tabs, activeTabId, labels);
+    }, 500);
   }, [tabs, activeTabId, hydrated]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
@@ -284,10 +291,8 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
     if (!closeConfirm) return;
     const { tabId, sessions } = closeConfirm;
     if (action === 'kill') {
-      const wsHost = window.location.hostname;
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       for (const sn of sessions) {
-        const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`);
+        const ws = new WebSocket(getWsUrl());
         ws.onopen = () => {
           ws.send(JSON.stringify({ type: 'kill', sessionName: sn }));
           setTimeout(() => ws.close(), 500);
@@ -317,15 +322,9 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
     setTabs(prev => {
       const tab = prev.find(t => t.id === tabId);
       if (tab) {
-        // Update session labels mapping for all sessions in this tab
         const sessions = collectSessionNames(tab.tree);
-        if (sessions.length > 0) {
-          setSessionLabels(sl => {
-            const next = { ...sl };
-            for (const sn of sessions) next[sn] = label;
-            saveSessionLabels(next);
-            return next;
-          });
+        for (const sn of sessions) {
+          sessionLabelsRef.current[sn] = label;
         }
       }
       return prev.map(t => t.id === tabId ? { ...t, label } : t);
@@ -349,9 +348,7 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
   const refreshSessions = useCallback(() => {
     // Use a short-lived WS to list sessions, with abort guard
     let closed = false;
-    const wsHost = window.location.hostname;
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`);
+    const ws = new WebSocket(getWsUrl());
     const timeout = setTimeout(() => { closed = true; ws.close(); }, 3000);
     ws.onopen = () => {
       if (closed) return;
@@ -540,7 +537,7 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
               <tbody>
                 {tmuxSessions.map(s => {
                   const inUse = usedSessions.includes(s.name);
-                  const savedLabel = sessionLabels[s.name];
+                  const savedLabel = sessionLabelsRef.current[s.name];
                   return (
                     <tr key={s.name} className="border-b border-[#2a2a4a]/50 hover:bg-[#1a1a2e]">
                       <td className="py-1.5 pr-3 text-gray-300">
@@ -564,7 +561,7 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
                             onClick={() => {
                               // Open in a new tab, restore saved label if available
                               const tree = makeTerminal(s.name);
-                              const label = sessionLabels[s.name] || s.name.replace('mw-', '');
+                              const label = sessionLabelsRef.current[s.name] || s.name.replace('mw-', '');
                               const newTab: TabState = { id: nextId++, label, tree, ratios: {}, activeId: firstTerminalId(tree) };
                               setTabs(prev => [...prev, newTab]);
                               setActiveTabId(newTab.id);
@@ -578,9 +575,7 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
                         <button
                           onClick={() => {
                             if (!confirm(`Kill session ${s.name}?`)) return;
-                            const wsHost = window.location.hostname;
-                            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                            const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`);
+                            const ws = new WebSocket(getWsUrl());
                             ws.onopen = () => {
                               ws.send(JSON.stringify({ type: 'kill', sessionName: s.name }));
                               setTimeout(() => { ws.close(); refreshSessions(); }, 500);
@@ -822,6 +817,7 @@ const MemoTerminalPane = memo(function TerminalPane({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      scrollback: 10000,
       theme: {
         background: '#1a1a2e',
         foreground: '#e0e0e0',
@@ -856,9 +852,7 @@ const MemoTerminalPane = memo(function TerminalPane({
 
     // ── WebSocket with auto-reconnect ──
 
-    const wsHost = window.location.hostname;
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${wsHost}:3001`;
+    const wsUrl = getWsUrl();
     let ws: WebSocket | null = null;
     let reconnectTimer = 0;
     let connectedSession: string | null = null;
