@@ -22,14 +22,14 @@ export default function MarkdownContent({ content }: { content: string }) {
           if (isBlock) {
             const lang = className?.replace('language-', '') || '';
             return (
-              <div className="my-2 rounded border border-[var(--border)] overflow-hidden">
+              <div className="my-2 rounded border border-[var(--border)] overflow-hidden max-w-full">
                 {lang && (
                   <div className="px-3 py-1 bg-[var(--bg-tertiary)] border-b border-[var(--border)] text-[9px] text-[var(--text-secondary)] font-mono">
                     {lang}
                   </div>
                 )}
-                <pre className="p-3 bg-[var(--bg-tertiary)] overflow-x-auto">
-                  <code className="text-[11px] font-mono text-[var(--text-primary)]">{children}</code>
+                <pre className="p-3 bg-[var(--bg-tertiary)] overflow-x-auto max-w-full">
+                  <code className="text-[11px] font-mono text-[var(--text-primary)] break-all">{children}</code>
                 </pre>
               </div>
             );

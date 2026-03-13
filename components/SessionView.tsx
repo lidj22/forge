@@ -451,7 +451,7 @@ export default function SessionView({
       </div>
 
       {/* Right: session content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {activeSession && (
           <div className="border-b border-[var(--border)] px-4 py-2 shrink-0">
             <div className="flex items-center gap-2">
@@ -563,7 +563,7 @@ function SessionEntryView({
     return (
       <div className="flex justify-end">
         <div className="max-w-[80%] px-3 py-2 bg-[var(--accent)]/10 border border-[var(--accent)]/20 rounded-lg">
-          <p className="text-xs text-[var(--text-primary)] whitespace-pre-wrap">{entry.content}</p>
+          <p className="text-xs text-[var(--text-primary)] whitespace-pre-wrap break-all">{entry.content}</p>
           {entry.timestamp && (
             <span className="text-[9px] text-[var(--text-secondary)] mt-1 block">
               {new Date(entry.timestamp).toLocaleTimeString()}
@@ -594,7 +594,7 @@ function SessionEntryView({
           {isLong && <span className="text-[9px] text-[var(--text-secondary)] ml-auto">{expanded ? '▲' : '▼'}</span>}
         </button>
         {expanded && (
-          <pre className="px-3 py-2 text-[10px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-words max-h-40 overflow-y-auto border-t border-[var(--border)]">
+          <pre className="px-3 py-2 text-[10px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-all max-h-40 overflow-y-auto border-t border-[var(--border)]">
             {entry.content}
           </pre>
         )}
@@ -619,7 +619,7 @@ function SessionEntryView({
           {isLong && <span className="text-[9px] text-[var(--text-secondary)] shrink-0">{expanded ? '▲' : '▼'}</span>}
         </button>
         {(expanded || !isLong) && isLong && (
-          <pre className="px-3 py-2 text-[11px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-words max-h-60 overflow-y-auto border-t border-[var(--border)]">
+          <pre className="px-3 py-2 text-[11px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-all max-h-60 overflow-y-auto border-t border-[var(--border)]">
             {entry.content}
           </pre>
         )}

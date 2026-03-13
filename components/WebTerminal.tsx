@@ -131,25 +131,29 @@ const pendingCommands = new Map<number, string>();
 
 const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, ref) {
   const [tabs, setTabs] = useState<TabState[]>(() => {
-    const saved = loadTabs();
-    if (saved && saved.tabs.length > 0) {
-      initNextIdFromTabs(saved.tabs);
-      return saved.tabs;
-    }
     const tree = makeTerminal();
     return [{ id: nextId++, label: 'Terminal 1', tree, ratios: {}, activeId: firstTerminalId(tree) }];
   });
-  const [activeTabId, setActiveTabId] = useState(() => {
-    const saved = loadTabs();
-    return saved?.activeTabId || tabs[0]?.id || 1;
-  });
+  const [activeTabId, setActiveTabId] = useState(() => tabs[0]?.id || 1);
+  const [hydrated, setHydrated] = useState(false);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
 
-  // Persist on changes
+  // Restore from localStorage after mount (avoids hydration mismatch)
   useEffect(() => {
-    saveTabs(tabs, activeTabId);
-  }, [tabs, activeTabId]);
+    const saved = loadTabs();
+    if (saved && saved.tabs.length > 0) {
+      initNextIdFromTabs(saved.tabs);
+      setTabs(saved.tabs);
+      setActiveTabId(saved.activeTabId);
+    }
+    setHydrated(true);
+  }, []);
+
+  // Persist on changes (only after hydration)
+  useEffect(() => {
+    if (hydrated) saveTabs(tabs, activeTabId);
+  }, [tabs, activeTabId, hydrated]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
