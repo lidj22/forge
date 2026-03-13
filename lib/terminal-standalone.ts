@@ -68,7 +68,21 @@ function listTmuxSessions(): { name: string; created: string; attached: boolean;
   }
 }
 
+const MAX_SESSIONS = 20;
+
 function createTmuxSession(cols: number, rows: number): string {
+  // Auto-cleanup: if too many sessions, kill the oldest idle ones
+  const existing = listTmuxSessions();
+  if (existing.length >= MAX_SESSIONS) {
+    const idle = existing.filter(s => !s.attached);
+    // Kill oldest idle sessions to make room
+    const toKill = idle.slice(0, Math.max(1, idle.length - Math.floor(MAX_SESSIONS / 2)));
+    for (const s of toKill) {
+      console.log(`[terminal] Auto-cleanup: killing idle session "${s.name}"`);
+      killTmuxSession(s.name);
+    }
+  }
+
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const name = `${SESSION_PREFIX}${id}`;
   execSync(`${TMUX} new-session -d -s ${name} -x ${cols} -y ${rows}`, {
@@ -108,8 +122,7 @@ wss.on('connection', (ws: WebSocket) => {
 
   function attachToTmux(name: string, cols: number, rows: number) {
     if (!tmuxSessionExists(name)) {
-      ws.send(JSON.stringify({ type: 'output', data: `\r\n\x1b[91mSession "${name}" no longer exists\x1b[0m\r\n` }));
-      ws.send(JSON.stringify({ type: 'exit', code: 1 }));
+      ws.send(JSON.stringify({ type: 'error', message: `session "${name}" no longer exists` }));
       return;
     }
 
@@ -159,15 +172,27 @@ wss.on('connection', (ws: WebSocket) => {
         case 'create': {
           const cols = parsed.cols || 120;
           const rows = parsed.rows || 30;
-          const name = createTmuxSession(cols, rows);
-          attachToTmux(name, cols, rows);
+          try {
+            const name = createTmuxSession(cols, rows);
+            attachToTmux(name, cols, rows);
+          } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : 'unknown error';
+            console.error(`[terminal] Failed to create tmux session:`, errMsg);
+            ws.send(JSON.stringify({ type: 'error', message: `failed to create session: ${errMsg}` }));
+          }
           break;
         }
 
         case 'attach': {
           const cols = parsed.cols || 120;
           const rows = parsed.rows || 30;
-          attachToTmux(parsed.sessionName, cols, rows);
+          try {
+            attachToTmux(parsed.sessionName, cols, rows);
+          } catch (e: unknown) {
+            const errMsg = e instanceof Error ? e.message : 'unknown error';
+            console.error(`[terminal] Failed to attach to session:`, errMsg);
+            ws.send(JSON.stringify({ type: 'error', message: `failed to attach: ${errMsg}` }));
+          }
           break;
         }
 
@@ -190,7 +215,12 @@ wss.on('connection', (ws: WebSocket) => {
           break;
         }
       }
-    } catch {}
+    } catch (e) {
+      console.error('[terminal] Error handling message:', e);
+      try {
+        ws.send(JSON.stringify({ type: 'error', message: 'internal server error' }));
+      } catch {}
+    }
   });
 
   ws.on('close', () => {

@@ -45,8 +45,22 @@ function saveTabs(tabs: TabState[], activeTabId: number) {
 function loadTabs(): { tabs: TabState[]; activeTabId: number } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
+    if (raw) {
+      const data = JSON.parse(raw);
+      // Validate structure to avoid crashes from stale data
+      if (data && Array.isArray(data.tabs) && data.tabs.length > 0 && typeof data.activeTabId === 'number') {
+        // Verify each tab has required fields
+        const valid = data.tabs.every((t: Record<string, unknown>) =>
+          t && typeof t.id === 'number' && typeof t.label === 'string' && t.tree
+        );
+        if (valid) return data;
+      }
+      // Invalid data, clear it
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  }
   return null;
 }
 
@@ -127,6 +141,10 @@ function collectAllSessionNames(tabs: TabState[]): string[] {
 
 const pendingCommands = new Map<number, string>();
 
+// ─── Global drag lock — suppress terminal fit() during split drag ──
+
+let globalDragging = false;
+
 // ─── Main component ─────────────────────────────────────────
 
 const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, ref) {
@@ -191,38 +209,51 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
     setActiveTabId(newTab.id);
   }, [tabs.length]);
 
-  const closeTab = useCallback((tabId: number) => {
-    const tab = tabs.find(t => t.id === tabId);
-    if (!tab) return;
-    const sessions = collectSessionNames(tab.tree);
-    if (sessions.length > 0) {
-      setCloseConfirm({ tabId, sessions });
-    } else {
-      // No sessions, just close
-      removeTab(tabId);
-    }
-  }, [tabs]);
-
   const removeTab = useCallback((tabId: number) => {
     setTabs(prev => {
       if (prev.length <= 1) return prev;
-      return prev.filter(t => t.id !== tabId);
+      const filtered = prev.filter(t => t.id !== tabId);
+      // Also fix activeTabId if needed
+      setActiveTabId(curActive => {
+        if (curActive === tabId) {
+          const idx = prev.findIndex(t => t.id === tabId);
+          const next = prev[idx - 1] || prev[idx + 1];
+          return next?.id || prev[0]?.id || 0;
+        }
+        return curActive;
+      });
+      return filtered;
     });
-    setActiveTabId(prev => {
-      if (prev === tabId) {
-        const idx = tabs.findIndex(t => t.id === tabId);
-        const next = tabs[idx - 1] || tabs[idx + 1];
-        return next?.id || tabs[0]?.id || 0;
+  }, []);
+
+  const closeTab = useCallback((tabId: number) => {
+    setTabs(prev => {
+      const tab = prev.find(t => t.id === tabId);
+      if (!tab) return prev;
+      const sessions = collectSessionNames(tab.tree);
+      if (sessions.length > 0) {
+        setCloseConfirm({ tabId, sessions });
+        return prev; // don't remove yet, show dialog
       }
-      return prev;
+      // No sessions, just close directly
+      if (prev.length <= 1) return prev;
+      const filtered = prev.filter(t => t.id !== tabId);
+      setActiveTabId(curActive => {
+        if (curActive === tabId) {
+          const idx = prev.findIndex(t => t.id === tabId);
+          const next = prev[idx - 1] || prev[idx + 1];
+          return next?.id || prev[0]?.id || 0;
+        }
+        return curActive;
+      });
+      return filtered;
     });
-  }, [tabs]);
+  }, []);
 
   const closeTabWithAction = useCallback((action: 'detach' | 'kill') => {
     if (!closeConfirm) return;
     const { tabId, sessions } = closeConfirm;
     if (action === 'kill') {
-      // Kill all tmux sessions in this tab
       const wsHost = window.location.hostname;
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       for (const sn of sessions) {
@@ -233,7 +264,6 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
         };
       }
     }
-    // Both actions remove the tab; 'detach' keeps tmux sessions alive
     removeTab(tabId);
     setCloseConfirm(null);
   }, [closeConfirm, removeTab]);
@@ -646,6 +676,7 @@ function DraggableSplit({
       e.stopPropagation();
       divider.setPointerCapture(e.pointerId);
       draggingRef.current = true;
+      globalDragging = true;
       lastRatio = ratioRef.current;
       document.body.style.cursor = vertical ? 'col-resize' : 'row-resize';
       document.body.style.userSelect = 'none';
@@ -667,10 +698,13 @@ function DraggableSplit({
     const onPointerUp = () => {
       if (!draggingRef.current) return;
       draggingRef.current = false;
+      globalDragging = false;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       // Commit final ratio to React state (single re-render)
       setRatios(prev => ({ ...prev, [splitId]: lastRatio }));
+      // Trigger a global resize so all terminals fit() once after drag ends
+      window.dispatchEvent(new Event('terminal-drag-end'));
     };
 
     divider.addEventListener('pointerdown', onPointerDown);
@@ -788,6 +822,12 @@ const MemoTerminalPane = memo(function TerminalPane({
               }
             }, 500);
           }
+        } else if (msg.type === 'error') {
+          // Session doesn't exist — fallback to creating a new one
+          term.write(`\r\n\x1b[93m[${msg.message || 'error'} — creating new session...]\x1b[0m\r\n`);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+          }
         } else if (msg.type === 'exit') {
           term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
         }
@@ -802,25 +842,45 @@ const MemoTerminalPane = memo(function TerminalPane({
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
     });
 
-    let resizeRaf = 0;
-    const handleResize = () => {
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(() => {
-        resizeRaf = 0;
-        const el = containerRef.current;
-        if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return; // hidden tab
-        try {
-          fit.fit();
-          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-        } catch {}
-      });
+    let resizeTimer = 0;
+    let lastW = 0;
+    let lastH = 0;
+
+    const doFit = () => {
+      const el = containerRef.current;
+      if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return;
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      if (w === lastW && h === lastH) return; // no actual size change
+      lastW = w;
+      lastH = h;
+      try {
+        fit.fit();
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      } catch {}
     };
+
+    const handleResize = () => {
+      if (globalDragging) return; // suppress during split drag
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(doFit, 150);
+    };
+
+    // After split drag ends, fit once
+    const onDragEnd = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(doFit, 50);
+    };
+    window.addEventListener('terminal-drag-end', onDragEnd);
 
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(containerRef.current);
 
     return () => {
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      clearTimeout(resizeTimer);
+      window.removeEventListener('terminal-drag-end', onDragEnd);
       resizeObserver.disconnect();
       ws.close();
       term.dispose();
