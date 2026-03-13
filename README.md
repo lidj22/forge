@@ -267,6 +267,12 @@ telegramTunnelPassword: "secret"    # Password for Telegram tunnel commands
 | Tunnel | Cloudflare (cloudflared) |
 | Bot | Telegram Bot API |
 
+## Roadmap
+
+- [ ] **Multi-Agent Workflow** — DAG-based pipelines where multiple Claude Code instances collaborate, passing outputs between nodes with template variables, conditional routing, and parallel execution. See [docs/roadmap-multi-agent-workflow.md](docs/roadmap-multi-agent-workflow.md) for full design.
+- [ ] Pipeline UI — DAG visualization with real-time node status
+- [ ] Real-time agent collaboration (Phase 2) — agents communicate via message channels during execution
+
 ## License
 
 MIT
