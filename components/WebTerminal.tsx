@@ -898,6 +898,9 @@ const MemoTerminalPane = memo(function TerminalPane({
     let ws: WebSocket | null = null;
     let reconnectTimer = 0;
     let connectedSession: string | null = null;
+    let createRetries = 0;
+    const MAX_CREATE_RETRIES = 2;
+    let reconnectAttempts = 0;
 
     function connect() {
       if (disposed) return;
@@ -931,6 +934,8 @@ const MemoTerminalPane = memo(function TerminalPane({
             term.write(msg.data);
           } else if (msg.type === 'connected') {
             connectedSession = msg.sessionName;
+            createRetries = 0;
+            reconnectAttempts = 0;
             onSessionConnected(id, msg.sessionName);
             // Force tmux to redraw by toggling size, then send reset
             setTimeout(() => {
@@ -952,9 +957,9 @@ const MemoTerminalPane = memo(function TerminalPane({
               }, 500);
             }
           } else if (msg.type === 'error') {
-            // Only auto-create if we haven't already created one for this pane
-            if (!connectedSession) {
-              term.write(`\r\n\x1b[93m[${msg.message || 'error'} — creating new session...]\x1b[0m\r\n`);
+            if (!connectedSession && createRetries < MAX_CREATE_RETRIES) {
+              createRetries++;
+              term.write(`\r\n\x1b[93m[${msg.message || 'error'} — retry ${createRetries}/${MAX_CREATE_RETRIES}...]\x1b[0m\r\n`);
               if (ws?.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
               }
@@ -969,9 +974,11 @@ const MemoTerminalPane = memo(function TerminalPane({
 
       ws.onclose = () => {
         if (disposed) return;
-        term.write('\r\n\x1b[90m[disconnected — reconnecting...]\x1b[0m\r\n');
-        // Auto-reconnect after delay
-        reconnectTimer = window.setTimeout(connect, 2000);
+        reconnectAttempts++;
+        // Exponential backoff: 2s, 4s, 8s, ... max 30s
+        const delay = Math.min(2000 * Math.pow(2, reconnectAttempts - 1), 30000);
+        term.write(`\r\n\x1b[90m[disconnected — reconnecting in ${delay / 1000}s...]\x1b[0m\r\n`);
+        reconnectTimer = window.setTimeout(connect, delay);
       };
 
       ws.onerror = () => {
