@@ -116,6 +116,11 @@ function createTmuxSession(cols: number, rows: number): string {
     cwd: homedir(),
     env: { ...process.env, TERM: 'xterm-256color' },
   });
+  // Enable mouse scrolling and set large scrollback buffer
+  try {
+    execSync(`${TMUX} set-option -t ${name} mouse on 2>/dev/null`);
+    execSync(`${TMUX} set-option -t ${name} history-limit 50000 2>/dev/null`);
+  } catch {}
   return name;
 }
 
@@ -152,6 +157,12 @@ wss.on('connection', (ws: WebSocket) => {
       ws.send(JSON.stringify({ type: 'error', message: `session "${name}" no longer exists` }));
       return;
     }
+
+    // Ensure mouse and scrollback are enabled (for old sessions too)
+    try {
+      execSync(`${TMUX} set-option -t ${name} mouse on 2>/dev/null`);
+      execSync(`${TMUX} set-option -t ${name} history-limit 50000 2>/dev/null`);
+    } catch {}
 
     sessionName = name;
 
