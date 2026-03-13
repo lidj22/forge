@@ -42,19 +42,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="flex items-center gap-3 text-[var(--text-secondary)] text-xs">
-          <div className="flex-1 h-px bg-[var(--border)]" />
-          <span>or</span>
-          <div className="flex-1 h-px bg-[var(--border)]" />
-        </div>
-
-        {/* Google OAuth */}
-        <button
-          onClick={() => signIn('google', { callbackUrl: window.location.origin + '/' })}
-          className="w-full py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] hover:bg-[var(--border)] transition-colors"
-        >
-          Sign in with Google
-        </button>
       </div>
     </div>
   );
