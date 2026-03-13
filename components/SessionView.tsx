@@ -50,6 +50,8 @@ export default function SessionView({
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [watchers, setWatchers] = useState<Watcher[]>([]);
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Map<string, Set<string>>>(new Map()); // project → sessionIds
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Load cached sessions tree
@@ -195,6 +197,86 @@ export default function SessionView({
     alert(`Monitor task created for "${label}"`);
   };
 
+  // ─── Batch helpers ────────────────────────────────────────
+  const totalSelected = Array.from(selectedIds.values()).reduce((n, s) => n + s.size, 0);
+
+  const toggleSelect = (project: string, sessionId: string) => {
+    setSelectedIds(prev => {
+      const next = new Map(prev);
+      const set = new Set(next.get(project) || []);
+      set.has(sessionId) ? set.delete(sessionId) : set.add(sessionId);
+      if (set.size === 0) next.delete(project); else next.set(project, set);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (project: string) => {
+    const sessions = sessionTree[project] || [];
+    setSelectedIds(prev => {
+      const next = new Map(prev);
+      const existing = next.get(project);
+      if (existing && existing.size === sessions.length) {
+        next.delete(project);
+      } else {
+        next.set(project, new Set(sessions.map(s => s.sessionId)));
+      }
+      return next;
+    });
+  };
+
+  const isSelected = (project: string, sessionId: string) =>
+    selectedIds.get(project)?.has(sessionId) ?? false;
+
+  const isAllSelected = (project: string) => {
+    const sessions = sessionTree[project] || [];
+    return sessions.length > 0 && (selectedIds.get(project)?.size ?? 0) === sessions.length;
+  };
+
+  const exitBatchMode = () => {
+    setBatchMode(false);
+    setSelectedIds(new Map());
+  };
+
+  const batchDelete = async () => {
+    if (totalSelected === 0) return;
+    if (!confirm(`Delete ${totalSelected} sessions? This cannot be undone.`)) return;
+    for (const [project, ids] of selectedIds) {
+      await fetch(`/api/claude-sessions/${encodeURIComponent(project)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionIds: Array.from(ids) }),
+      });
+    }
+    // Clear active if it was deleted
+    if (activeSessionId && selectedIds.get(selectedProject)?.has(activeSessionId)) {
+      setActiveSessionId(null);
+      setEntries([]);
+    }
+    exitBatchMode();
+    loadTree(false);
+  };
+
+  const batchMonitor = async () => {
+    if (totalSelected === 0) return;
+    for (const [project, ids] of selectedIds) {
+      for (const sessionId of ids) {
+        await fetch('/api/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectName: project,
+            prompt: `Monitor session ${sessionId}`,
+            mode: 'monitor',
+            conversationId: sessionId,
+            watchConfig: { condition: 'change', action: 'notify', repeat: true },
+          }),
+        });
+      }
+    }
+    alert(`Created ${totalSelected} monitor tasks`);
+    exitBatchMode();
+  };
+
   const activeSession = sessionTree[selectedProject]?.find(s => s.sessionId === activeSessionId);
   const watchedSessionIds = new Set(watchers.filter(w => w.active).map(w => w.sessionId));
   const watchedProjects = new Set(watchers.filter(w => w.active && !w.sessionId).map(w => w.projectName));
@@ -206,14 +288,45 @@ export default function SessionView({
         {/* Header */}
         <div className="flex items-center justify-between p-2 border-b border-[var(--border)]">
           <span className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase">Sessions</span>
-          <button
-            onClick={() => loadTree(true)}
-            disabled={syncing}
-            className="text-[9px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
-          >
-            {syncing ? 'Syncing...' : 'Sync'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => batchMode ? exitBatchMode() : setBatchMode(true)}
+              className={`text-[9px] transition-colors ${batchMode ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+            >
+              {batchMode ? 'Cancel' : 'Batch'}
+            </button>
+            <button
+              onClick={() => loadTree(true)}
+              disabled={syncing}
+              className="text-[9px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+            >
+              {syncing ? 'Syncing...' : 'Sync'}
+            </button>
+          </div>
         </div>
+
+        {/* Batch action bar */}
+        {batchMode && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--border)] bg-[var(--bg-tertiary)]">
+            <span className="text-[9px] text-[var(--text-secondary)] flex-1">
+              {totalSelected} selected
+            </span>
+            <button
+              onClick={batchMonitor}
+              disabled={totalSelected === 0}
+              className="text-[8px] px-1.5 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20 disabled:opacity-30"
+            >
+              Monitor All
+            </button>
+            <button
+              onClick={batchDelete}
+              disabled={totalSelected === 0}
+              className="text-[8px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-30"
+            >
+              Delete All
+            </button>
+          </div>
+        )}
 
         {/* Tree */}
         <div className="flex-1 overflow-y-auto">
@@ -226,10 +339,19 @@ export default function SessionView({
           {Object.entries(sessionTree).map(([project, sessions]) => (
             <div key={project}>
               {/* Project node */}
-              <button
+              <div
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-[var(--bg-tertiary)] transition-colors border-b border-[var(--border)]/50 cursor-pointer"
                 onClick={() => toggleProject(project)}
-                className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-[var(--bg-tertiary)] transition-colors border-b border-[var(--border)]/50"
               >
+                {batchMode && (
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected(project)}
+                    onChange={(e) => { e.stopPropagation(); toggleSelectAll(project); }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="shrink-0 accent-[var(--accent)]"
+                  />
+                )}
                 <span className="text-[10px] text-[var(--text-secondary)]">
                   {expandedProjects.has(project) ? '▼' : '▶'}
                 </span>
@@ -238,7 +360,7 @@ export default function SessionView({
                 {watchedProjects.has(project) && (
                   <span className="text-[9px] text-[var(--accent)]" title="Watching">👁</span>
                 )}
-              </button>
+              </div>
 
               {/* Session children */}
               {expandedProjects.has(project) && sessions.map(s => {
@@ -250,30 +372,41 @@ export default function SessionView({
                     className={`group relative w-full text-left pl-6 pr-2 py-1.5 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer ${
                       isActive ? 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--accent)]' : 'border-l-2 border-l-transparent'
                     }`}
-                    onClick={() => selectSession(project, s.sessionId)}
+                    onClick={() => batchMode ? toggleSelect(project, s.sessionId) : selectSession(project, s.sessionId)}
                   >
                     <div className="flex items-center gap-1">
+                      {batchMode && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected(project, s.sessionId)}
+                          onChange={() => toggleSelect(project, s.sessionId)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="shrink-0 accent-[var(--accent)]"
+                        />
+                      )}
                       <span className="text-[10px] text-[var(--text-primary)] truncate flex-1">
                         {s.summary || s.firstPrompt?.slice(0, 40) || s.sessionId.slice(0, 8)}
                       </span>
                       {isWatched && <span className="text-[8px] text-[var(--accent)]">👁</span>}
-                      {/* Hover actions */}
-                      <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); createMonitorTask(project, s.sessionId); }}
-                          className="text-[8px] px-1 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
-                          title="Create monitor task (notify via Telegram)"
-                        >
-                          monitor
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); deleteSessionById(project, s.sessionId); }}
-                          className="text-[8px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
-                          title="Delete session"
-                        >
-                          del
-                        </button>
-                      </span>
+                      {/* Hover actions — hide in batch mode */}
+                      {!batchMode && (
+                        <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); createMonitorTask(project, s.sessionId); }}
+                            className="text-[8px] px-1 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
+                            title="Create monitor task (notify via Telegram)"
+                          >
+                            monitor
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteSessionById(project, s.sessionId); }}
+                            className="text-[8px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                            title="Delete session"
+                          >
+                            del
+                          </button>
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[8px] text-[var(--text-secondary)] font-mono">{s.sessionId.slice(0, 8)}</span>

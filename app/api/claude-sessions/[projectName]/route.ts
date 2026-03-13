@@ -12,22 +12,26 @@ export async function GET(_req: Request, { params }: { params: Promise<{ project
 export async function DELETE(req: Request, { params }: { params: Promise<{ projectName: string }> }) {
   const { projectName } = await params;
   const project = decodeURIComponent(projectName);
-  const { sessionId } = await req.json();
+  const body = await req.json();
 
-  if (!sessionId) {
-    return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
+  // Support both single sessionId and batch sessionIds
+  const ids: string[] = body.sessionIds || (body.sessionId ? [body.sessionId] : []);
+
+  if (ids.length === 0) {
+    return NextResponse.json({ error: 'sessionId or sessionIds required' }, { status: 400 });
   }
 
-  const deleted = deleteSession(project, sessionId);
-  if (!deleted) {
-    return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  const db = getDb(getDbPath());
+  let deletedCount = 0;
+
+  for (const id of ids) {
+    if (deleteSession(project, id)) {
+      deletedCount++;
+    }
+    try {
+      db.prepare('DELETE FROM cached_sessions WHERE project_name = ? AND session_id = ?').run(project, id);
+    } catch {}
   }
 
-  // Also remove from cache
-  try {
-    const db = getDb(getDbPath());
-    db.prepare('DELETE FROM cached_sessions WHERE project_name = ? AND session_id = ?').run(project, sessionId);
-  } catch {}
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, deleted: deletedCount });
 }

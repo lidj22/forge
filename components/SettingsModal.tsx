@@ -5,7 +5,6 @@ import { useState, useEffect } from 'react';
 interface Settings {
   projectRoots: string[];
   claudePath: string;
-  obsidianVault: string;
   telegramBotToken: string;
   telegramChatId: string;
   notifyOnComplete: boolean;
@@ -16,7 +15,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<Settings>({
     projectRoots: [],
     claudePath: '',
-    obsidianVault: '',
     telegramBotToken: '',
     telegramChatId: '',
     notifyOnComplete: true,
@@ -113,22 +111,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             value={settings.claudePath}
             onChange={e => setSettings({ ...settings, claudePath: e.target.value })}
             placeholder="/usr/local/bin/claude"
-            className="w-full px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]"
-          />
-        </div>
-
-        {/* Obsidian Vault */}
-        <div className="space-y-2">
-          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
-            Obsidian Vault Path
-          </label>
-          <p className="text-[10px] text-[var(--text-secondary)]">
-            Path to your Obsidian vault for note syncing.
-          </p>
-          <input
-            value={settings.obsidianVault}
-            onChange={e => setSettings({ ...settings, obsidianVault: e.target.value })}
-            placeholder="/Users/you/obsidian-vault"
             className="w-full px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]"
           />
         </div>

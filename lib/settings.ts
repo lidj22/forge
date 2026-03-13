@@ -8,7 +8,6 @@ const SETTINGS_FILE = join(homedir(), '.my-workflow', 'settings.yaml');
 export interface Settings {
   projectRoots: string[];       // Multiple project directories
   claudePath: string;           // Path to claude binary
-  obsidianVault: string;        // Obsidian vault path
   telegramBotToken: string;     // Telegram Bot API token
   telegramChatId: string;       // Telegram chat ID to send notifications to
   notifyOnComplete: boolean;    // Notify when task completes
@@ -18,7 +17,6 @@ export interface Settings {
 const defaults: Settings = {
   projectRoots: [],
   claudePath: '',
-  obsidianVault: '',
   telegramBotToken: '',
   telegramChatId: '',
   notifyOnComplete: true,

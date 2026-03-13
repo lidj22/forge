@@ -20,13 +20,6 @@ export interface MemoryConfig {
   summaryModel?: string;     // model to use for summarization
 }
 
-export interface ObsidianConfig {
-  autoSave: 'false' | 'manual' | 'milestone' | 'always' | 'smart';
-  saveTarget?: string;
-  saveFormat?: 'append' | 'new_file' | 'replace';
-  readPaths?: string[];
-}
-
 export interface SessionTemplate {
   id: string;
   name: string;
@@ -38,9 +31,7 @@ export interface SessionTemplate {
   systemPrompt: string;
   context?: {
     files?: string[];
-    obsidianPaths?: string[];
   };
-  obsidian?: ObsidianConfig;
   commands?: Record<string, { description: string; action: string; prompt?: string }>;
   ui?: {
     icon?: string;
@@ -130,9 +121,6 @@ export interface TaskLogEntry {
 export interface AppConfig {
   dataDir: string;
   providers: Record<ProviderName, ProviderConfig>;
-  obsidian?: {
-    vaultPath: string;
-  };
   server: {
     host: string;
     port: number;
