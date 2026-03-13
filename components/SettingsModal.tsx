@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface Settings {
   projectRoots: string[];
@@ -9,6 +9,14 @@ interface Settings {
   telegramChatId: string;
   notifyOnComplete: boolean;
   notifyOnFailure: boolean;
+}
+
+interface TunnelStatus {
+  status: 'stopped' | 'starting' | 'running' | 'error';
+  url: string | null;
+  error: string | null;
+  installed: boolean;
+  log: string[];
 }
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -22,10 +30,26 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   });
   const [newRoot, setNewRoot] = useState('');
   const [saved, setSaved] = useState(false);
+  const [tunnel, setTunnel] = useState<TunnelStatus>({
+    status: 'stopped', url: null, error: null, installed: false, log: [],
+  });
+  const [tunnelLoading, setTunnelLoading] = useState(false);
+
+  const refreshTunnel = useCallback(() => {
+    fetch('/api/tunnel').then(r => r.json()).then(setTunnel).catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/settings').then(r => r.json()).then(setSettings);
-  }, []);
+    refreshTunnel();
+  }, [refreshTunnel]);
+
+  // Poll tunnel status while starting
+  useEffect(() => {
+    if (tunnel.status !== 'starting') return;
+    const id = setInterval(refreshTunnel, 2000);
+    return () => clearInterval(id);
+  }, [tunnel.status, refreshTunnel]);
 
   const save = async () => {
     await fetch('/api/settings', {
@@ -174,6 +198,102 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Remote Access (Cloudflare Tunnel) */}
+        <div className="space-y-2">
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
+            Remote Access
+          </label>
+          <p className="text-[10px] text-[var(--text-secondary)]">
+            Expose this instance to the internet via Cloudflare Tunnel. No account needed — generates a temporary public URL.
+            {!tunnel.installed && ' First use will download cloudflared (~30MB).'}
+          </p>
+
+          <div className="flex items-center gap-2">
+            {tunnel.status === 'stopped' || tunnel.status === 'error' ? (
+              <button
+                disabled={tunnelLoading}
+                onClick={async () => {
+                  setTunnelLoading(true);
+                  try {
+                    const res = await fetch('/api/tunnel', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'start' }),
+                    });
+                    const data = await res.json();
+                    setTunnel(data);
+                  } catch {}
+                  setTunnelLoading(false);
+                }}
+                className="text-[10px] px-3 py-1.5 bg-[var(--green)] text-black rounded hover:opacity-90 disabled:opacity-50"
+              >
+                {tunnelLoading ? (tunnel.installed ? 'Starting...' : 'Downloading...') : 'Start Tunnel'}
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  await fetch('/api/tunnel', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'stop' }),
+                  });
+                  refreshTunnel();
+                }}
+                className="text-[10px] px-3 py-1.5 bg-[var(--red)] text-white rounded hover:opacity-90"
+              >
+                Stop Tunnel
+              </button>
+            )}
+
+            <span className="text-[10px] text-[var(--text-secondary)]">
+              {tunnel.status === 'running' && (
+                <span className="text-[var(--green)]">Running</span>
+              )}
+              {tunnel.status === 'starting' && (
+                <span className="text-[var(--yellow)]">Starting...</span>
+              )}
+              {tunnel.status === 'error' && (
+                <span className="text-[var(--red)]">Error</span>
+              )}
+              {tunnel.status === 'stopped' && 'Stopped'}
+            </span>
+          </div>
+
+          {tunnel.url && (
+            <div className="flex items-center gap-2">
+              <input
+                readOnly
+                value={tunnel.url}
+                className="flex-1 px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--green)] font-mono focus:outline-none cursor-text select-all"
+                onClick={e => (e.target as HTMLInputElement).select()}
+              />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(tunnel.url!);
+                }}
+                className="text-[10px] px-2 py-1.5 border border-[var(--border)] rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+              >
+                Copy
+              </button>
+            </div>
+          )}
+
+          {tunnel.error && (
+            <p className="text-[10px] text-[var(--red)]">{tunnel.error}</p>
+          )}
+
+          {tunnel.log.length > 0 && tunnel.status !== 'stopped' && (
+            <details className="text-[10px]">
+              <summary className="text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]">
+                Logs ({tunnel.log.length} lines)
+              </summary>
+              <pre className="mt-1 p-2 bg-[var(--bg-primary)] border border-[var(--border)] rounded text-[9px] text-[var(--text-secondary)] max-h-[120px] overflow-auto font-mono whitespace-pre-wrap">
+                {tunnel.log.join('\n')}
+              </pre>
+            </details>
+          )}
         </div>
 
         {/* Actions */}

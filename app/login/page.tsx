@@ -11,7 +11,7 @@ export default function LoginPage() {
     e.preventDefault();
     const result = await signIn('credentials', {
       password,
-      callbackUrl: '/',
+      callbackUrl: window.location.origin + '/',
     }) as { error?: string } | undefined;
     if (result?.error) setError('Wrong password');
   };
@@ -50,7 +50,7 @@ export default function LoginPage() {
 
         {/* Google OAuth */}
         <button
-          onClick={() => signIn('google', { callbackUrl: '/' })}
+          onClick={() => signIn('google', { callbackUrl: window.location.origin + '/' })}
           className="w-full py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] hover:bg-[var(--border)] transition-colors"
         >
           Sign in with Google

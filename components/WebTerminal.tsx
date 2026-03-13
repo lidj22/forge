@@ -36,8 +36,13 @@ interface TabState {
 
 function getWsUrl() {
   if (typeof window === 'undefined') return 'ws://localhost:3001';
-  const wsHost = window.location.hostname;
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsHost = window.location.hostname;
+  // When accessed via tunnel or non-localhost, use the Next.js proxy path
+  // so the WS goes through the same origin (no need to expose port 3001)
+  if (wsHost !== 'localhost' && wsHost !== '127.0.0.1') {
+    return `${wsProtocol}//${window.location.host}/terminal-ws`;
+  }
   return `${wsProtocol}//${wsHost}:3001`;
 }
 

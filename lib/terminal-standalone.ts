@@ -143,6 +143,24 @@ function tmuxSessionExists(name: string): boolean {
   }
 }
 
+// ─── Connection tracking (for orphan cleanup) ──────────────────
+
+/** Map from tmux session name → Set of WebSocket clients attached to it */
+const sessionClients = new Map<string, Set<WebSocket>>();
+
+/** Map from WebSocket → timestamp when the session was *created* (not attached) by this client */
+const createdAt = new Map<WebSocket, { session: string; time: number }>();
+
+function trackAttach(ws: WebSocket, sessionName: string) {
+  if (!sessionClients.has(sessionName)) sessionClients.set(sessionName, new Set());
+  sessionClients.get(sessionName)!.add(ws);
+}
+
+function trackDetach(ws: WebSocket, sessionName: string) {
+  sessionClients.get(sessionName)?.delete(ws);
+  if (sessionClients.get(sessionName)?.size === 0) sessionClients.delete(sessionName);
+}
+
 // ─── WebSocket server ──────────────────────────────────────────
 
 const wss = new WebSocketServer({ port: PORT });
@@ -164,7 +182,10 @@ wss.on('connection', (ws: WebSocket) => {
       execSync(`${TMUX} set-option -t ${name} history-limit 50000 2>/dev/null`);
     } catch {}
 
+    // Detach from previous session if switching
+    if (sessionName) trackDetach(ws, sessionName);
     sessionName = name;
+    trackAttach(ws, name);
 
     // Attach to tmux session via pty
     term = pty.spawn(TMUX, ['attach-session', '-t', name], {
@@ -212,6 +233,7 @@ wss.on('connection', (ws: WebSocket) => {
           const rows = parsed.rows || 30;
           try {
             const name = createTmuxSession(cols, rows);
+            createdAt.set(ws, { session: name, time: Date.now() });
             attachToTmux(name, cols, rows);
           } catch (e: unknown) {
             const errMsg = e instanceof Error ? e.message : 'unknown error';
@@ -279,5 +301,20 @@ wss.on('connection', (ws: WebSocket) => {
       term.kill();
       console.log(`[terminal] Detached from tmux session "${sessionName}"`);
     }
+
+    // Untrack this client
+    if (sessionName) trackDetach(ws, sessionName);
+
+    // Orphan cleanup: if this client *created* the session < 5s ago
+    // and no other clients are attached, kill it (React Strict Mode artifact)
+    const created = createdAt.get(ws);
+    if (created && Date.now() - created.time < 5000) {
+      const otherClients = sessionClients.get(created.session)?.size ?? 0;
+      if (otherClients === 0 && tmuxSessionExists(created.session)) {
+        console.log(`[terminal] Auto-killing orphaned session "${created.session}" (created ${Date.now() - created.time}ms ago, no clients)`);
+        killTmuxSession(created.session);
+      }
+    }
+    createdAt.delete(ws);
   });
 });

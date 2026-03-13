@@ -308,6 +308,21 @@ async function main() {
       break;
     }
 
+    case 'password':
+    case 'pw': {
+      const { readFileSync } = await import('node:fs');
+      const { homedir } = await import('node:os');
+      const { join } = await import('node:path');
+      const pwFile = join(homedir(), '.my-workflow', 'password');
+      try {
+        const pw = readFileSync(pwFile, 'utf-8').trim();
+        console.log(`Login password: ${pw}`);
+      } catch {
+        console.log('No password file found. Password is set via MW_PASSWORD env var.');
+      }
+      break;
+    }
+
     case 'projects':
     case 'p': {
       const projects = await api('/api/projects');
@@ -336,8 +351,9 @@ Usage:
   mw retry <id>                  Retry a failed task
   mw flows                       List workflows
   mw projects                    List projects
+  mw password                    Show login password
 
-Shortcuts: t=task, r=run, ls=tasks, w=watch, l=log, s=status, f=flows, p=projects
+Shortcuts: t=task, r=run, ls=tasks, w=watch, l=log, s=status, f=flows, p=projects, pw=password
 
 Examples:
   mw task accord "Fix the authentication bug in login.ts"

@@ -6,6 +6,7 @@ import TaskDetail from './TaskDetail';
 import SessionView from './SessionView';
 import NewTaskModal from './NewTaskModal';
 import SettingsModal from './SettingsModal';
+import TunnelToggle from './TunnelToggle';
 import type { Task } from '@/src/types';
 import type { WebTerminalHandle } from './WebTerminal';
 
@@ -123,6 +124,7 @@ export default function Dashboard({ user }: { user: any }) {
               + New Task
             </button>
           )}
+          <TunnelToggle />
           <button
             onClick={() => setShowSettings(true)}
             className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"

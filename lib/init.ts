@@ -6,6 +6,7 @@
 import { ensureRunnerStarted } from './task-manager';
 import { startTelegramBot, stopTelegramBot } from './telegram-bot';
 import { startWatcherLoop } from './session-watcher';
+import { getPassword } from './password';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -14,6 +15,14 @@ let initialized = false;
 export function ensureInitialized() {
   if (initialized) return;
   initialized = true;
+
+  // Ensure MW_PASSWORD is set (auto-generate if not configured)
+  if (!process.env.MW_PASSWORD) {
+    const password = getPassword();
+    process.env.MW_PASSWORD = password;
+  }
+  console.log(`[init] Login password: ${process.env.MW_PASSWORD}`);
+  console.log('[init] Forgot? Run: mw password');
 
   // Start background task runner
   ensureRunnerStarted();
