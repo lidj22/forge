@@ -22,6 +22,8 @@ export function getDb(dbPath: string): Database.Database {
 function initSchema(db: Database.Database) {
   // Migrations for existing tables
   try { db.exec('ALTER TABLE tasks ADD COLUMN scheduled_at TEXT'); } catch {}
+  try { db.exec('ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT \'prompt\''); } catch {}
+  try { db.exec('ALTER TABLE tasks ADD COLUMN watch_config TEXT'); } catch {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -80,7 +82,9 @@ function initSchema(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       started_at TEXT,
       completed_at TEXT,
-      scheduled_at TEXT
+      scheduled_at TEXT,
+      mode TEXT NOT NULL DEFAULT 'prompt',
+      watch_config TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, created_at);

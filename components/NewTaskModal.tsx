@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import type { TaskMode, WatchConfig } from '@/src/types';
 
 interface Project {
   name: string;
@@ -28,12 +29,25 @@ export default function NewTaskModal({
     conversationId?: string;
     newSession?: boolean;
     scheduledAt?: string;
+    mode?: TaskMode;
+    watchConfig?: WatchConfig;
   }) => void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState('');
   const [prompt, setPrompt] = useState('');
   const [priority, setPriority] = useState(0);
+
+  // Task mode
+  const [taskMode, setTaskMode] = useState<TaskMode>('prompt');
+
+  // Monitor config
+  const [watchCondition, setWatchCondition] = useState<WatchConfig['condition']>('change');
+  const [watchKeyword, setWatchKeyword] = useState('');
+  const [watchIdleMinutes, setWatchIdleMinutes] = useState(10);
+  const [watchAction, setWatchAction] = useState<WatchConfig['action']>('notify');
+  const [watchActionPrompt, setWatchActionPrompt] = useState('');
+  const [watchRepeat, setWatchRepeat] = useState(false);
 
   // Session selection
   const [sessionMode, setSessionMode] = useState<'auto' | 'select' | 'new'>('auto');
@@ -83,13 +97,17 @@ export default function NewTaskModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProject || !prompt.trim()) return;
+    if (!selectedProject) return;
+    // Monitor mode requires session selection; prompt mode requires prompt text
+    if (taskMode === 'prompt' && !prompt.trim()) return;
+    if (taskMode === 'monitor' && sessionMode !== 'select') return;
 
     const data: Parameters<typeof onCreate>[0] = {
       projectName: selectedProject,
-      prompt: prompt.trim(),
+      prompt: taskMode === 'monitor' ? `Monitor session ${selectedSessionId}` : prompt.trim(),
       priority,
       scheduledAt: getScheduledAt(),
+      mode: taskMode,
     };
 
     if (sessionMode === 'new') {
@@ -97,7 +115,18 @@ export default function NewTaskModal({
     } else if (sessionMode === 'select' && selectedSessionId) {
       data.conversationId = selectedSessionId;
     }
-    // 'auto' → don't set conversationId, let backend auto-inherit
+
+    if (taskMode === 'monitor') {
+      const wc: WatchConfig = {
+        condition: watchCondition,
+        action: watchAction,
+        repeat: watchRepeat,
+      };
+      if (watchCondition === 'keyword') wc.keyword = watchKeyword;
+      if (watchCondition === 'idle') wc.idleMinutes = watchIdleMinutes;
+      if (watchAction !== 'notify') wc.actionPrompt = watchActionPrompt;
+      data.watchConfig = wc;
+    }
 
     onCreate(data);
   };
@@ -129,27 +158,62 @@ export default function NewTaskModal({
             </select>
           </div>
 
-          {/* Session */}
+          {/* Task Mode */}
           <div>
-            <label className="text-[11px] text-[var(--text-secondary)] block mb-1">Session</label>
+            <label className="text-[11px] text-[var(--text-secondary)] block mb-1">Mode</label>
             <div className="flex gap-2">
-              {(['auto', 'select', 'new'] as const).map(mode => (
+              {([
+                { value: 'prompt' as const, label: 'Prompt', desc: 'Send a message to Claude' },
+                { value: 'monitor' as const, label: 'Monitor', desc: 'Watch a session, trigger actions' },
+              ]).map(m => (
                 <button
-                  key={mode}
+                  key={m.value}
                   type="button"
-                  onClick={() => setSessionMode(mode)}
+                  onClick={() => {
+                    setTaskMode(m.value);
+                    if (m.value === 'monitor') setSessionMode('select');
+                  }}
                   className={`text-[11px] px-3 py-1 rounded border transition-colors ${
-                    sessionMode === mode
+                    taskMode === m.value
                       ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10'
                       : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]'
                   }`}
                 >
-                  {mode === 'auto' ? 'Auto Continue' : mode === 'select' ? 'Choose Session' : 'New Session'}
+                  {m.label}
                 </button>
               ))}
             </div>
+            <p className="text-[10px] text-[var(--text-secondary)] mt-1">
+              {taskMode === 'prompt' ? 'Send a message to Claude to work on autonomously' : 'Watch a session and trigger actions on conditions'}
+            </p>
+          </div>
 
-            {sessionMode === 'auto' && (
+          {/* Session */}
+          <div>
+            <label className="text-[11px] text-[var(--text-secondary)] block mb-1">Session</label>
+            {taskMode === 'prompt' && (
+              <div className="flex gap-2">
+                {(['auto', 'select', 'new'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setSessionMode(mode)}
+                    className={`text-[11px] px-3 py-1 rounded border transition-colors ${
+                      sessionMode === mode
+                        ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]'
+                    }`}
+                  >
+                    {mode === 'auto' ? 'Auto Continue' : mode === 'select' ? 'Choose Session' : 'New Session'}
+                  </button>
+                ))}
+              </div>
+            )}
+            {taskMode === 'monitor' && (
+              <p className="text-[10px] text-[var(--text-secondary)]">Select a session to monitor</p>
+            )}
+
+            {sessionMode === 'auto' && taskMode === 'prompt' && (
               <p className="text-[10px] text-[var(--text-secondary)] mt-1">
                 {autoSessionId
                   ? <>Will continue <span className="font-mono text-[var(--accent)]">{autoSessionId.slice(0, 12)}</span></>
@@ -190,18 +254,116 @@ export default function NewTaskModal({
             )}
           </div>
 
-          {/* Task prompt */}
-          <div>
-            <label className="text-[11px] text-[var(--text-secondary)] block mb-1">What should Claude do?</label>
-            <textarea
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              placeholder="e.g. Refactor the authentication module to use JWT tokens..."
-              rows={5}
-              className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent)]"
-              autoFocus
-            />
-          </div>
+          {/* Monitor Config — only in monitor mode */}
+          {taskMode === 'monitor' && (
+            <div className="space-y-3 p-3 bg-[var(--bg-tertiary)] rounded border border-[var(--border)]">
+              <div>
+                <label className="text-[11px] text-[var(--text-secondary)] block mb-1">Trigger when</label>
+                <div className="flex gap-1 flex-wrap">
+                  {([
+                    { value: 'change' as const, label: 'Content changes' },
+                    { value: 'idle' as const, label: 'Session idle' },
+                    { value: 'complete' as const, label: 'Session completes' },
+                    { value: 'error' as const, label: 'Error occurs' },
+                    { value: 'keyword' as const, label: 'Keyword found' },
+                  ]).map(c => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      onClick={() => setWatchCondition(c.value)}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                        watchCondition === c.value
+                          ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10'
+                          : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+                {watchCondition === 'keyword' && (
+                  <input
+                    type="text"
+                    value={watchKeyword}
+                    onChange={e => setWatchKeyword(e.target.value)}
+                    placeholder="Enter keyword to watch for..."
+                    className="mt-2 w-full px-2 py-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] focus:outline-none"
+                  />
+                )}
+                {watchCondition === 'idle' && (
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] text-[var(--text-secondary)]">Idle for</span>
+                    <input
+                      type="number"
+                      value={watchIdleMinutes}
+                      onChange={e => setWatchIdleMinutes(Number(e.target.value))}
+                      min={1}
+                      className="w-16 px-2 py-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] focus:outline-none"
+                    />
+                    <span className="text-[10px] text-[var(--text-secondary)]">minutes</span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-[11px] text-[var(--text-secondary)] block mb-1">Then</label>
+                <div className="flex gap-1 flex-wrap">
+                  {([
+                    { value: 'notify' as const, label: 'Send Telegram notification' },
+                    { value: 'message' as const, label: 'Send message to session' },
+                    { value: 'task' as const, label: 'Create new task' },
+                  ]).map(a => (
+                    <button
+                      key={a.value}
+                      type="button"
+                      onClick={() => setWatchAction(a.value)}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                        watchAction === a.value
+                          ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/10'
+                          : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {a.label}
+                    </button>
+                  ))}
+                </div>
+                {watchAction !== 'notify' && (
+                  <textarea
+                    value={watchActionPrompt}
+                    onChange={e => setWatchActionPrompt(e.target.value)}
+                    placeholder={watchAction === 'message' ? 'Message to send to the session...' : 'Prompt for the new task...'}
+                    rows={2}
+                    className="mt-2 w-full px-2 py-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] resize-none focus:outline-none"
+                  />
+                )}
+              </div>
+
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={watchRepeat}
+                  onChange={e => setWatchRepeat(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="text-[10px] text-[var(--text-secondary)]">Keep watching after trigger (repeat)</span>
+              </label>
+            </div>
+          )}
+
+          {/* Task prompt — only in prompt mode */}
+          {taskMode === 'prompt' && (
+            <div>
+              <label className="text-[11px] text-[var(--text-secondary)] block mb-1">What should Claude do?</label>
+              <textarea
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                placeholder="e.g. Refactor the authentication module to use JWT tokens..."
+                rows={5}
+                className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent)]"
+                autoFocus
+              />
+            </div>
+          )}
 
           {/* Schedule */}
           <div>
@@ -281,10 +443,10 @@ export default function NewTaskModal({
             </button>
             <button
               type="submit"
-              disabled={!selectedProject || !prompt.trim()}
+              disabled={!selectedProject || (taskMode === 'prompt' && !prompt.trim()) || (taskMode === 'monitor' && !selectedSessionId)}
               className="text-xs px-4 py-1.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
             >
-              {scheduleMode === 'now' ? 'Submit Task' : 'Schedule Task'}
+              {taskMode === 'monitor' ? 'Start Monitor' : scheduleMode === 'now' ? 'Submit Task' : 'Schedule Task'}
             </button>
           </div>
         </form>

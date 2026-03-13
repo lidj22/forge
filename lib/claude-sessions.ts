@@ -3,7 +3,7 @@
  * Enables live-tailing of local CLI sessions from the web UI.
  */
 
-import { existsSync, readFileSync, statSync, readdirSync, watch, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, readdirSync, watch, openSync, readSync, closeSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { getProjectInfo } from './projects';
@@ -194,6 +194,18 @@ export function readSessionEntries(filePath: string): SessionEntry[] {
     entries.push(...parseSessionLine(line));
   }
   return entries;
+}
+
+/**
+ * Delete a session file and its cache entry.
+ */
+export function deleteSession(projectName: string, sessionId: string): boolean {
+  const dir = getClaudeDirForProject(projectName);
+  if (!dir) return false;
+  const fp = join(dir, `${sessionId}.jsonl`);
+  if (!existsSync(fp)) return false;
+  unlinkSync(fp);
+  return true;
 }
 
 /**

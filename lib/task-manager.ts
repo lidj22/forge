@@ -10,7 +10,7 @@ import { getDb } from '@/src/core/db/database';
 import { getDbPath } from '@/src/config';
 import { loadSettings } from './settings';
 import { notifyTaskComplete, notifyTaskFailed } from './notify';
-import type { Task, TaskLogEntry, TaskStatus } from '@/src/types';
+import type { Task, TaskLogEntry, TaskStatus, TaskMode, WatchConfig } from '@/src/types';
 
 let runner: ReturnType<typeof setInterval> | null = null;
 let currentTaskId: string | null = null;
@@ -40,22 +40,29 @@ export function createTask(opts: {
   projectName: string;
   projectPath: string;
   prompt: string;
+  mode?: TaskMode;
   priority?: number;
   conversationId?: string;  // Explicit override; otherwise auto-inherits from project
   scheduledAt?: string;     // ISO timestamp — task won't run until this time
+  watchConfig?: WatchConfig;
 }): Task {
   const id = randomUUID().slice(0, 8);
+  const mode = opts.mode || 'prompt';
 
-  // Auto-inherit conversation_id from the project's last completed task
-  // Pass explicit empty string to force a new session
+  // For prompt mode: auto-inherit conversation_id
+  // For monitor mode: conversationId is required (the session to watch)
   const convId = opts.conversationId === ''
     ? null
-    : (opts.conversationId || getProjectConversationId(opts.projectName));
+    : (opts.conversationId || (mode === 'prompt' ? getProjectConversationId(opts.projectName) : null));
 
   db().prepare(`
-    INSERT INTO tasks (id, project_name, project_path, prompt, status, priority, conversation_id, log, scheduled_at)
-    VALUES (?, ?, ?, ?, 'queued', ?, ?, '[]', ?)
-  `).run(id, opts.projectName, opts.projectPath, opts.prompt, opts.priority || 0, convId || null, opts.scheduledAt || null);
+    INSERT INTO tasks (id, project_name, project_path, prompt, mode, status, priority, conversation_id, log, scheduled_at, watch_config)
+    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, '[]', ?, ?)
+  `).run(
+    id, opts.projectName, opts.projectPath, opts.prompt, mode,
+    opts.priority || 0, convId || null, opts.scheduledAt || null,
+    opts.watchConfig ? JSON.stringify(opts.watchConfig) : null,
+  );
 
   // Kick the runner
   ensureRunnerStarted();
@@ -99,8 +106,13 @@ export function cancelTask(id: string): boolean {
   if (!task) return false;
   if (task.status === 'done' || task.status === 'failed') return false;
 
+  // Cancel monitor tasks
+  if (task.mode === 'monitor' && activeMonitors.has(id)) {
+    cancelMonitor(id);
+    return true;
+  }
+
   if (task.status === 'running' && currentTaskId === id) {
-    // Will be handled by the runner
     updateTaskStatus(id, 'cancelled');
     return true;
   }
@@ -159,6 +171,13 @@ async function processNextTask() {
   if (!next) return;
 
   const task = rowToTask(next);
+
+  if (task.mode === 'monitor') {
+    // Monitor tasks run in background, don't block the runner
+    startMonitorTask(task);
+    return;
+  }
+
   currentTaskId = task.id;
 
   try {
@@ -415,9 +434,11 @@ function rowToTask(row: any): Task {
     projectName: row.project_name,
     projectPath: row.project_path,
     prompt: row.prompt,
+    mode: row.mode || 'prompt',
     status: row.status,
     priority: row.priority,
     conversationId: row.conversation_id || undefined,
+    watchConfig: row.watch_config ? JSON.parse(row.watch_config) : undefined,
     log: JSON.parse(row.log || '[]'),
     resultSummary: row.result_summary || undefined,
     gitDiff: row.git_diff || undefined,
@@ -429,4 +450,193 @@ function rowToTask(row: any): Task {
     completedAt: row.completed_at || undefined,
     scheduledAt: row.scheduled_at || undefined,
   };
+}
+
+// ─── Monitor task execution ──────────────────────────────────
+
+import { getSessionFilePath, readSessionEntries, tailSessionFile, type SessionEntry } from './claude-sessions';
+
+const activeMonitors = new Map<string, () => void>(); // taskId → cleanup fn
+
+function startMonitorTask(task: Task) {
+  if (!task.conversationId || !task.watchConfig) {
+    updateTaskStatus(task.id, 'failed', 'Monitor task requires a session and watch config');
+    return;
+  }
+
+  const config = task.watchConfig;
+  const fp = getSessionFilePath(task.projectName, task.conversationId);
+  if (!fp) {
+    updateTaskStatus(task.id, 'failed', `Session file not found: ${task.conversationId}`);
+    return;
+  }
+
+  updateTaskStatus(task.id, 'running');
+  appendLog(task.id, {
+    type: 'system', subtype: 'init',
+    content: `Monitoring session ${task.conversationId.slice(0, 12)} — condition: ${config.condition}, action: ${config.action}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Read initial state
+  const initialEntries = readSessionEntries(fp);
+  let lastEntryCount = initialEntries.length;
+  let lastActivityTime = Date.now();
+
+  // Idle check timer
+  let idleTimer: ReturnType<typeof setInterval> | null = null;
+  if (config.condition === 'idle') {
+    const idleMs = (config.idleMinutes || 10) * 60_000;
+    idleTimer = setInterval(() => {
+      if (Date.now() - lastActivityTime > idleMs) {
+        triggerMonitorAction(task, `Session idle for ${config.idleMinutes || 10} minutes`);
+        if (!config.repeat) stopMonitor(task.id);
+      }
+    }, 30_000);
+  }
+
+  // Tail the file for changes
+  const stopTail = tailSessionFile(fp, (newEntries) => {
+    lastActivityTime = Date.now();
+    lastEntryCount += newEntries.length;
+
+    appendLog(task.id, {
+      type: 'system', subtype: 'text',
+      content: `+${newEntries.length} entries (${lastEntryCount} total)`,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Check conditions
+    if (config.condition === 'change') {
+      triggerMonitorAction(task, summarizeNewEntries(newEntries));
+      if (!config.repeat) stopMonitor(task.id);
+    }
+
+    if (config.condition === 'keyword' && config.keyword) {
+      const kw = config.keyword.toLowerCase();
+      const matched = newEntries.find(e => e.content.toLowerCase().includes(kw));
+      if (matched) {
+        triggerMonitorAction(task, `Keyword "${config.keyword}" found: ${matched.content.slice(0, 200)}`);
+        if (!config.repeat) stopMonitor(task.id);
+      }
+    }
+
+    if (config.condition === 'error') {
+      const errors = newEntries.filter(e =>
+        e.type === 'system' && e.content.toLowerCase().includes('error')
+      );
+      if (errors.length > 0) {
+        triggerMonitorAction(task, `Error detected: ${errors[0].content.slice(0, 200)}`);
+        if (!config.repeat) stopMonitor(task.id);
+      }
+    }
+
+    if (config.condition === 'complete') {
+      // Check if last assistant entry looks like completion
+      const lastAssistant = [...newEntries].reverse().find(e => e.type === 'assistant_text');
+      if (lastAssistant) {
+        // Heuristic: check if there are no more tool calls after the last text
+        const lastIdx = newEntries.lastIndexOf(lastAssistant);
+        const afterToolUse = newEntries.slice(lastIdx + 1).some(e => e.type === 'tool_use');
+        if (!afterToolUse && newEntries.length > 2) {
+          // Wait a bit to see if more entries come
+          setTimeout(() => {
+            if (Date.now() - lastActivityTime > 30_000) {
+              triggerMonitorAction(task, `Session appears complete.\n\nLast: ${lastAssistant.content.slice(0, 300)}`);
+              if (!config.repeat) stopMonitor(task.id);
+            }
+          }, 35_000);
+        }
+      }
+    }
+  });
+
+  const cleanup = () => {
+    stopTail();
+    if (idleTimer) clearInterval(idleTimer);
+  };
+
+  activeMonitors.set(task.id, cleanup);
+}
+
+function stopMonitor(taskId: string) {
+  const cleanup = activeMonitors.get(taskId);
+  if (cleanup) {
+    cleanup();
+    activeMonitors.delete(taskId);
+  }
+  updateTaskStatus(taskId, 'done');
+}
+
+// Also export for cancel
+export function cancelMonitor(taskId: string) {
+  stopMonitor(taskId);
+  updateTaskStatus(taskId, 'cancelled');
+}
+
+async function triggerMonitorAction(task: Task, context: string) {
+  const config = task.watchConfig!;
+
+  appendLog(task.id, {
+    type: 'system', subtype: 'text',
+    content: `⚡ Triggered: ${context}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  if (config.action === 'notify') {
+    // Send Telegram notification
+    const { notifyTaskComplete } = await import('./notify');
+    const settings = loadSettings();
+    if (settings.telegramBotToken && settings.telegramChatId) {
+      const msg = config.actionPrompt
+        ? config.actionPrompt.replace('{{context}}', context)
+        : `📋 Monitor: ${task.projectName}/${task.conversationId?.slice(0, 8)}\n\n${context}`;
+      await sendTelegramDirect(settings.telegramBotToken, settings.telegramChatId, msg);
+    }
+  } else if (config.action === 'message' && config.actionPrompt && task.conversationId) {
+    // Send a message to the session by creating a prompt task
+    createTask({
+      projectName: task.projectName,
+      projectPath: task.projectPath,
+      prompt: config.actionPrompt,
+      conversationId: task.conversationId,
+    });
+    appendLog(task.id, {
+      type: 'system', subtype: 'text',
+      content: `Created follow-up task with prompt: ${config.actionPrompt.slice(0, 100)}`,
+      timestamp: new Date().toISOString(),
+    });
+  } else if (config.action === 'task' && config.actionPrompt) {
+    const project = config.actionProject || task.projectName;
+    createTask({
+      projectName: project,
+      projectPath: task.projectPath,
+      prompt: config.actionPrompt,
+    });
+    appendLog(task.id, {
+      type: 'system', subtype: 'text',
+      content: `Created new task for ${project}: ${config.actionPrompt.slice(0, 100)}`,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+async function sendTelegramDirect(token: string, chatId: string, text: string) {
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+    });
+  } catch {}
+}
+
+function summarizeNewEntries(entries: SessionEntry[]): string {
+  const parts: string[] = [];
+  for (const e of entries) {
+    if (e.type === 'user') parts.push(`👤 ${e.content.slice(0, 100)}`);
+    else if (e.type === 'assistant_text') parts.push(`🤖 ${e.content.slice(0, 150)}`);
+    else if (e.type === 'tool_use') parts.push(`🔧 ${e.toolName || 'tool'}`);
+  }
+  return parts.slice(0, 5).join('\n') || 'Activity detected';
 }

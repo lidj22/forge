@@ -159,6 +159,42 @@ export default function SessionView({
     loadWatchers();
   };
 
+  const deleteSessionById = async (project: string, sessionId: string) => {
+    if (!confirm(`Delete session ${sessionId.slice(0, 8)}? This cannot be undone.`)) return;
+    await fetch(`/api/claude-sessions/${encodeURIComponent(project)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    });
+    // Clear selection if deleted session was active
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(null);
+      setEntries([]);
+    }
+    loadTree(false);
+  };
+
+  const createMonitorTask = async (project: string, sessionId: string) => {
+    const sessionLabel = sessionTree[project]?.find(s => s.sessionId === sessionId);
+    const label = sessionLabel?.summary || sessionLabel?.firstPrompt?.slice(0, 40) || sessionId.slice(0, 8);
+    await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectName: project,
+        prompt: `Monitor session ${sessionId}`,
+        mode: 'monitor',
+        conversationId: sessionId,
+        watchConfig: {
+          condition: 'change',
+          action: 'notify',
+          repeat: true,
+        },
+      }),
+    });
+    alert(`Monitor task created for "${label}"`);
+  };
+
   const activeSession = sessionTree[selectedProject]?.find(s => s.sessionId === activeSessionId);
   const watchedSessionIds = new Set(watchers.filter(w => w.active).map(w => w.sessionId));
   const watchedProjects = new Set(watchers.filter(w => w.active && !w.sessionId).map(w => w.projectName));
@@ -209,18 +245,35 @@ export default function SessionView({
                 const isActive = selectedProject === project && activeSessionId === s.sessionId;
                 const isWatched = watchedSessionIds.has(s.sessionId);
                 return (
-                  <button
+                  <div
                     key={s.sessionId}
-                    onClick={() => selectSession(project, s.sessionId)}
-                    className={`w-full text-left pl-6 pr-2 py-1.5 hover:bg-[var(--bg-tertiary)] transition-colors ${
+                    className={`group relative w-full text-left pl-6 pr-2 py-1.5 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer ${
                       isActive ? 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--accent)]' : 'border-l-2 border-l-transparent'
                     }`}
+                    onClick={() => selectSession(project, s.sessionId)}
                   >
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-[var(--text-primary)] truncate flex-1">
                         {s.summary || s.firstPrompt?.slice(0, 40) || s.sessionId.slice(0, 8)}
                       </span>
                       {isWatched && <span className="text-[8px] text-[var(--accent)]">👁</span>}
+                      {/* Hover actions */}
+                      <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); createMonitorTask(project, s.sessionId); }}
+                          className="text-[8px] px-1 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
+                          title="Create monitor task (notify via Telegram)"
+                        >
+                          monitor
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteSessionById(project, s.sessionId); }}
+                          className="text-[8px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
+                          title="Delete session"
+                        >
+                          del
+                        </button>
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[8px] text-[var(--text-secondary)] font-mono">{s.sessionId.slice(0, 8)}</span>
@@ -231,7 +284,7 @@ export default function SessionView({
                         </span>
                       )}
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -285,6 +338,15 @@ export default function SessionView({
                     Watch
                   </button>
                 )}
+                {activeSessionId && (
+                  <button
+                    onClick={() => createMonitorTask(selectedProject, activeSessionId!)}
+                    className="text-[10px] px-2 py-0.5 border border-[var(--border)] text-[var(--text-secondary)] rounded hover:text-[var(--accent)] hover:border-[var(--accent)]"
+                    title="Create a monitor task that sends Telegram notifications on changes"
+                  >
+                    Monitor
+                  </button>
+                )}
                 {onOpenInTerminal && activeSessionId && (
                   <button
                     onClick={() => {
@@ -294,6 +356,14 @@ export default function SessionView({
                     className="text-[10px] px-2 py-0.5 bg-[var(--accent)] text-white rounded hover:opacity-90"
                   >
                     Open in Terminal
+                  </button>
+                )}
+                {activeSessionId && (
+                  <button
+                    onClick={() => deleteSessionById(selectedProject, activeSessionId!)}
+                    className="text-[10px] px-2 py-0.5 border border-red-500/30 text-red-400 rounded hover:bg-red-500/10"
+                  >
+                    Delete
                   </button>
                 )}
               </div>

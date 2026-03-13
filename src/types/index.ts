@@ -85,15 +85,28 @@ export interface UsageRecord {
 }
 
 export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+export type TaskMode = 'prompt' | 'monitor';
+
+export interface WatchConfig {
+  condition: 'change' | 'idle' | 'complete' | 'error' | 'keyword';
+  keyword?: string;          // for 'keyword' condition
+  idleMinutes?: number;      // for 'idle' condition (default 10)
+  action: 'notify' | 'message' | 'task';
+  actionPrompt?: string;     // message to send or task prompt
+  actionProject?: string;    // for 'task' action
+  repeat?: boolean;          // keep watching after trigger (default false)
+}
 
 export interface Task {
   id: string;
   projectName: string;
   projectPath: string;
   prompt: string;
+  mode: TaskMode;
   status: TaskStatus;
   priority: number;
   conversationId?: string;
+  watchConfig?: WatchConfig;
   log: TaskLogEntry[];
   resultSummary?: string;
   gitDiff?: string;

@@ -14,7 +14,7 @@ export async function GET(req: Request) {
 
 // Create a new task
 export async function POST(req: Request) {
-  const { projectName, prompt, priority, newSession, conversationId, scheduledAt } = await req.json();
+  const { projectName, prompt, priority, newSession, conversationId, scheduledAt, mode, watchConfig } = await req.json();
 
   if (!projectName || !prompt) {
     return NextResponse.json({ error: 'projectName and prompt are required' }, { status: 400 });
@@ -35,6 +35,8 @@ export async function POST(req: Request) {
     priority: priority || 0,
     conversationId: convId,
     scheduledAt: scheduledAt || undefined,
+    mode: mode || 'prompt',
+    watchConfig: watchConfig || undefined,
   });
 
   return NextResponse.json(task);
