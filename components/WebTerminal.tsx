@@ -138,6 +138,8 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
   const [hydrated, setHydrated] = useState(false);
   const [tmuxSessions, setTmuxSessions] = useState<TmuxSession[]>([]);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [editingTabId, setEditingTabId] = useState<number | null>(null);
+  const [editingLabel, setEditingLabel] = useState('');
 
   // Restore from localStorage after mount (avoids hydration mismatch)
   useEffect(() => {
@@ -202,6 +204,13 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
       return prev;
     });
   }, [tabs]);
+
+  const renameTab = useCallback((tabId: number, newLabel: string) => {
+    const label = newLabel.trim();
+    if (!label) return;
+    setTabs(prev => prev.map(t => t.id === tabId ? { ...t, label } : t));
+    setEditingTabId(null);
+  }, []);
 
   // ─── Update active tab's state ─────────────────────────
 
@@ -274,7 +283,31 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
               }`}
               onClick={() => setActiveTabId(tab.id)}
             >
-              <span className="truncate max-w-[100px]">{tab.label}</span>
+              {editingTabId === tab.id ? (
+                <input
+                  autoFocus
+                  value={editingLabel}
+                  onChange={(e) => setEditingLabel(e.target.value)}
+                  onBlur={() => renameTab(tab.id, editingLabel)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') renameTab(tab.id, editingLabel);
+                    if (e.key === 'Escape') setEditingTabId(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-transparent border border-[#4a4a6a] rounded px-1 text-[11px] text-white outline-none w-20"
+                />
+              ) : (
+                <span
+                  className="truncate max-w-[100px]"
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setEditingTabId(tab.id);
+                    setEditingLabel(tab.label);
+                  }}
+                >
+                  {tab.label}
+                </span>
+              )}
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
