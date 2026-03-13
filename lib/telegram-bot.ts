@@ -12,11 +12,17 @@ import { createTask, getTask, listTasks, cancelTask, retryTask, onTaskEvent } fr
 import { scanProjects } from './projects';
 import { listClaudeSessions, getSessionFilePath, readSessionEntries } from './claude-sessions';
 import { listWatchers, createWatcher, deleteWatcher, toggleWatcher } from './session-watcher';
+import { startTunnel, stopTunnel, getTunnelStatus } from './cloudflared';
+import { getPassword } from './password';
 import type { Task, TaskLogEntry } from '@/src/types';
 
 let polling = false;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let lastUpdateId = 0;
+
+// Prevent duplicate polling across hot-reloads
+const globalKey = Symbol.for('mw-telegram-polling');
+const g = globalThis as any;
 
 // Track which Telegram message maps to which task (for reply-based interaction)
 const taskMessageMap = new Map<number, string>(); // messageId → taskId
@@ -36,12 +42,16 @@ const logBuffers = new Map<string, { entries: string[]; timer: ReturnType<typeof
 // ─── Start/Stop ──────────────────────────────────────────────
 
 export function startTelegramBot() {
-  if (polling) return;
+  if (polling || g[globalKey]) return;
   const settings = loadSettings();
   if (!settings.telegramBotToken || !settings.telegramChatId) return;
 
   polling = true;
+  g[globalKey] = true;
   console.log('[telegram] Bot started');
+
+  // Set bot command menu
+  setBotCommands(settings.telegramBotToken);
 
   // Listen for task events → stream to Telegram
   onTaskEvent((taskId, event, data) => {
@@ -61,6 +71,7 @@ export function startTelegramBot() {
 
 export function stopTelegramBot() {
   polling = false;
+  g[globalKey] = false;
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
 }
 
@@ -176,6 +187,12 @@ async function handleMessage(msg: any) {
       case '/retry':
         await handleRetry(chatId, args[0]);
         break;
+      case '/tunnel':
+        await handleTunnel(chatId, args[0], args[1], msg.message_id);
+        break;
+      case '/tunnel_password':
+        await handleTunnelPassword(chatId, args[0], msg.message_id);
+        break;
       default:
         await send(chatId, `Unknown command: ${cmd}\nUse /help to see available commands.`);
     }
@@ -213,6 +230,8 @@ async function sendHelp(chatId: number) {
     `📝 Submit task:\nproject-name: your instructions\n\n` +
     `🔧 /cancel <id>  /retry <id>\n` +
     `/projects — list projects\n\n` +
+    `🌐 /tunnel [start|stop] — remote access\n` +
+    `/tunnel_password <pw> — get login password\n\n` +
     `Reply number to select`
   );
 }
@@ -623,6 +642,99 @@ async function handleUnwatch(chatId: number, watcherId?: string) {
   await send(chatId, `🗑 Watcher ${watcherId} removed`);
 }
 
+// ─── Tunnel Commands ─────────────────────────────────────────
+
+async function handleTunnel(chatId: number, action?: string, password?: string, userMsgId?: number) {
+  const settings = loadSettings();
+  if (String(chatId) !== settings.telegramChatId) {
+    await send(chatId, '⛔ Unauthorized');
+    return;
+  }
+
+  // start/stop require password
+  if (action === 'start' || action === 'stop') {
+    if (!settings.telegramTunnelPassword) {
+      await send(chatId, '⚠️ Set telegram tunnel password in Settings first.');
+      return;
+    }
+    if (!password || password !== settings.telegramTunnelPassword) {
+      await send(chatId, `⛔ Password required\nUsage: /tunnel ${action} <password>`);
+      return;
+    }
+    // Delete user's message containing password
+    if (userMsgId) deleteMessageLater(chatId, userMsgId, 0);
+  }
+
+  if (action === 'start') {
+    const status = getTunnelStatus();
+    if (status.status === 'running' && status.url) {
+      await send(chatId, `🌐 Tunnel already running:\n${status.url}`);
+      return;
+    }
+    await send(chatId, '🌐 Starting tunnel...');
+    const result = await startTunnel();
+    if (result.url) {
+      await send(chatId, '✅ Tunnel started:');
+      await sendHtml(chatId, `<code>${result.url}</code>`);
+    } else {
+      await send(chatId, `❌ Failed: ${result.error}`);
+    }
+  } else if (action === 'stop') {
+    stopTunnel();
+    await send(chatId, '🛑 Tunnel stopped');
+  } else {
+    // Status (no password needed)
+    const status = getTunnelStatus();
+    if (status.status === 'running' && status.url) {
+      await send(chatId, `🌐 Tunnel running:\n${status.url}\n\n/tunnel stop <pw> — stop tunnel`);
+    } else if (status.status === 'starting') {
+      await send(chatId, '⏳ Tunnel is starting...');
+    } else {
+      await send(chatId, `🌐 Tunnel is ${status.status}\n\n/tunnel start <pw> — start tunnel`);
+    }
+  }
+}
+
+async function handleTunnelPassword(chatId: number, password?: string, userMsgId?: number) {
+  const settings = loadSettings();
+  if (String(chatId) !== settings.telegramChatId) {
+    await send(chatId, '⛔ Unauthorized');
+    return;
+  }
+
+  if (!settings.telegramTunnelPassword) {
+    await send(chatId, '⚠️ Telegram tunnel password not configured.\nSet it in Settings → Remote Access → Telegram tunnel password');
+    return;
+  }
+
+  if (!password) {
+    await send(chatId, 'Usage: /tunnel_password <your-password>');
+    return;
+  }
+
+  // Immediately delete user's message containing password
+  if (userMsgId) deleteMessageLater(chatId, userMsgId, 0);
+
+  if (password !== settings.telegramTunnelPassword) {
+    await send(chatId, '⛔ Wrong password');
+    return;
+  }
+
+  const loginPassword = getPassword();
+  const status = getTunnelStatus();
+  // Send password as code block, auto-delete after 30s
+  const labelId = await send(chatId, '🔑 Login password (auto-deletes in 30s):');
+  const pwId = await sendHtml(chatId, `<code>${loginPassword}</code>`);
+  if (labelId) deleteMessageLater(chatId, labelId);
+  if (pwId) deleteMessageLater(chatId, pwId);
+  if (status.status === 'running' && status.url) {
+    const urlLabelId = await send(chatId, '🌐 URL:');
+    const urlId = await sendHtml(chatId, `<code>${status.url}</code>`);
+    if (urlLabelId) deleteMessageLater(chatId, urlLabelId);
+    if (urlId) deleteMessageLater(chatId, urlId);
+  }
+}
+
 // ─── Real-time Streaming ─────────────────────────────────────
 
 function bufferLogEntry(taskId: string, chatId: number, entry: TaskLogEntry) {
@@ -719,6 +831,71 @@ async function send(chatId: number, text: string): Promise<number | null> {
   } catch (err) {
     console.error('[telegram] Send failed:', err);
     return null;
+  }
+}
+
+/** Delete a message after a delay (seconds) */
+function deleteMessageLater(chatId: number, messageId: number, delaySec: number = 30) {
+  setTimeout(async () => {
+    const settings = loadSettings();
+    if (!settings.telegramBotToken) return;
+    try {
+      await fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/deleteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
+      });
+    } catch {}
+  }, delaySec * 1000);
+}
+
+/** Set bot command menu for quick access */
+async function setBotCommands(token: string) {
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        commands: [
+          { command: 'tasks', description: 'List tasks' },
+          { command: 'task', description: 'Create task: /task project prompt' },
+          { command: 'sessions', description: 'Browse sessions' },
+          { command: 'projects', description: 'List projects' },
+          { command: 'tunnel', description: 'Tunnel status / start / stop' },
+          { command: 'tunnel_password', description: 'Get login password' },
+          { command: 'watch', description: 'Monitor session' },
+          { command: 'watchers', description: 'List watchers' },
+          { command: 'help', description: 'Show help' },
+        ],
+      }),
+    });
+  } catch {}
+}
+
+async function sendHtml(chatId: number, html: string): Promise<number | null> {
+  const settings = loadSettings();
+  if (!settings.telegramBotToken) return null;
+
+  try {
+    const url = `https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: html,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+
+    const data = await res.json();
+    if (!data.ok) {
+      return send(chatId, html.replace(/<[^>]+>/g, ''));
+    }
+    return data.result?.message_id || null;
+  } catch {
+    return send(chatId, html.replace(/<[^>]+>/g, ''));
   }
 }
 

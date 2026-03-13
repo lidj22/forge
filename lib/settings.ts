@@ -12,6 +12,8 @@ export interface Settings {
   telegramChatId: string;       // Telegram chat ID to send notifications to
   notifyOnComplete: boolean;    // Notify when task completes
   notifyOnFailure: boolean;     // Notify when task fails
+  tunnelAutoStart: boolean;     // Auto-start Cloudflare Tunnel on startup
+  telegramTunnelPassword: string; // Password for getting login password via Telegram
 }
 
 const defaults: Settings = {
@@ -21,6 +23,8 @@ const defaults: Settings = {
   telegramChatId: '',
   notifyOnComplete: true,
   notifyOnFailure: true,
+  tunnelAutoStart: false,
+  telegramTunnelPassword: '',
 };
 
 export function loadSettings(): Settings {

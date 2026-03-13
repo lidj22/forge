@@ -9,6 +9,8 @@ interface Settings {
   telegramChatId: string;
   notifyOnComplete: boolean;
   notifyOnFailure: boolean;
+  tunnelAutoStart: boolean;
+  telegramTunnelPassword: string;
 }
 
 interface TunnelStatus {
@@ -27,6 +29,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     telegramChatId: '',
     notifyOnComplete: true,
     notifyOnFailure: true,
+    tunnelAutoStart: false,
+    telegramTunnelPassword: '',
   });
   const [newRoot, setNewRoot] = useState('');
   const [saved, setSaved] = useState(false);
@@ -34,6 +38,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     status: 'stopped', url: null, error: null, installed: false, log: [],
   });
   const [tunnelLoading, setTunnelLoading] = useState(false);
+  const [confirmStopTunnel, setConfirmStopTunnel] = useState(false);
 
   const refreshTunnel = useCallback(() => {
     fetch('/api/tunnel').then(r => r.json()).then(setTunnel).catch(() => {});
@@ -231,16 +236,33 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               >
                 {tunnelLoading ? (tunnel.installed ? 'Starting...' : 'Downloading...') : 'Start Tunnel'}
               </button>
+            ) : confirmStopTunnel ? (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-[var(--text-secondary)]">Stop tunnel?</span>
+                <button
+                  onClick={async () => {
+                    await fetch('/api/tunnel', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'stop' }),
+                    });
+                    refreshTunnel();
+                    setConfirmStopTunnel(false);
+                  }}
+                  className="text-[10px] px-2 py-1 bg-[var(--red)] text-white rounded hover:opacity-90"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setConfirmStopTunnel(false)}
+                  className="text-[10px] px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                >
+                  Cancel
+                </button>
+              </div>
             ) : (
               <button
-                onClick={async () => {
-                  await fetch('/api/tunnel', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'stop' }),
-                  });
-                  refreshTunnel();
-                }}
+                onClick={() => setConfirmStopTunnel(true)}
                 className="text-[10px] px-3 py-1.5 bg-[var(--red)] text-white rounded hover:opacity-90"
               >
                 Stop Tunnel
@@ -294,6 +316,28 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </pre>
             </details>
           )}
+
+          <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
+            <input
+              type="checkbox"
+              checked={settings.tunnelAutoStart}
+              onChange={e => setSettings({ ...settings, tunnelAutoStart: e.target.checked })}
+              className="rounded"
+            />
+            Auto-start tunnel on server startup
+          </label>
+
+          <div className="space-y-1">
+            <label className="text-[10px] text-[var(--text-secondary)]">
+              Telegram tunnel password (for /tunnel_password command)
+            </label>
+            <input
+              value={settings.telegramTunnelPassword}
+              onChange={e => setSettings({ ...settings, telegramTunnelPassword: e.target.value })}
+              placeholder="Set a password to get login credentials via Telegram"
+              className="w-full px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]"
+            />
+          </div>
         </div>
 
         {/* Actions */}

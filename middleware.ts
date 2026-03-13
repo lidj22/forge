@@ -1,7 +1,6 @@
-import { auth } from '@/lib/auth';
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 
-export default auth((req) => {
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Allow auth endpoints and static assets without login
@@ -14,18 +13,20 @@ export default auth((req) => {
     return NextResponse.next();
   }
 
-  // Everything else requires authentication
-  if (!req.auth) {
-    // API routes: return 401
+  // Check for NextAuth session cookie (works in Edge Runtime, no Node.js imports)
+  const hasSession =
+    req.cookies.has('authjs.session-token') ||
+    req.cookies.has('__Secure-authjs.session-token');
+
+  if (!hasSession) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
-    // Pages: redirect to login
     return NextResponse.redirect(new URL('/login', req.url));
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],

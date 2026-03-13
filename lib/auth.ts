@@ -9,15 +9,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     }),
-    // Local password — set by init.ts on startup (auto-generated if not configured)
+    // Local password — auto-generated, rotates daily
     Credentials({
       name: 'Local',
       credentials: {
         password: { label: 'Password', type: 'password' },
       },
-      authorize(credentials) {
-        const localPassword = process.env.MW_PASSWORD;
-        if (localPassword && credentials?.password === localPassword) {
+      async authorize(credentials) {
+        // Dynamic import to avoid Edge Runtime pulling in node:path/node:fs
+        const { getPassword } = await import('./password');
+        const localPassword = getPassword();
+        if (credentials?.password === localPassword) {
           return { id: 'local', name: 'zliu', email: 'local@my-workflow' };
         }
         return null;

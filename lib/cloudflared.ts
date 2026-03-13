@@ -87,44 +87,54 @@ export function isInstalled(): boolean {
 }
 
 // ─── Tunnel process management ──────────────────────────────────
+// Use globalThis to persist state across hot-reloads
 
-let tunnelProcess: ChildProcess | null = null;
-let tunnelUrl: string | null = null;
-let tunnelStatus: 'stopped' | 'starting' | 'running' | 'error' = 'stopped';
-let tunnelError: string | null = null;
-let tunnelLog: string[] = [];
+interface TunnelState {
+  process: ChildProcess | null;
+  url: string | null;
+  status: 'stopped' | 'starting' | 'running' | 'error';
+  error: string | null;
+  log: string[];
+}
+
+const stateKey = Symbol.for('mw-tunnel-state');
+const gAny = globalThis as any;
+if (!gAny[stateKey]) {
+  gAny[stateKey] = { process: null, url: null, status: 'stopped', error: null, log: [] } as TunnelState;
+}
+const state: TunnelState = gAny[stateKey];
 
 const MAX_LOG_LINES = 100;
 
 function pushLog(line: string) {
-  tunnelLog.push(line);
-  if (tunnelLog.length > MAX_LOG_LINES) tunnelLog.shift();
+  state.log.push(line);
+  if (state.log.length > MAX_LOG_LINES) state.log.shift();
 }
 
 export async function startTunnel(localPort: number = 3000): Promise<{ url?: string; error?: string }> {
-  if (tunnelProcess) {
-    return tunnelUrl ? { url: tunnelUrl } : { error: 'Tunnel is starting...' };
+  if (state.process) {
+    return state.url ? { url: state.url } : { error: 'Tunnel is starting...' };
   }
 
-  tunnelStatus = 'starting';
-  tunnelUrl = null;
-  tunnelError = null;
-  tunnelLog = [];
+  state.status = 'starting';
+  state.url = null;
+  state.error = null;
+  state.log = [];
 
   let binPath: string;
   try {
     binPath = await downloadCloudflared();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    tunnelStatus = 'error';
-    tunnelError = msg;
+    state.status = 'error';
+    state.error = msg;
     return { error: msg };
   }
 
   return new Promise((resolve) => {
     let resolved = false;
 
-    tunnelProcess = spawn(binPath, ['tunnel', '--url', `http://localhost:${localPort}`], {
+    state.process = spawn(binPath, ['tunnel', '--url', `http://localhost:${localPort}`], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
     });
@@ -135,28 +145,25 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
         if (!line.trim()) continue;
         pushLog(line);
 
-        // cloudflared prints the URL in a line like:
-        // | https://xxx-xxx-xxx.trycloudflare.com |
-        // or: INFO[...] +---+---------------------------+---+
         const urlMatch = line.match(/(https:\/\/[a-z0-9-]+\.trycloudflare\.com)/);
-        if (urlMatch && !tunnelUrl) {
-          tunnelUrl = urlMatch[1];
-          tunnelStatus = 'running';
-          console.log(`[cloudflared] Tunnel URL: ${tunnelUrl}`);
+        if (urlMatch && !state.url) {
+          state.url = urlMatch[1];
+          state.status = 'running';
+          console.log(`[cloudflared] Tunnel URL: ${state.url}`);
           if (!resolved) {
             resolved = true;
-            resolve({ url: tunnelUrl });
+            resolve({ url: state.url });
           }
         }
       }
     };
 
-    tunnelProcess.stdout?.on('data', handleOutput);
-    tunnelProcess.stderr?.on('data', handleOutput);
+    state.process.stdout?.on('data', handleOutput);
+    state.process.stderr?.on('data', handleOutput);
 
-    tunnelProcess.on('error', (err) => {
-      tunnelStatus = 'error';
-      tunnelError = err.message;
+    state.process.on('error', (err) => {
+      state.status = 'error';
+      state.error = err.message;
       pushLog(`[error] ${err.message}`);
       if (!resolved) {
         resolved = true;
@@ -164,12 +171,12 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
       }
     });
 
-    tunnelProcess.on('exit', (code) => {
-      tunnelProcess = null;
-      if (tunnelStatus !== 'error') {
-        tunnelStatus = 'stopped';
+    state.process.on('exit', (code) => {
+      state.process = null;
+      if (state.status !== 'error') {
+        state.status = 'stopped';
       }
-      tunnelUrl = null;
+      state.url = null;
       pushLog(`[exit] cloudflared exited with code ${code}`);
       if (!resolved) {
         resolved = true;
@@ -177,13 +184,12 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
       }
     });
 
-    // Timeout: if no URL after 30s, report error
     setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        if (!tunnelUrl) {
-          tunnelStatus = 'error';
-          tunnelError = 'Timeout waiting for tunnel URL';
+        if (!state.url) {
+          state.status = 'error';
+          state.error = 'Timeout waiting for tunnel URL';
           resolve({ error: 'Timeout waiting for tunnel URL (30s)' });
         }
       }
@@ -192,21 +198,21 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
 }
 
 export function stopTunnel() {
-  if (tunnelProcess) {
-    tunnelProcess.kill('SIGTERM');
-    tunnelProcess = null;
+  if (state.process) {
+    state.process.kill('SIGTERM');
+    state.process = null;
   }
-  tunnelUrl = null;
-  tunnelStatus = 'stopped';
-  tunnelError = null;
+  state.url = null;
+  state.status = 'stopped';
+  state.error = null;
 }
 
 export function getTunnelStatus() {
   return {
-    status: tunnelStatus,
-    url: tunnelUrl,
-    error: tunnelError,
+    status: state.status,
+    url: state.url,
+    error: state.error,
     installed: isInstalled(),
-    log: tunnelLog.slice(-20),
+    log: state.log.slice(-20),
   };
 }

@@ -313,10 +313,16 @@ async function main() {
       const { readFileSync } = await import('node:fs');
       const { homedir } = await import('node:os');
       const { join } = await import('node:path');
-      const pwFile = join(homedir(), '.my-workflow', 'password');
+      const pwFile = join(homedir(), '.my-workflow', 'password.json');
       try {
-        const pw = readFileSync(pwFile, 'utf-8').trim();
-        console.log(`Login password: ${pw}`);
+        const data = JSON.parse(readFileSync(pwFile, 'utf-8'));
+        const today = new Date().toISOString().slice(0, 10);
+        if (data.date === today) {
+          console.log(`Login password: ${data.password}`);
+          console.log(`Valid for: ${data.date}`);
+        } else {
+          console.log(`Password expired (was for ${data.date}). Restart server to generate new one.`);
+        }
       } catch {
         console.log('No password file found. Password is set via MW_PASSWORD env var.');
       }

@@ -903,9 +903,14 @@ const MemoTerminalPane = memo(function TerminalPane({
               }, 500);
             }
           } else if (msg.type === 'error') {
-            term.write(`\r\n\x1b[93m[${msg.message || 'error'} — creating new session...]\x1b[0m\r\n`);
-            if (ws?.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+            // Only auto-create if we haven't already created one for this pane
+            if (!connectedSession) {
+              term.write(`\r\n\x1b[93m[${msg.message || 'error'} — creating new session...]\x1b[0m\r\n`);
+              if (ws?.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+              }
+            } else {
+              term.write(`\r\n\x1b[93m[${msg.message || 'error'}]\x1b[0m\r\n`);
             }
           } else if (msg.type === 'exit') {
             term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');

@@ -12,6 +12,12 @@ export default function TunnelToggle() {
   const [tunnel, setTunnel] = useState<TunnelStatus>({ status: 'stopped', url: null, error: null });
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isRemote, setIsRemote] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
+
+  useEffect(() => {
+    setIsRemote(!['localhost', '127.0.0.1'].includes(window.location.hostname));
+  }, []);
 
   const refresh = useCallback(() => {
     fetch('/api/tunnel').then(r => r.json()).then(setTunnel).catch(() => {});
@@ -23,21 +29,34 @@ export default function TunnelToggle() {
     return () => clearInterval(id);
   }, [refresh]);
 
-  // Poll faster while starting
   useEffect(() => {
     if (tunnel.status !== 'starting') return;
     const id = setInterval(refresh, 2000);
     return () => clearInterval(id);
   }, [tunnel.status, refresh]);
 
-  const toggle = async () => {
+  const doStop = async () => {
     setLoading(true);
-    const action = tunnel.status === 'running' || tunnel.status === 'starting' ? 'stop' : 'start';
     try {
       const res = await fetch('/api/tunnel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action: 'stop' }),
+      });
+      const data = await res.json();
+      setTunnel(data);
+    } catch {}
+    setLoading(false);
+    setConfirmStop(false);
+  };
+
+  const doStart = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/tunnel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' }),
       });
       const data = await res.json();
       setTunnel(data);
@@ -53,10 +72,37 @@ export default function TunnelToggle() {
     }
   };
 
+  // Hide tunnel controls when accessing remotely
+  if (isRemote) {
+    return null;
+  }
+
+  // Stop confirmation dialog
+  if (confirmStop) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-[var(--text-secondary)]">Stop tunnel?</span>
+        <button
+          onClick={doStop}
+          disabled={loading}
+          className="text-[10px] px-2 py-0.5 bg-[var(--red)] text-white rounded hover:opacity-90"
+        >
+          Confirm
+        </button>
+        <button
+          onClick={() => setConfirmStop(false)}
+          className="text-[10px] px-2 py-0.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   if (tunnel.status === 'stopped' && !tunnel.error) {
     return (
       <button
-        onClick={toggle}
+        onClick={doStart}
         disabled={loading}
         className="text-[10px] px-2 py-0.5 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)] transition-colors disabled:opacity-50"
         title="Start Cloudflare Tunnel for remote access"
@@ -85,7 +131,7 @@ export default function TunnelToggle() {
           {copied ? 'Copied!' : tunnel.url.replace('https://', '')}
         </button>
         <button
-          onClick={toggle}
+          onClick={() => setConfirmStop(true)}
           disabled={loading}
           className="text-[10px] px-1.5 py-0.5 text-[var(--red)] hover:bg-[var(--red)] hover:text-white rounded transition-colors"
           title="Stop tunnel"
@@ -103,7 +149,7 @@ export default function TunnelToggle() {
           Tunnel error
         </span>
         <button
-          onClick={toggle}
+          onClick={doStart}
           disabled={loading}
           className="text-[10px] px-2 py-0.5 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
         >
