@@ -252,6 +252,20 @@ notifyOnFailure: true
 | Tunnel | Cloudflare (cloudflared) |
 | Bot | Telegram Bot API (extensible) |
 
+## Troubleshooting
+
+### macOS: "fork failed: Device not configured"
+
+This means the system ran out of pseudo-terminal (PTY) devices. macOS defaults to 511, which can be tight when running IDEs and many terminal sessions. Increase the limit:
+
+```bash
+# Temporary (until reboot)
+sudo sysctl kern.tty.ptmx_max=2048
+
+# Permanent
+echo 'kern.tty.ptmx_max=2048' | sudo tee -a /etc/sysctl.conf
+```
+
 ## Roadmap
 
 - [ ] **Multi-Agent Workflow** — DAG-based pipelines where multiple Claude Code instances collaborate, passing outputs between nodes with conditional routing and parallel execution. See [docs/roadmap-multi-agent-workflow.md](docs/roadmap-multi-agent-workflow.md).

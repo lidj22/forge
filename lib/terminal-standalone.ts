@@ -215,6 +215,12 @@ wss.on('connection', (ws: WebSocket) => {
       return;
     }
 
+    // Kill previous pty process before attaching to new session (prevents PTY leak)
+    if (term) {
+      try { term.kill(); } catch {}
+      term = null;
+    }
+
     // Ensure mouse and scrollback are enabled (for old sessions too)
     try {
       execSync(`${TMUX} set-option -t ${name} mouse on 2>/dev/null`);

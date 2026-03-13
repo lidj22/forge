@@ -920,8 +920,11 @@ const MemoTerminalPane = memo(function TerminalPane({
           const sn = sessionNameRef.current;
           if (sn) {
             socket.send(JSON.stringify({ type: 'attach', sessionName: sn, cols, rows }));
-          } else {
+          } else if (createRetries < MAX_CREATE_RETRIES) {
+            createRetries++;
             socket.send(JSON.stringify({ type: 'create', cols, rows }));
+          } else {
+            term.write('\r\n\x1b[91m[failed to create session — check server logs]\x1b[0m\r\n');
           }
         }
       };
@@ -957,15 +960,7 @@ const MemoTerminalPane = memo(function TerminalPane({
               }, 500);
             }
           } else if (msg.type === 'error') {
-            if (!connectedSession && createRetries < MAX_CREATE_RETRIES) {
-              createRetries++;
-              term.write(`\r\n\x1b[93m[${msg.message || 'error'} — retry ${createRetries}/${MAX_CREATE_RETRIES}...]\x1b[0m\r\n`);
-              if (ws?.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
-              }
-            } else {
-              term.write(`\r\n\x1b[93m[${msg.message || 'error'}]\x1b[0m\r\n`);
-            }
+            term.write(`\r\n\x1b[93m[${msg.message || 'error'}]\x1b[0m\r\n`);
           } else if (msg.type === 'exit') {
             term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
           }
