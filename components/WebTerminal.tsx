@@ -302,18 +302,25 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
   }, []);
 
   const refreshSessions = useCallback(() => {
+    // Use a short-lived WS to list sessions, with abort guard
+    let closed = false;
     const wsHost = window.location.hostname;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`);
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'list' }));
+    const timeout = setTimeout(() => { closed = true; ws.close(); }, 3000);
+    ws.onopen = () => {
+      if (closed) return;
+      ws.send(JSON.stringify({ type: 'list' }));
+    };
     ws.onmessage = (e) => {
+      clearTimeout(timeout);
       try {
         const msg = JSON.parse(e.data);
         if (msg.type === 'sessions') setTmuxSessions(msg.sessions);
       } catch {}
       ws.close();
     };
-    ws.onerror = () => ws.close();
+    ws.onerror = () => { clearTimeout(timeout); ws.close(); };
   }, []);
 
   const onSplit = useCallback((dir: 'horizontal' | 'vertical') => {
@@ -756,6 +763,8 @@ const MemoTerminalPane = memo(function TerminalPane({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let disposed = false; // guard against post-cleanup writes (React Strict Mode)
+
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -787,88 +796,118 @@ const MemoTerminalPane = memo(function TerminalPane({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
-    requestAnimationFrame(() => fit.fit());
+    requestAnimationFrame(() => {
+      if (disposed) return;
+      try { fit.fit(); } catch {}
+    });
+
+    // ── WebSocket with auto-reconnect ──
 
     const wsHost = window.location.hostname;
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${wsProtocol}//${wsHost}:3001`);
+    const wsUrl = `${wsProtocol}//${wsHost}:3001`;
+    let ws: WebSocket | null = null;
+    let reconnectTimer = 0;
+    let connectedSession: string | null = null;
 
-    ws.onopen = () => {
-      const cols = term.cols;
-      const rows = term.rows;
-      const sn = sessionNameRef.current;
+    function connect() {
+      if (disposed) return;
+      ws = new WebSocket(wsUrl);
 
-      if (sn) {
-        ws.send(JSON.stringify({ type: 'attach', sessionName: sn, cols, rows }));
-      } else {
-        ws.send(JSON.stringify({ type: 'create', cols, rows }));
-      }
-    };
+      ws.onopen = () => {
+        if (disposed) { ws?.close(); return; }
+        const cols = term.cols;
+        const rows = term.rows;
 
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'output') {
-          term.write(msg.data);
-        } else if (msg.type === 'connected') {
-          onSessionConnected(id, msg.sessionName);
-          // Send pending command if any (e.g. claude --resume)
-          const cmd = pendingCommands.get(id);
-          if (cmd) {
-            pendingCommands.delete(id);
-            setTimeout(() => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'input', data: cmd }));
-              }
-            }, 500);
+        if (connectedSession) {
+          // Reconnect to the same session
+          ws!.send(JSON.stringify({ type: 'attach', sessionName: connectedSession, cols, rows }));
+        } else {
+          const sn = sessionNameRef.current;
+          if (sn) {
+            ws!.send(JSON.stringify({ type: 'attach', sessionName: sn, cols, rows }));
+          } else {
+            ws!.send(JSON.stringify({ type: 'create', cols, rows }));
           }
-        } else if (msg.type === 'error') {
-          // Session doesn't exist — fallback to creating a new one
-          term.write(`\r\n\x1b[93m[${msg.message || 'error'} — creating new session...]\x1b[0m\r\n`);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
-          }
-        } else if (msg.type === 'exit') {
-          term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
         }
-      } catch {}
-    };
+      };
 
-    ws.onclose = () => {
-      term.write('\r\n\x1b[90m[disconnected — session persists in tmux]\x1b[0m\r\n');
-    };
+      ws.onmessage = (event) => {
+        if (disposed) return;
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'output') {
+            term.write(msg.data);
+          } else if (msg.type === 'connected') {
+            connectedSession = msg.sessionName;
+            onSessionConnected(id, msg.sessionName);
+            const cmd = pendingCommands.get(id);
+            if (cmd) {
+              pendingCommands.delete(id);
+              setTimeout(() => {
+                if (!disposed && ws?.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'input', data: cmd }));
+                }
+              }, 500);
+            }
+          } else if (msg.type === 'error') {
+            term.write(`\r\n\x1b[93m[${msg.message || 'error'} — creating new session...]\x1b[0m\r\n`);
+            if (ws?.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+            }
+          } else if (msg.type === 'exit') {
+            term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (disposed) return;
+        term.write('\r\n\x1b[90m[disconnected — reconnecting...]\x1b[0m\r\n');
+        // Auto-reconnect after delay
+        reconnectTimer = window.setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after this, triggering reconnect
+      };
+    }
+
+    connect();
 
     term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
     });
+
+    // ── Resize handling ──
 
     let resizeTimer = 0;
     let lastW = 0;
     let lastH = 0;
 
     const doFit = () => {
+      if (disposed) return;
       const el = containerRef.current;
       if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return;
       const w = el.offsetWidth;
       const h = el.offsetHeight;
-      if (w === lastW && h === lastH) return; // no actual size change
+      if (w === lastW && h === lastH) return;
       lastW = w;
       lastH = h;
       try {
         fit.fit();
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws?.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }
       } catch {}
     };
 
     const handleResize = () => {
-      if (globalDragging) return; // suppress during split drag
+      if (globalDragging) return;
       clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(doFit, 150);
     };
 
-    // After split drag ends, fit once
     const onDragEnd = () => {
       clearTimeout(resizeTimer);
       resizeTimer = window.setTimeout(doFit, 50);
@@ -878,11 +917,15 @@ const MemoTerminalPane = memo(function TerminalPane({
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(containerRef.current);
 
+    // ── Cleanup ──
+
     return () => {
+      disposed = true;
       clearTimeout(resizeTimer);
+      clearTimeout(reconnectTimer);
       window.removeEventListener('terminal-drag-end', onDragEnd);
       resizeObserver.disconnect();
-      ws.close();
+      if (ws) { ws.onclose = null; ws.close(); }
       term.dispose();
     };
   }, [id, onSessionConnected]);
