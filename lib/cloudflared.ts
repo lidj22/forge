@@ -150,6 +150,7 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
           state.url = urlMatch[1];
           state.status = 'running';
           console.log(`[cloudflared] Tunnel URL: ${state.url}`);
+          startHealthCheck();
           if (!resolved) {
             resolved = true;
             resolve({ url: state.url });
@@ -198,6 +199,7 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
 }
 
 export function stopTunnel() {
+  stopHealthCheck();
   if (state.process) {
     state.process.kill('SIGTERM');
     state.process = null;
@@ -215,4 +217,93 @@ export function getTunnelStatus() {
     installed: isInstalled(),
     log: state.log.slice(-20),
   };
+}
+
+// ─── Tunnel health check ──────────────────────────────────────
+
+let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+let consecutiveFailures = 0;
+const MAX_FAILURES = 3;
+const HEALTH_CHECK_INTERVAL = 60_000; // 60s
+
+async function checkTunnelHealth() {
+  if (state.status !== 'running' || !state.url) return;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch(state.url, {
+      method: 'HEAD',
+      signal: controller.signal,
+      redirect: 'manual',
+    });
+    clearTimeout(timeout);
+
+    // Any response (including 302 to login) means tunnel is alive
+    if (res.status > 0) {
+      if (consecutiveFailures > 0) {
+        pushLog(`[health] Tunnel recovered after ${consecutiveFailures} failures`);
+      }
+      consecutiveFailures = 0;
+      return;
+    }
+  } catch {
+    // fetch failed — tunnel likely down
+  }
+
+  consecutiveFailures++;
+  pushLog(`[health] Tunnel unreachable (${consecutiveFailures}/${MAX_FAILURES})`);
+
+  if (consecutiveFailures >= MAX_FAILURES) {
+    pushLog('[health] Tunnel appears dead — restarting...');
+    state.status = 'error';
+    state.error = 'Tunnel unreachable — restarting';
+
+    // Kill old process and restart
+    if (state.process) {
+      state.process.kill('SIGTERM');
+      state.process = null;
+    }
+    state.url = null;
+    consecutiveFailures = 0;
+
+    // Restart after a short delay
+    setTimeout(async () => {
+      const result = await startTunnel();
+      if (result.url) {
+        pushLog(`[health] Tunnel restarted: ${result.url}`);
+        // Notify via Telegram if configured
+        try {
+          const { loadSettings } = await import('./settings');
+          const settings = loadSettings();
+          if (settings.telegramBotToken && settings.telegramChatId) {
+            await fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: settings.telegramChatId,
+                text: `🔄 Tunnel restarted\n\nNew URL: ${result.url}`,
+                disable_web_page_preview: true,
+              }),
+            });
+          }
+        } catch {}
+      } else {
+        pushLog(`[health] Tunnel restart failed: ${result.error}`);
+      }
+    }, 3000);
+  }
+}
+
+export function startHealthCheck() {
+  if (healthCheckTimer) return;
+  healthCheckTimer = setInterval(checkTunnelHealth, HEALTH_CHECK_INTERVAL);
+}
+
+export function stopHealthCheck() {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
+  }
+  consecutiveFailures = 0;
 }
