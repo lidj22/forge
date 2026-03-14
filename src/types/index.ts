@@ -86,6 +86,7 @@ export interface WatchConfig {
   actionPrompt?: string;     // message to send or task prompt
   actionProject?: string;    // for 'task' action
   repeat?: boolean;          // keep watching after trigger (default false)
+  notifyIntervalSeconds?: number; // min seconds between notifications (default 60)
 }
 
 export interface Task {

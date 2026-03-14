@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import MarkdownContent from './MarkdownContent';
+import NewTaskModal from './NewTaskModal';
 import type { Task, TaskLogEntry } from '@/src/types';
 
 export default function TaskDetail({
@@ -18,6 +19,7 @@ export default function TaskDetail({
   const [tab, setTab] = useState<'log' | 'diff' | 'result'>('log');
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
   const [followUpText, setFollowUpText] = useState('');
+  const [editing, setEditing] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // SSE stream for running tasks
@@ -90,6 +92,9 @@ export default function TaskDetail({
             <span className="text-[10px] text-[var(--text-secondary)] font-mono">{task.id}</span>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => setEditing(true)} className="text-[10px] px-2 py-0.5 text-[var(--accent)] border border-[var(--accent)]/30 rounded hover:bg-[var(--accent)] hover:text-white">
+              Edit
+            </button>
             {(liveStatus === 'running' || liveStatus === 'queued') && (
               <button onClick={() => handleAction('cancel')} className="text-[10px] px-2 py-0.5 text-[var(--red)] border border-[var(--red)]/30 rounded hover:bg-[var(--red)] hover:text-white">
                 Cancel
@@ -222,6 +227,22 @@ export default function TaskDetail({
             Session <span className="font-mono">{task.conversationId.slice(0, 12)}...</span> — creates a new task continuing this conversation
           </p>
         </div>
+      )}
+
+      {editing && (
+        <NewTaskModal
+          editTask={{ id: task.id, projectName: task.projectName, prompt: task.prompt, priority: task.priority, mode: task.mode }}
+          onClose={() => setEditing(false)}
+          onCreate={async (data) => {
+            await fetch(`/api/tasks/${task.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...data, restart: true }),
+            });
+            setEditing(false);
+            onRefresh();
+          }}
+        />
       )}
     </div>
   );

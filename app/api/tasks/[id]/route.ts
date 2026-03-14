@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getTask, cancelTask, deleteTask, retryTask } from '@/lib/task-manager';
+import { getTask, cancelTask, deleteTask, retryTask, updateTask } from '@/lib/task-manager';
 
 // Get task details (including full log)
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -26,6 +26,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+}
+
+// Edit a queued task
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const body = await req.json();
+  const updated = updateTask(id, body);
+  if (!updated) return NextResponse.json({ error: 'Cannot edit (only queued tasks)' }, { status: 400 });
+  return NextResponse.json(updated);
 }
 
 // Delete a task

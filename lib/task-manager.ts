@@ -133,6 +133,35 @@ export function deleteTask(id: string): boolean {
   return true;
 }
 
+export function updateTask(id: string, updates: { prompt?: string; projectName?: string; projectPath?: string; priority?: number; restart?: boolean }): Task | null {
+  const task = getTask(id);
+  if (!task) return null;
+
+  // If running, cancel first
+  if (task.status === 'running') cancelTask(id);
+
+  const fields: string[] = [];
+  const values: any[] = [];
+  if (updates.prompt !== undefined) { fields.push('prompt = ?'); values.push(updates.prompt); }
+  if (updates.projectName !== undefined) { fields.push('project_name = ?'); values.push(updates.projectName); }
+  if (updates.projectPath !== undefined) { fields.push('project_path = ?'); values.push(updates.projectPath); }
+  if (updates.priority !== undefined) { fields.push('priority = ?'); values.push(updates.priority); }
+
+  // Reset to queued so it runs again
+  if (updates.restart) {
+    fields.push("status = 'queued'", 'started_at = NULL', 'completed_at = NULL', 'error = NULL', "log = '[]'", 'result_summary = NULL', 'git_diff = NULL', 'cost_usd = NULL');
+  }
+
+  if (fields.length === 0) return task;
+
+  values.push(id);
+  db().prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+
+  if (updates.restart) ensureRunnerStarted();
+
+  return getTask(id);
+}
+
 export function retryTask(id: string): Task | null {
   const task = getTask(id);
   if (!task) return null;
@@ -506,21 +535,43 @@ function startMonitorTask(task: Task) {
     }, 30_000);
   }
 
+  // Notification throttling: batch updates and send at most once per interval
+  const notifyInterval = (config.notifyIntervalSeconds || 60) * 1000;
+  let lastNotifyTime = 0;
+  let pendingContext: string[] = [];
+  let notifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleNotify(context: string, immediate?: boolean) {
+    pendingContext.push(context);
+    if (immediate) {
+      flushNotify();
+      return;
+    }
+    if (notifyTimer) return; // already scheduled
+    const elapsed = Date.now() - lastNotifyTime;
+    const delay = Math.max(0, notifyInterval - elapsed);
+    notifyTimer = setTimeout(flushNotify, delay);
+  }
+
+  function flushNotify() {
+    if (notifyTimer) { clearTimeout(notifyTimer); notifyTimer = null; }
+    if (pendingContext.length === 0) return;
+    const summary = pendingContext.length === 1
+      ? pendingContext[0]
+      : `${pendingContext.length} updates:\n\n${pendingContext.slice(-5).join('\n\n')}`;
+    pendingContext = [];
+    lastNotifyTime = Date.now();
+    triggerMonitorAction(task, summary);
+  }
+
   // Tail the file for changes (uses fs.watch + 5s polling fallback)
   const stopTail = tailSessionFile(fp, (newEntries) => {
     lastActivityTime = Date.now();
     lastEntryCount += newEntries.length;
-    // Monitor entries tracked in task log only
-
-    appendLog(task.id, {
-      type: 'system', subtype: 'text',
-      content: `+${newEntries.length} entries (${lastEntryCount} total)`,
-      timestamp: new Date().toISOString(),
-    });
 
     // Check conditions
     if (config.condition === 'change') {
-      triggerMonitorAction(task, summarizeNewEntries(newEntries));
+      scheduleNotify(summarizeNewEntries(newEntries));
       if (!config.repeat) stopMonitor(task.id);
     }
 
@@ -528,7 +579,7 @@ function startMonitorTask(task: Task) {
       const kw = config.keyword.toLowerCase();
       const matched = newEntries.find(e => e.content.toLowerCase().includes(kw));
       if (matched) {
-        triggerMonitorAction(task, `Keyword "${config.keyword}" found: ${matched.content.slice(0, 200)}`);
+        scheduleNotify(`Keyword "${config.keyword}" found: ${matched.content.slice(0, 200)}`, true);
         if (!config.repeat) stopMonitor(task.id);
       }
     }
@@ -538,7 +589,7 @@ function startMonitorTask(task: Task) {
         e.type === 'system' && e.content.toLowerCase().includes('error')
       );
       if (errors.length > 0) {
-        triggerMonitorAction(task, `Error detected: ${errors[0].content.slice(0, 200)}`);
+        scheduleNotify(`Error detected: ${errors[0].content.slice(0, 200)}`, true);
         if (!config.repeat) stopMonitor(task.id);
       }
     }
@@ -554,7 +605,7 @@ function startMonitorTask(task: Task) {
           // Wait a bit to see if more entries come
           setTimeout(() => {
             if (Date.now() - lastActivityTime > 30_000) {
-              triggerMonitorAction(task, `Session appears complete.\n\nLast: ${lastAssistant.content.slice(0, 300)}`);
+              scheduleNotify(`Session appears complete.\n\nLast: ${lastAssistant.content.slice(0, 300)}`, true);
               if (!config.repeat) stopMonitor(task.id);
             }
           }, 35_000);
@@ -573,6 +624,7 @@ function startMonitorTask(task: Task) {
   const cleanup = () => {
     stopTail();
     if (idleTimer) clearInterval(idleTimer);
+    flushNotify(); // send any remaining batched notifications
   };
 
   activeMonitors.set(task.id, cleanup);

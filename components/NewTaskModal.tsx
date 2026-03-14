@@ -17,29 +17,33 @@ interface SessionInfo {
   gitBranch?: string;
 }
 
+interface TaskData {
+  projectName: string;
+  prompt: string;
+  priority?: number;
+  conversationId?: string;
+  newSession?: boolean;
+  scheduledAt?: string;
+  mode?: TaskMode;
+  watchConfig?: WatchConfig;
+}
+
 export default function NewTaskModal({
   onClose,
   onCreate,
+  editTask,
 }: {
   onClose: () => void;
-  onCreate: (data: {
-    projectName: string;
-    prompt: string;
-    priority?: number;
-    conversationId?: string;
-    newSession?: boolean;
-    scheduledAt?: string;
-    mode?: TaskMode;
-    watchConfig?: WatchConfig;
-  }) => void;
+  onCreate: (data: TaskData) => void;
+  editTask?: { id: string; projectName: string; prompt: string; priority: number; mode: TaskMode };
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [priority, setPriority] = useState(0);
+  const [selectedProject, setSelectedProject] = useState(editTask?.projectName || '');
+  const [prompt, setPrompt] = useState(editTask?.prompt || '');
+  const [priority, setPriority] = useState(editTask?.priority || 0);
 
   // Task mode
-  const [taskMode, setTaskMode] = useState<TaskMode>('prompt');
+  const [taskMode, setTaskMode] = useState<TaskMode>(editTask?.mode || 'prompt');
 
   // Monitor config
   const [watchCondition, setWatchCondition] = useState<WatchConfig['condition']>('change');
@@ -63,7 +67,7 @@ export default function NewTaskModal({
   useEffect(() => {
     fetch('/api/projects').then(r => r.json()).then((p: Project[]) => {
       setProjects(p);
-      if (p.length > 0) setSelectedProject(p[0].name);
+      if (!selectedProject && p.length > 0) setSelectedProject(p[0].name);
     });
   }, []);
 
@@ -135,7 +139,7 @@ export default function NewTaskModal({
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg w-[560px] max-h-[80vh] overflow-auto" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-[var(--border)]">
-          <h2 className="text-sm font-semibold">New Task</h2>
+          <h2 className="text-sm font-semibold">{editTask ? 'Edit Task' : 'New Task'}</h2>
           <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
             Submit a task for Claude Code to work on autonomously
           </p>
@@ -446,7 +450,7 @@ export default function NewTaskModal({
               disabled={!selectedProject || (taskMode === 'prompt' && !prompt.trim()) || (taskMode === 'monitor' && !selectedSessionId)}
               className="text-xs px-4 py-1.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
             >
-              {taskMode === 'monitor' ? 'Start Monitor' : scheduleMode === 'now' ? 'Submit Task' : 'Schedule Task'}
+              {editTask ? 'Save & Restart' : taskMode === 'monitor' ? 'Start Monitor' : scheduleMode === 'now' ? 'Submit Task' : 'Schedule Task'}
             </button>
           </div>
         </form>
