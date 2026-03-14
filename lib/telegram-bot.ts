@@ -188,7 +188,13 @@ async function handleMessage(msg: any) {
         await handleRetry(chatId, args[0]);
         break;
       case '/tunnel':
-        await handleTunnel(chatId, args[0], args[1], msg.message_id);
+        await handleTunnelStatus(chatId);
+        break;
+      case '/tunnel_start':
+        await handleTunnelStart(chatId);
+        break;
+      case '/tunnel_stop':
+        await handleTunnelStop(chatId);
         break;
       case '/tunnel_password':
         await handleTunnelPassword(chatId, args[0], msg.message_id);
@@ -230,7 +236,9 @@ async function sendHelp(chatId: number) {
     `📝 Submit task:\nproject-name: your instructions\n\n` +
     `🔧 /cancel <id>  /retry <id>\n` +
     `/projects — list projects\n\n` +
-    `🌐 /tunnel [start|stop] — remote access\n` +
+    `🌐 /tunnel — tunnel status\n` +
+    `/tunnel_start — start tunnel\n` +
+    `/tunnel_stop — stop tunnel\n` +
     `/tunnel_password <pw> — get login password\n\n` +
     `Reply number to select`
   );
@@ -644,55 +652,62 @@ async function handleUnwatch(chatId: number, watcherId?: string) {
 
 // ─── Tunnel Commands ─────────────────────────────────────────
 
-async function handleTunnel(chatId: number, action?: string, password?: string, userMsgId?: number) {
+async function handleTunnelStatus(chatId: number) {
   const settings = loadSettings();
-  if (String(chatId) !== settings.telegramChatId) {
-    await send(chatId, '⛔ Unauthorized');
-    return;
-  }
+  if (String(chatId) !== settings.telegramChatId) { await send(chatId, '⛔ Unauthorized'); return; }
 
-  // start/stop require password
-  if (action === 'start' || action === 'stop') {
-    if (!settings.telegramTunnelPassword) {
-      await send(chatId, '⚠️ Set telegram tunnel password in Settings first.');
-      return;
-    }
-    if (!password || password !== settings.telegramTunnelPassword) {
-      await send(chatId, `⛔ Password required\nUsage: /tunnel ${action} <password>`);
-      return;
-    }
-    // Delete user's message containing password
-    if (userMsgId) deleteMessageLater(chatId, userMsgId, 0);
-  }
-
-  if (action === 'start') {
-    const status = getTunnelStatus();
-    if (status.status === 'running' && status.url) {
-      await send(chatId, `🌐 Tunnel already running:\n${status.url}`);
-      return;
-    }
-    await send(chatId, '🌐 Starting tunnel...');
-    const result = await startTunnel();
-    if (result.url) {
-      await send(chatId, '✅ Tunnel started:');
-      await sendHtml(chatId, `<a href="${result.url}">${result.url}</a>`);
-    } else {
-      await send(chatId, `❌ Failed: ${result.error}`);
-    }
-  } else if (action === 'stop') {
-    stopTunnel();
-    await send(chatId, '🛑 Tunnel stopped');
+  const status = getTunnelStatus();
+  if (status.status === 'running' && status.url) {
+    await sendHtml(chatId, `🌐 Tunnel running:\n<a href="${status.url}">${status.url}</a>\n\n/tunnel_stop — stop tunnel`);
+  } else if (status.status === 'starting') {
+    await send(chatId, '⏳ Tunnel is starting...');
   } else {
-    // Status (no password needed)
-    const status = getTunnelStatus();
-    if (status.status === 'running' && status.url) {
-      await send(chatId, `🌐 Tunnel running:\n${status.url}\n\n/tunnel stop <pw> — stop tunnel`);
-    } else if (status.status === 'starting') {
-      await send(chatId, '⏳ Tunnel is starting...');
-    } else {
-      await send(chatId, `🌐 Tunnel is ${status.status}\n\n/tunnel start <pw> — start tunnel`);
-    }
+    await send(chatId, `🌐 Tunnel is ${status.status}\n\n/tunnel_start — start tunnel`);
   }
+}
+
+async function handleTunnelStart(chatId: number) {
+  const settings = loadSettings();
+  if (String(chatId) !== settings.telegramChatId) { await send(chatId, '⛔ Unauthorized'); return; }
+
+  // Check if tunnel is already running and still reachable
+  const status = getTunnelStatus();
+  if (status.status === 'running' && status.url) {
+    // Verify it's actually alive
+    let alive = false;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(status.url, { method: 'HEAD', signal: controller.signal, redirect: 'manual' });
+      clearTimeout(timeout);
+      alive = res.status > 0;
+    } catch {}
+
+    if (alive) {
+      await sendHtml(chatId, `🌐 Tunnel already running:\n<a href="${status.url}">${status.url}</a>`);
+      return;
+    }
+    // Tunnel process alive but URL unreachable — kill and restart
+    await send(chatId, '🌐 Tunnel URL unreachable, restarting...');
+    stopTunnel();
+  }
+
+  await send(chatId, '🌐 Starting tunnel...');
+  const result = await startTunnel();
+  if (result.url) {
+    await send(chatId, '✅ Tunnel started:');
+    await sendHtml(chatId, `<a href="${result.url}">${result.url}</a>`);
+  } else {
+    await send(chatId, `❌ Failed: ${result.error}`);
+  }
+}
+
+async function handleTunnelStop(chatId: number) {
+  const settings = loadSettings();
+  if (String(chatId) !== settings.telegramChatId) { await send(chatId, '⛔ Unauthorized'); return; }
+
+  stopTunnel();
+  await send(chatId, '🛑 Tunnel stopped');
 }
 
 async function handleTunnelPassword(chatId: number, password?: string, userMsgId?: number) {
@@ -861,7 +876,9 @@ async function setBotCommands(token: string) {
           { command: 'task', description: 'Create task: /task project prompt' },
           { command: 'sessions', description: 'Browse sessions' },
           { command: 'projects', description: 'List projects' },
-          { command: 'tunnel', description: 'Tunnel status / start / stop' },
+          { command: 'tunnel', description: 'Tunnel status' },
+          { command: 'tunnel_start', description: 'Start tunnel' },
+          { command: 'tunnel_stop', description: 'Stop tunnel' },
           { command: 'tunnel_password', description: 'Get login password' },
           { command: 'watch', description: 'Monitor session' },
           { command: 'watchers', description: 'List watchers' },
