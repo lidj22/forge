@@ -34,7 +34,10 @@ const chatNumberedTasks = new Map<number, Map<number, string>>();
 const chatNumberedSessions = new Map<number, Map<number, { projectName: string; sessionId: string }>>();
 const chatNumberedProjects = new Map<number, Map<number, string>>();
 // Track what the last numbered list was for
-const chatListMode = new Map<number, 'tasks' | 'projects' | 'sessions'>();
+const chatListMode = new Map<number, 'tasks' | 'projects' | 'sessions' | 'task-create' | 'peek'>();
+
+// Pending task creation: waiting for prompt text
+const pendingTaskProject = new Map<number, { name: string; path: string }>();  // chatId → project
 
 // Buffer for streaming logs
 const logBuffers = new Map<string, { entries: string[]; timer: ReturnType<typeof setTimeout> | null }>();
@@ -113,6 +116,20 @@ async function handleMessage(msg: any) {
   const text: string = msg.text.trim();
   const replyTo = msg.reply_to_message?.message_id;
 
+  // Check if waiting for task prompt
+  const pending = pendingTaskProject.get(chatId);
+  if (pending && !text.startsWith('/')) {
+    pendingTaskProject.delete(chatId);
+    const task = createTask({
+      projectName: pending.name,
+      projectPath: pending.path,
+      prompt: text,
+    });
+    const msgId = await send(chatId, `✅ Task ${task.id} created\n📁 ${task.projectName}\n\n${text.slice(0, 200)}`);
+    if (msgId) { taskMessageMap.set(msgId, task.id); taskChatMap.set(task.id, chatId); }
+    return;
+  }
+
   // Check if replying to a task message → follow-up
   if (replyTo && taskMessageMap.has(replyTo)) {
     const taskId = taskMessageMap.get(replyTo)!;
@@ -125,7 +142,25 @@ async function handleMessage(msg: any) {
     const num = parseInt(text);
     const mode = chatListMode.get(chatId);
 
-    if (mode === 'projects') {
+    if (mode === 'task-create') {
+      const projMap = chatNumberedProjects.get(chatId);
+      if (projMap?.has(num)) {
+        const projectName = projMap.get(num)!;
+        const projects = scanProjects();
+        const project = projects.find(p => p.name === projectName);
+        if (project) {
+          pendingTaskProject.set(chatId, { name: project.name, path: project.path });
+          await send(chatId, `📁 ${project.name}\n\nSend the task prompt:`);
+        }
+        return;
+      }
+    } else if (mode === 'peek') {
+      const projMap = chatNumberedProjects.get(chatId);
+      if (projMap?.has(num)) {
+        await handlePeek(chatId, projMap.get(num)!);
+        return;
+      }
+    } else if (mode === 'projects') {
       const projMap = chatNumberedProjects.get(chatId);
       if (projMap?.has(num)) {
         await sendSessionList(chatId, projMap.get(num)!);
@@ -149,6 +184,9 @@ async function handleMessage(msg: any) {
 
   // Commands
   if (text.startsWith('/')) {
+    // Any new command cancels pending states
+    pendingTaskProject.delete(chatId);
+
     const [cmd, ...args] = text.split(/\s+/);
     switch (cmd) {
       case '/start':
@@ -161,7 +199,11 @@ async function handleMessage(msg: any) {
         break;
       case '/new':
       case '/task':
-        await handleNewTask(chatId, args.join(' '));
+        if (args.length > 0) {
+          await handleNewTask(chatId, args.join(' '));
+        } else {
+          await startTaskCreation(chatId);
+        }
         break;
       case '/sessions':
       case '/s':
@@ -184,6 +226,13 @@ async function handleMessage(msg: any) {
         break;
       case '/unwatch':
         await handleUnwatch(chatId, args[0]);
+        break;
+      case '/peek':
+        if (args.length > 0) {
+          await handlePeek(chatId, args[0], args[1]);
+        } else {
+          await startPeekSelection(chatId);
+        }
         break;
       case '/cancel':
         await handleCancel(chatId, args[0]);
@@ -238,6 +287,7 @@ async function sendHelp(chatId: number) {
     `/watchers — list active watchers\n` +
     `/unwatch <id> — stop watching\n\n` +
     `📝 Submit task:\nproject-name: your instructions\n\n` +
+    `👀 /peek [project] [sessionId] — session summary\n\n` +
     `🔧 /cancel <id>  /retry <id>\n` +
     `/projects — list projects\n\n` +
     `🌐 /tunnel — tunnel status\n` +
@@ -437,6 +487,167 @@ async function sendSessionContent(chatId: number, projectName: string, sessionId
   }
 }
 
+async function startPeekSelection(chatId: number) {
+  const projects = scanProjects();
+  if (projects.length === 0) {
+    await send(chatId, 'No projects configured.');
+    return;
+  }
+
+  // Filter to projects that have sessions
+  const withSessions = projects.filter(p => listClaudeSessions(p.name).length > 0);
+  if (withSessions.length === 0) {
+    await send(chatId, 'No projects with sessions found.');
+    return;
+  }
+
+  const numbered = new Map<number, string>();
+  const lines = withSessions.slice(0, 15).map((p, i) => {
+    numbered.set(i + 1, p.name);
+    const sessions = listClaudeSessions(p.name);
+    const latest = sessions[0];
+    const info = latest?.summary || latest?.firstPrompt?.slice(0, 40) || '';
+    return `${i + 1}. ${p.name}${info ? `\n   ${info}` : ''}`;
+  });
+
+  chatNumberedProjects.set(chatId, numbered);
+  chatListMode.set(chatId, 'peek');
+
+  await send(chatId, `👀 Peek — select project:\n\n${lines.join('\n')}`);
+}
+
+async function handlePeek(chatId: number, projectArg?: string, sessionArg?: string) {
+  const projects = scanProjects();
+
+  // If no project specified, use the most recent task's project
+  let projectName = projectArg;
+  let sessionId = sessionArg;
+
+  if (!projectName) {
+    // Find most recent running or done task
+    const tasks = listTasks();
+    const recent = tasks.find(t => t.status === 'running') || tasks[0];
+    if (recent) {
+      projectName = recent.projectName;
+    } else {
+      await send(chatId, 'No project specified and no recent tasks.\nUsage: /peek [project] [sessionId]');
+      return;
+    }
+  }
+
+  const project = projects.find(p => p.name === projectName || p.name.toLowerCase() === projectName!.toLowerCase());
+  if (!project) {
+    await send(chatId, `Project not found: ${projectName}`);
+    return;
+  }
+
+  // Find session
+  const sessions = listClaudeSessions(project.name);
+  if (sessions.length === 0) {
+    await send(chatId, `No sessions for ${project.name}`);
+    return;
+  }
+
+  const session = sessionId
+    ? sessions.find(s => s.sessionId.startsWith(sessionId!))
+    : sessions[0]; // most recent
+
+  if (!session) {
+    await send(chatId, `Session not found: ${sessionId}`);
+    return;
+  }
+
+  const filePath = getSessionFilePath(project.name, session.sessionId);
+  if (!filePath) {
+    await send(chatId, 'Session file not found');
+    return;
+  }
+
+  await send(chatId, `🔍 Loading ${project.name} / ${session.sessionId.slice(0, 8)}...`);
+
+  const entries = readSessionEntries(filePath);
+  if (entries.length === 0) {
+    await send(chatId, 'Session is empty');
+    return;
+  }
+
+  // Collect last N meaningful entries for raw display
+  const recentRaw: string[] = [];
+  let rawCount = 0;
+  for (let i = entries.length - 1; i >= 0 && rawCount < 8; i--) {
+    const e = entries[i];
+    if (e.type === 'user') {
+      recentRaw.unshift(`👤 ${e.content.slice(0, 300)}`);
+      rawCount++;
+    } else if (e.type === 'assistant_text') {
+      recentRaw.unshift(`🤖 ${e.content.slice(0, 300)}`);
+      rawCount++;
+    } else if (e.type === 'tool_use') {
+      recentRaw.unshift(`🔧 ${e.toolName || 'tool'}`);
+      rawCount++;
+    }
+  }
+
+  // Build context for AI summary (last ~50 entries)
+  const contextEntries: string[] = [];
+  let contextLen = 0;
+  const MAX_CONTEXT = 8000;
+  for (let i = entries.length - 1; i >= 0 && contextLen < MAX_CONTEXT; i--) {
+    const e = entries[i];
+    let line = '';
+    if (e.type === 'user') line = `User: ${e.content}`;
+    else if (e.type === 'assistant_text') line = `Assistant: ${e.content}`;
+    else if (e.type === 'tool_use') line = `Tool: ${e.toolName || 'tool'}`;
+    else continue;
+    if (contextLen + line.length > MAX_CONTEXT) break;
+    contextEntries.unshift(line);
+    contextLen += line.length;
+  }
+
+  // AI summary
+  let summary = '';
+  try {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (apiKey) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 500,
+          messages: [{
+            role: 'user',
+            content: `Summarize this Claude Code session in 2-3 sentences. What was the user trying to do? What's the current status? Answer in the same language as the session content.\n\n${contextEntries.join('\n')}`,
+          }],
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        summary = data.content?.[0]?.text || '';
+      }
+    }
+  } catch {}
+
+  // Format output
+  const header = `📋 ${project.name} / ${session.sessionId.slice(0, 8)}\n${entries.length} entries${session.gitBranch ? ` • ${session.gitBranch}` : ''}`;
+
+  const summaryBlock = summary
+    ? `\n\n📝 Summary:\n${summary}`
+    : '';
+
+  const rawBlock = `\n\n--- Recent ---\n${recentRaw.join('\n\n')}`;
+
+  const fullText = header + summaryBlock + rawBlock;
+  const chunks = splitMessage(fullText, 4000);
+  for (const chunk of chunks) {
+    await send(chatId, chunk);
+  }
+}
+
 /**
  * Parse task creation input. Supports:
  *   project-name instructions
@@ -444,6 +655,25 @@ async function sendSessionContent(chatId: number, projectName: string, sessionId
  *   project-name -in 30m instructions
  *   project-name -at 2024-01-01T10:00 instructions
  */
+async function startTaskCreation(chatId: number) {
+  const projects = scanProjects();
+  if (projects.length === 0) {
+    await send(chatId, 'No projects configured. Add project roots in Settings.');
+    return;
+  }
+
+  const numbered = new Map<number, string>();
+  const lines = projects.slice(0, 15).map((p, i) => {
+    numbered.set(i + 1, p.name);
+    return `${i + 1}. ${p.name}`;
+  });
+
+  chatNumberedProjects.set(chatId, numbered);
+  chatListMode.set(chatId, 'task-create');
+
+  await send(chatId, `📝 New Task\n\nSelect project:\n${lines.join('\n')}`);
+}
+
 async function handleNewTask(chatId: number, input: string) {
   if (!input) {
     await send(chatId,
@@ -877,13 +1107,14 @@ async function setBotCommands(token: string) {
       body: JSON.stringify({
         commands: [
           { command: 'tasks', description: 'List tasks' },
-          { command: 'task', description: 'Create task: /task project prompt' },
+          { command: 'task', description: 'Create task (interactive or /task project prompt)' },
           { command: 'sessions', description: 'Browse sessions' },
           { command: 'projects', description: 'List projects' },
           { command: 'tunnel', description: 'Tunnel status' },
           { command: 'tunnel_start', description: 'Start tunnel' },
           { command: 'tunnel_stop', description: 'Stop tunnel' },
           { command: 'tunnel_password', description: 'Get login password' },
+          { command: 'peek', description: 'Session summary (AI + recent)' },
           { command: 'watch', description: 'Monitor session' },
           { command: 'watchers', description: 'List watchers' },
           { command: 'help', description: 'Show help' },
