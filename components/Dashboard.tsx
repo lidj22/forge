@@ -40,6 +40,7 @@ export default function Dashboard({ user }: { user: any }) {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showCode, setShowCode] = useState(true);
   const [usage, setUsage] = useState<UsageSummary[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -255,10 +256,10 @@ export default function Dashboard({ user }: { user: any }) {
           </Suspense>
         ) : null}
 
-        {/* Code — file browser + terminal, always mounted to keep terminal sessions alive */}
+        {/* Code — terminal + file browser, always mounted to keep terminal sessions alive */}
         <div className={`flex-1 min-h-0 flex ${viewMode === 'terminal' ? '' : 'hidden'}`}>
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
-            <CodeViewer terminalRef={terminalRef} />
+            <CodeViewer terminalRef={terminalRef} onToggleCode={() => setShowCode(v => !v)} />
           </Suspense>
         </div>
       </div>

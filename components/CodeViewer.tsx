@@ -23,15 +23,17 @@ function TreeNode({ node, depth, selected, onSelect, gitMap }: {
   onSelect: (path: string) => void;
   gitMap: GitStatusMap;
 }) {
-  const [expanded, setExpanded] = useState(depth < 1);
+  // Auto-expand if selected file is under this directory
+  const containsSelected = selected ? selected.startsWith(node.path + '/') : false;
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const expanded = manualExpanded ?? (depth < 1 || containsSelected);
 
   if (node.type === 'dir') {
-    // Check if any child has git changes
     const dirHasChanges = node.children?.some(c => hasGitChanges(c, gitMap));
     return (
       <div>
         <button
-          onClick={() => setExpanded(v => !v)}
+          onClick={() => setManualExpanded(v => v === null ? !expanded : !v)}
           className="w-full text-left flex items-center gap-1 px-1 py-0.5 hover:bg-[var(--bg-tertiary)] rounded text-xs"
           style={{ paddingLeft: depth * 12 + 4 }}
         >
@@ -90,9 +92,74 @@ const LANG_MAP: Record<string, string> = {
   md: 'Markdown', sh: 'Shell', sql: 'SQL', toml: 'TOML', xml: 'XML',
 };
 
+// ─── Simple syntax highlighting ──────────────────────────
+
+const KEYWORDS = new Set([
+  'import', 'export', 'from', 'const', 'let', 'var', 'function', 'return',
+  'if', 'else', 'for', 'while', 'switch', 'case', 'break', 'continue',
+  'class', 'extends', 'new', 'this', 'super', 'typeof', 'instanceof',
+  'try', 'catch', 'finally', 'throw', 'async', 'await', 'yield',
+  'default', 'interface', 'type', 'enum', 'implements', 'readonly',
+  'public', 'private', 'protected', 'static', 'abstract',
+  'true', 'false', 'null', 'undefined', 'void',
+  'def', 'self', 'None', 'True', 'False', 'class', 'lambda', 'with', 'as', 'in', 'not', 'and', 'or',
+  'func', 'package', 'struct', 'go', 'defer', 'select', 'chan', 'map', 'range',
+]);
+
+function highlightLine(line: string, lang: string): React.ReactNode {
+  if (!line) return ' ';
+
+  // Comments
+  const commentIdx = lang === 'py' ? line.indexOf('#') :
+    line.indexOf('//');
+  if (commentIdx === 0 || (commentIdx > 0 && /^\s*$/.test(line.slice(0, commentIdx)))) {
+    return <span className="text-gray-500 italic">{line}</span>;
+  }
+
+  // Tokenize with regex
+  const parts: React.ReactNode[] = [];
+  let lastIdx = 0;
+
+  const regex = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+\.?\d*\b)|(\/\/.*$|#.*$)|(\b[A-Z_][A-Z_0-9]+\b)|(\b\w+\b)/g;
+  let match;
+
+  while ((match = regex.exec(line)) !== null) {
+    // Text before match
+    if (match.index > lastIdx) {
+      parts.push(line.slice(lastIdx, match.index));
+    }
+
+    if (match[1]) {
+      // String
+      parts.push(<span key={match.index} className="text-green-400">{match[0]}</span>);
+    } else if (match[2]) {
+      // Number
+      parts.push(<span key={match.index} className="text-orange-300">{match[0]}</span>);
+    } else if (match[3]) {
+      // Comment
+      parts.push(<span key={match.index} className="text-gray-500 italic">{match[0]}</span>);
+    } else if (match[4]) {
+      // CONSTANT
+      parts.push(<span key={match.index} className="text-cyan-300">{match[0]}</span>);
+    } else if (match[5] && KEYWORDS.has(match[5])) {
+      // Keyword
+      parts.push(<span key={match.index} className="text-purple-400">{match[0]}</span>);
+    } else {
+      parts.push(match[0]);
+    }
+    lastIdx = match.index + match[0].length;
+  }
+
+  if (lastIdx < line.length) {
+    parts.push(line.slice(lastIdx));
+  }
+
+  return parts.length > 0 ? <>{parts}</> : line;
+}
+
 // ─── Main Component ──────────────────────────────────────
 
-export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObject<WebTerminalHandle | null> }) {
+export default function CodeViewer({ terminalRef, onToggleCode }: { terminalRef: React.RefObject<WebTerminalHandle | null>; onToggleCode?: () => void }) {
   const [currentDir, setCurrentDir] = useState<string | null>(null);
   const [dirName, setDirName] = useState('');
   const [tree, setTree] = useState<FileNode[]>([]);
@@ -104,7 +171,11 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
   const [language, setLanguage] = useState('');
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [diffContent, setDiffContent] = useState<string | null>(null);
+  const [diffFile, setDiffFile] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'file' | 'diff'>('file');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [codeOpen, setCodeOpen] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(300);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -157,6 +228,7 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
   const openFile = useCallback(async (path: string) => {
     if (!currentDir) return;
     setSelectedFile(path);
+    setViewMode('file');
     setLoading(true);
     const res = await fetch(`/api/code?dir=${encodeURIComponent(currentDir)}&file=${encodeURIComponent(path)}`);
     const data = await res.json();
@@ -164,6 +236,23 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
     setLanguage(data.language || '');
     setLoading(false);
   }, [currentDir]);
+
+  const openDiff = useCallback(async (path: string) => {
+    if (!currentDir) return;
+    setDiffFile(path);
+    setViewMode('diff');
+    setLoading(true);
+    const res = await fetch(`/api/code?dir=${encodeURIComponent(currentDir)}&diff=${encodeURIComponent(path)}`);
+    const data = await res.json();
+    setDiffContent(data.diff || null);
+    setLoading(false);
+  }, [currentDir]);
+
+  // Open file and auto-expand its parent dirs in tree
+  const locateFile = useCallback((path: string) => {
+    setSearch(''); // clear search so tree is visible
+    openFile(path);
+  }, [openFile]);
 
   const allFiles = flattenTree(tree);
   const filtered = search
@@ -175,7 +264,7 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
     dragRef.current = { startY: e.clientY, startH: terminalHeight };
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return;
-      const delta = dragRef.current.startY - ev.clientY;
+      const delta = ev.clientY - dragRef.current.startY;
       setTerminalHeight(Math.max(100, Math.min(600, dragRef.current.startH + delta)));
     };
     const onUp = () => {
@@ -193,8 +282,23 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* File browser + code viewer */}
-      <div className="flex-1 flex min-h-0">
+      {/* Terminal — top */}
+      <div className={codeOpen ? 'shrink-0' : 'flex-1'} style={codeOpen ? { height: terminalHeight } : undefined}>
+        <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
+          <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} codeOpen={codeOpen} onToggleCode={() => setCodeOpen(v => !v)} />
+        </Suspense>
+      </div>
+
+      {/* Resize handle */}
+      {codeOpen && (
+        <div
+          onMouseDown={onDragStart}
+          className="h-1 bg-[var(--border)] cursor-row-resize hover:bg-[var(--accent)]/50 shrink-0"
+        />
+      )}
+
+      {/* File browser + code viewer — bottom */}
+      {codeOpen && <div className="flex-1 flex min-h-0">
         {/* Sidebar */}
         {sidebarOpen && (
           <aside className="w-56 border-r border-[var(--border)] flex flex-col shrink-0">
@@ -222,13 +326,12 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
 
             {/* Git changes */}
             {showGit && gitChanges.length > 0 && (
-              <div className="border-b border-[var(--border)] max-h-40 overflow-y-auto">
+              <div className="border-b border-[var(--border)] max-h-48 overflow-y-auto">
                 {gitChanges.map(g => (
-                  <button
+                  <div
                     key={g.path}
-                    onClick={() => openFile(g.path)}
-                    className={`w-full text-left px-3 py-1 text-xs flex items-center gap-2 hover:bg-[var(--bg-tertiary)] ${
-                      selectedFile === g.path ? 'bg-[var(--accent)]/10' : ''
+                    className={`flex items-center px-2 py-1 text-xs hover:bg-[var(--bg-tertiary)] ${
+                      diffFile === g.path && viewMode === 'diff' ? 'bg-[var(--accent)]/10' : ''
                     }`}
                   >
                     <span className={`text-[10px] font-mono w-4 shrink-0 ${
@@ -239,8 +342,21 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
                     }`}>
                       {g.status.includes('?') ? '+' : g.status[0]}
                     </span>
-                    <span className="truncate text-[var(--text-secondary)]">{g.path}</span>
-                  </button>
+                    <button
+                      onClick={() => openDiff(g.path)}
+                      className="flex-1 text-left truncate text-[var(--text-secondary)] hover:text-[var(--text-primary)] ml-1"
+                      title="View diff"
+                    >
+                      {g.path}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); locateFile(g.path); }}
+                      className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--accent)]/10 px-1.5 py-0.5 rounded shrink-0"
+                      title="Locate in file tree"
+                    >
+                      file
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -296,7 +412,12 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
             >
               {sidebarOpen ? '◀' : '▶'}
             </button>
-            {selectedFile ? (
+            {viewMode === 'diff' && diffFile ? (
+              <>
+                <span className="text-xs font-semibold text-yellow-400 truncate">{diffFile}</span>
+                <span className="text-[9px] text-[var(--text-secondary)] ml-auto">diff</span>
+              </>
+            ) : selectedFile ? (
               <>
                 <span className="text-xs font-semibold text-[var(--text-primary)] truncate">{selectedFile}</span>
                 {language && (
@@ -308,20 +429,37 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
             )}
           </div>
 
-          {selectedFile && content !== null ? (
+          {loading ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-xs text-[var(--text-secondary)]">Loading...</div>
+            </div>
+          ) : viewMode === 'diff' && diffContent ? (
             <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
-              {loading ? (
-                <div className="p-4 text-xs text-[var(--text-secondary)]">Loading...</div>
-              ) : (
-                <pre className="p-4 text-[12px] leading-[1.5] font-mono text-[var(--text-primary)] whitespace-pre" style={{ fontFamily: 'Menlo, Monaco, "Courier New", monospace', tabSize: 2 }}>
-                  {content.split('\n').map((line, i) => (
-                    <div key={i} className="flex hover:bg-[var(--bg-tertiary)]/50">
-                      <span className="select-none text-[var(--text-secondary)]/40 text-right pr-4 w-10 shrink-0">{i + 1}</span>
-                      <span className="flex-1">{line || ' '}</span>
+              <pre className="p-4 text-[12px] leading-[1.5] font-mono whitespace-pre" style={{ fontFamily: 'Menlo, Monaco, "Courier New", monospace', tabSize: 2 }}>
+                {diffContent.split('\n').map((line, i) => {
+                  const color = line.startsWith('+') ? 'text-green-400 bg-green-900/20'
+                    : line.startsWith('-') ? 'text-red-400 bg-red-900/20'
+                    : line.startsWith('@@') ? 'text-cyan-400'
+                    : line.startsWith('diff') || line.startsWith('index') ? 'text-[var(--text-secondary)]'
+                    : 'text-[var(--text-primary)]';
+                  return (
+                    <div key={i} className={`${color} px-2`}>
+                      {line || ' '}
                     </div>
-                  ))}
-                </pre>
-              )}
+                  );
+                })}
+              </pre>
+            </div>
+          ) : selectedFile && content !== null ? (
+            <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
+              <pre className="p-4 text-[12px] leading-[1.5] font-mono text-[var(--text-primary)] whitespace-pre" style={{ fontFamily: 'Menlo, Monaco, "Courier New", monospace', tabSize: 2 }}>
+                {content.split('\n').map((line, i) => (
+                  <div key={i} className="flex hover:bg-[var(--bg-tertiary)]/50">
+                    <span className="select-none text-[var(--text-secondary)]/40 text-right pr-4 w-10 shrink-0">{i + 1}</span>
+                    <span className="flex-1">{highlightLine(line, language)}</span>
+                  </div>
+                ))}
+              </pre>
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">
@@ -329,20 +467,8 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
             </div>
           )}
         </main>
-      </div>
+      </div>}
 
-      {/* Resize handle */}
-      <div
-        onMouseDown={onDragStart}
-        className="h-1 bg-[var(--border)] cursor-row-resize hover:bg-[var(--accent)]/50 shrink-0"
-      />
-
-      {/* Terminal */}
-      <div className="shrink-0" style={{ height: terminalHeight }}>
-        <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-          <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} />
-        </Suspense>
-      </div>
     </div>
   );
 }

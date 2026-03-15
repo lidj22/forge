@@ -13,6 +13,8 @@ export interface WebTerminalHandle {
 
 export interface WebTerminalProps {
   onActiveSession?: (sessionName: string | null) => void;
+  codeOpen?: boolean;
+  onToggleCode?: () => void;
 }
 
 // ─── Types ───────────────────────────────────────────────────
@@ -160,7 +162,7 @@ let globalDragging = false;
 
 // ─── Main component ─────────────────────────────────────────
 
-const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession }, ref) {
+const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession, codeOpen, onToggleCode }, ref) {
   const [tabs, setTabs] = useState<TabState[]>(() => {
     const tree = makeTerminal();
     return [{ id: nextId++, label: 'Terminal 1', tree, ratios: {}, activeId: firstTerminalId(tree) }];
@@ -512,11 +514,20 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
               if (!activeTab) return;
               setRefreshKeys(prev => ({ ...prev, [activeTab.activeId]: (prev[activeTab.activeId] || 0) + 1 }));
             }}
-            className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[#2a2a4a] rounded"
+            className="text-[11px] px-3 py-1 text-black bg-yellow-400 hover:bg-yellow-300 rounded font-bold"
             title="Refresh terminal (fix garbled display)"
           >
             Refresh
           </button>
+          {onToggleCode && (
+            <button
+              onClick={onToggleCode}
+              className={`text-[11px] px-3 py-1 rounded font-bold ${codeOpen ? 'text-white bg-red-500 hover:bg-red-400' : 'text-red-400 border border-red-500 hover:bg-red-500 hover:text-white'}`}
+              title={codeOpen ? 'Hide code panel' : 'Show code panel'}
+            >
+              Code
+            </button>
+          )}
           {activeTab && countTerminals(activeTab.tree) > 1 && (
             <button onClick={onClosePane} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-red-400 hover:bg-[#2a2a4a] rounded">
               Close Pane
@@ -1000,8 +1011,8 @@ const MemoTerminalPane = memo(function TerminalPane({
       if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) return;
       // Skip if container is inside a hidden tab (prevents wrong resize)
       if (el.closest('.hidden')) return;
-      // Skip unreasonably small sizes (layout transient)
-      if (el.offsetWidth < 50 || el.offsetHeight < 30) return;
+      // Skip unreasonably small sizes — xterm crashes if rows/cols go below 2
+      if (el.offsetWidth < 100 || el.offsetHeight < 50) return;
       const w = el.offsetWidth;
       const h = el.offsetHeight;
       if (w === lastW && h === lastH) return;
@@ -1009,6 +1020,8 @@ const MemoTerminalPane = memo(function TerminalPane({
       lastH = h;
       try {
         fit.fit();
+        // Skip if xterm computed unreasonable dimensions
+        if (term.cols < 2 || term.rows < 2) return;
         if (ws?.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }

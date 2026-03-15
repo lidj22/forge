@@ -88,6 +88,33 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Directory not under any project root' }, { status: 403 });
   }
 
+  // Git diff for a specific file
+  const diffFile = searchParams.get('diff');
+  if (diffFile) {
+    const fullPath = join(resolvedDir, diffFile);
+    if (!fullPath.startsWith(resolvedDir)) {
+      return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+    }
+    try {
+      // Try staged + unstaged diff
+      let diff = '';
+      try { diff = execSync(`git diff -- "${diffFile}"`, { cwd: resolvedDir, encoding: 'utf-8', timeout: 5000 }); } catch {}
+      if (!diff) {
+        try { diff = execSync(`git diff HEAD -- "${diffFile}"`, { cwd: resolvedDir, encoding: 'utf-8', timeout: 5000 }); } catch {}
+      }
+      if (!diff) {
+        // Untracked file — show entire content as added
+        try {
+          const content = readFileSync(fullPath, 'utf-8');
+          diff = content.split('\n').map(l => `+${l}`).join('\n');
+        } catch {}
+      }
+      return NextResponse.json({ diff: diff || 'No changes' });
+    } catch {
+      return NextResponse.json({ diff: 'Failed to get diff' });
+    }
+  }
+
   // Read file content
   if (filePath) {
     const fullPath = join(resolvedDir, filePath);
