@@ -11,6 +11,10 @@ export interface WebTerminalHandle {
   openSessionInTerminal: (sessionId: string, projectPath: string) => void;
 }
 
+export interface WebTerminalProps {
+  onActiveSession?: (sessionName: string | null) => void;
+}
+
 // ─── Types ───────────────────────────────────────────────────
 
 interface TmuxSession {
@@ -156,7 +160,7 @@ let globalDragging = false;
 
 // ─── Main component ─────────────────────────────────────────
 
-const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, ref) {
+const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession }, ref) {
   const [tabs, setTabs] = useState<TabState[]>(() => {
     const tree = makeTerminal();
     return [{ id: nextId++, label: 'Terminal 1', tree, ratios: {}, activeId: firstTerminalId(tree) }];
@@ -207,6 +211,13 @@ const WebTerminal = forwardRef<WebTerminalHandle>(function WebTerminal(_props, r
   }, [tabs, activeTabId, hydrated]);
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
+
+  // Notify parent when active terminal session changes
+  useEffect(() => {
+    if (!onActiveSession || !activeTab) return;
+    const sessions = collectSessionNames(activeTab.tree);
+    onActiveSession(sessions[0] || null);
+  }, [activeTabId, activeTab, onActiveSession]);
 
   // ─── Imperative handle for parent ─────────────────────
 
@@ -918,11 +929,11 @@ const MemoTerminalPane = memo(function TerminalPane({
       };
 
       ws.onmessage = (event) => {
-        if (disposed) return;
+        if (disposed || !initDone) return;
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
-            term.write(msg.data);
+            try { term.write(msg.data); } catch {};
           } else if (msg.type === 'connected') {
             connectedSession = msg.sessionName;
             createRetries = 0;

@@ -12,6 +12,7 @@ import type { WebTerminalHandle } from './WebTerminal';
 
 const WebTerminal = lazy(() => import('./WebTerminal'));
 const DocsViewer = lazy(() => import('./DocsViewer'));
+const CodeViewer = lazy(() => import('./CodeViewer'));
 
 interface UsageSummary {
   provider: string;
@@ -106,7 +107,7 @@ export default function Dashboard({ user }: { user: any }) {
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              Terminal
+              Code
             </button>
             <button
               onClick={() => setViewMode('docs')}
@@ -254,10 +255,10 @@ export default function Dashboard({ user }: { user: any }) {
           </Suspense>
         ) : null}
 
-        {/* Terminal — always mounted, hidden when not active to keep sessions alive */}
-        <div className={`flex-1 min-h-0 ${viewMode === 'terminal' ? '' : 'hidden'}`}>
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading terminal...</div>}>
-            <WebTerminal ref={terminalRef} />
+        {/* Code — file browser + terminal, always mounted to keep terminal sessions alive */}
+        <div className={`flex-1 min-h-0 flex ${viewMode === 'terminal' ? '' : 'hidden'}`}>
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <CodeViewer terminalRef={terminalRef} />
           </Suspense>
         </div>
       </div>
