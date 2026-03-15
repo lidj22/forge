@@ -110,7 +110,7 @@ export default function NewTaskModal({
       projectName: selectedProject,
       prompt: taskMode === 'monitor' ? `Monitor session ${selectedSessionId}` : prompt.trim(),
       priority,
-      scheduledAt: getScheduledAt(),
+      scheduledAt: getScheduledAt() ?? undefined,
       mode: taskMode,
     };
 

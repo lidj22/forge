@@ -13,6 +13,7 @@ import type { WebTerminalHandle } from './WebTerminal';
 const WebTerminal = lazy(() => import('./WebTerminal'));
 const DocsViewer = lazy(() => import('./DocsViewer'));
 const CodeViewer = lazy(() => import('./CodeViewer'));
+const ProjectManager = lazy(() => import('./ProjectManager'));
 
 interface UsageSummary {
   provider: string;
@@ -35,7 +36,7 @@ interface ProjectInfo {
 }
 
 export default function Dashboard({ user }: { user: any }) {
-  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs'>('terminal');
+  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects'>('terminal');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
@@ -112,6 +113,16 @@ export default function Dashboard({ user }: { user: any }) {
               }`}
             >
               Docs
+            </button>
+            <button
+              onClick={() => setViewMode('projects')}
+              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
+                viewMode === 'projects'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Projects
             </button>
             <button
               onClick={() => setViewMode('tasks')}
@@ -273,6 +284,13 @@ export default function Dashboard({ user }: { user: any }) {
             }}
           />
         ) : null}
+
+        {/* Projects */}
+        {viewMode === 'projects' && (
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <ProjectManager />
+          </Suspense>
+        )}
 
         {/* Docs — always mounted to keep terminal session alive */}
         <div className={`flex-1 min-h-0 flex ${viewMode === 'docs' ? '' : 'hidden'}`}>
