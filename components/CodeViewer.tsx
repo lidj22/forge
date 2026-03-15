@@ -159,7 +159,7 @@ function highlightLine(line: string, lang: string): React.ReactNode {
 
 // ─── Main Component ──────────────────────────────────────
 
-export default function CodeViewer({ terminalRef, onToggleCode }: { terminalRef: React.RefObject<WebTerminalHandle | null>; onToggleCode?: () => void }) {
+export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObject<WebTerminalHandle | null> }) {
   const [currentDir, setCurrentDir] = useState<string | null>(null);
   const [dirName, setDirName] = useState('');
   const [tree, setTree] = useState<FileNode[]>([]);
@@ -176,6 +176,10 @@ export default function CodeViewer({ terminalRef, onToggleCode }: { terminalRef:
   const [viewMode, setViewMode] = useState<'file' | 'diff'>('file');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [codeOpen, setCodeOpen] = useState(false);
+
+  const handleCodeOpenChange = useCallback((open: boolean) => {
+    setCodeOpen(open);
+  }, []);
   const [terminalHeight, setTerminalHeight] = useState(300);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
@@ -285,7 +289,7 @@ export default function CodeViewer({ terminalRef, onToggleCode }: { terminalRef:
       {/* Terminal — top */}
       <div className={codeOpen ? 'shrink-0' : 'flex-1'} style={codeOpen ? { height: terminalHeight } : undefined}>
         <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-          <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} codeOpen={codeOpen} onToggleCode={() => setCodeOpen(v => !v)} />
+          <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} onCodeOpenChange={handleCodeOpenChange} />
         </Suspense>
       </div>
 

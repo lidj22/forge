@@ -13,8 +13,7 @@ export interface WebTerminalHandle {
 
 export interface WebTerminalProps {
   onActiveSession?: (sessionName: string | null) => void;
-  codeOpen?: boolean;
-  onToggleCode?: () => void;
+  onCodeOpenChange?: (open: boolean) => void;
 }
 
 // ─── Types ───────────────────────────────────────────────────
@@ -162,7 +161,7 @@ let globalDragging = false;
 
 // ─── Main component ─────────────────────────────────────────
 
-const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession, codeOpen, onToggleCode }, ref) {
+const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession, onCodeOpenChange }, ref) {
   const [tabs, setTabs] = useState<TabState[]>(() => {
     const tree = makeTerminal();
     return [{ id: nextId++, label: 'Terminal 1', tree, ratios: {}, activeId: firstTerminalId(tree) }];
@@ -178,6 +177,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
   const sessionLabelsRef = useRef<Record<string, string>>({});
   const dragTabRef = useRef<number | null>(null);
   const [refreshKeys, setRefreshKeys] = useState<Record<number, number>>({});
+  const [tabCodeOpen, setTabCodeOpen] = useState<Record<number, boolean>>({});
 
   // Restore shared state from server after mount
   useEffect(() => {
@@ -214,12 +214,17 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
 
   const activeTab = tabs.find(t => t.id === activeTabId) || tabs[0];
 
-  // Notify parent when active terminal session changes
+  // Notify parent when active terminal session or code state changes
   useEffect(() => {
-    if (!onActiveSession || !activeTab) return;
-    const sessions = collectSessionNames(activeTab.tree);
-    onActiveSession(sessions[0] || null);
-  }, [activeTabId, activeTab, onActiveSession]);
+    if (!activeTab) return;
+    if (onActiveSession) {
+      const sessions = collectSessionNames(activeTab.tree);
+      onActiveSession(sessions[0] || null);
+    }
+    if (onCodeOpenChange) {
+      onCodeOpenChange(tabCodeOpen[activeTab.id] ?? false);
+    }
+  }, [activeTabId, activeTab, onActiveSession, onCodeOpenChange, tabCodeOpen]);
 
   // ─── Imperative handle for parent ─────────────────────
 
@@ -519,11 +524,16 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
           >
             Refresh
           </button>
-          {onToggleCode && (
+          {onCodeOpenChange && activeTab && (
             <button
-              onClick={onToggleCode}
-              className={`text-[11px] px-3 py-1 rounded font-bold ${codeOpen ? 'text-white bg-red-500 hover:bg-red-400' : 'text-red-400 border border-red-500 hover:bg-red-500 hover:text-white'}`}
-              title={codeOpen ? 'Hide code panel' : 'Show code panel'}
+              onClick={() => {
+                const current = tabCodeOpen[activeTab.id] ?? false;
+                const next = !current;
+                setTabCodeOpen(prev => ({ ...prev, [activeTab.id]: next }));
+                onCodeOpenChange(next);
+              }}
+              className={`text-[11px] px-3 py-1 rounded font-bold ${(tabCodeOpen[activeTab.id] ?? false) ? 'text-white bg-red-500 hover:bg-red-400' : 'text-red-400 border border-red-500 hover:bg-red-500 hover:text-white'}`}
+              title={(tabCodeOpen[activeTab.id] ?? false) ? 'Hide code panel' : 'Show code panel'}
             >
               Code
             </button>
