@@ -175,7 +175,7 @@ export default function CodeViewer({ terminalRef, onToggleCode }: { terminalRef:
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'file' | 'diff'>('file');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [codeOpen, setCodeOpen] = useState(true);
+  const [codeOpen, setCodeOpen] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(300);
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);

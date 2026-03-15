@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback} from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
@@ -17,33 +17,12 @@ function getWsUrl() {
   return `${wsProtocol}//${wsHost}:3001`;
 }
 
-interface ClaudeSession {
-  sessionId: string;
-  summary?: string;
-  firstPrompt?: string;
-}
-
 export default function DocTerminal({ docRoot }: { docRoot: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
-  const [sessions, setSessions] = useState<ClaudeSession[]>([]);
-  const [showPicker, setShowPicker] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const termRef = useRef<Terminal | null>(null);
-
-  // Fetch Claude sessions for the doc root
-  const fetchSessions = useCallback(async () => {
-    try {
-      const name = docRoot.split('/').pop() || docRoot;
-      const res = await fetch(`/api/claude-sessions/${encodeURIComponent(name)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSessions(data);
-      }
-    } catch {}
-  }, [docRoot]);
-
-  useEffect(() => { fetchSessions(); }, [fetchSessions]);
+  const docRootRef = useRef(docRoot);
+  docRootRef.current = docRoot;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -62,8 +41,6 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
         selectionBackground: '#7c5bf066',
       },
     });
-    termRef.current = term;
-
     const fit = new FitAddon();
     term.loadAddon(fit);
 
@@ -73,6 +50,7 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
     const wsUrl = getWsUrl();
     let ws: WebSocket | null = null;
     let reconnectTimer = 0;
+    let isNewSession = false;
 
     function connect() {
       if (disposed) return;
@@ -84,7 +62,6 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
         if (disposed) { socket.close(); return; }
         const cols = term.cols;
         const rows = term.rows;
-        // Always attach to the dedicated docs session
         socket.send(JSON.stringify({ type: 'attach', sessionName: SESSION_NAME, cols, rows }));
       };
 
@@ -93,11 +70,21 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
-            term.write(msg.data);
+            try { term.write(msg.data); } catch {};
           } else if (msg.type === 'connected') {
             setConnected(true);
+            // For newly created session: cd to doc root and run claude --resume to let user pick
+            if (isNewSession && docRootRef.current) {
+              isNewSession = false;
+              setTimeout(() => {
+                if (socket.readyState === WebSocket.OPEN) {
+                  socket.send(JSON.stringify({ type: 'input', data: `cd "${docRootRef.current}" && claude --resume\n` }));
+                }
+              }, 300);
+            }
           } else if (msg.type === 'error') {
-            // Session doesn't exist yet — create it
+            // Session doesn't exist — create it
+            isNewSession = true;
             if (socket.readyState === WebSocket.OPEN) {
               socket.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows, sessionName: SESSION_NAME }));
             }
@@ -120,10 +107,13 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
     });
 
-    // Resize
+    // Resize with protection
     const resizeObserver = new ResizeObserver(() => {
+      const el = containerRef.current;
+      if (!el || el.offsetWidth < 100 || el.offsetHeight < 50) return;
       try {
         fit.fit();
+        if (term.cols < 2 || term.rows < 2) return;
         if (ws?.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         }
@@ -147,14 +137,6 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
     }
   }, []);
 
-  const startClaude = useCallback((sessionId?: string) => {
-    const cmd = sessionId
-      ? `cd "${docRoot}" && claude --resume ${sessionId}`
-      : `cd "${docRoot}" && claude`;
-    runCommand(cmd);
-    setShowPicker(false);
-  }, [docRoot, runCommand]);
-
   return (
     <div className="h-full flex flex-col bg-[#1a1a2e]">
       {/* Toolbar */}
@@ -165,41 +147,19 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
         </span>
         <div className="ml-auto flex items-center gap-1">
           <button
-            onClick={() => startClaude()}
+            onClick={() => runCommand(`cd "${docRoot}" && claude`)}
             className="text-[10px] px-2 py-0.5 text-[var(--accent)] hover:bg-[#2a2a4a] rounded"
           >
-            New Claude
+            New
           </button>
           <button
-            onClick={() => { fetchSessions(); setShowPicker(v => !v); }}
-            className={`text-[10px] px-2 py-0.5 rounded ${showPicker ? 'text-white bg-[#7c5bf0]/30' : 'text-gray-400 hover:bg-[#2a2a4a]'}`}
+            onClick={() => runCommand(`cd "${docRoot}" && claude --resume`)}
+            className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[#2a2a4a] rounded"
           >
             Resume
           </button>
         </div>
       </div>
-
-      {/* Session picker */}
-      {showPicker && (
-        <div className="border-b border-[#2a2a4a] bg-[#12122a] max-h-40 overflow-y-auto">
-          {sessions.length === 0 ? (
-            <div className="text-[10px] text-gray-500 p-2">No previous sessions</div>
-          ) : (
-            sessions.map(s => (
-              <button
-                key={s.sessionId}
-                onClick={() => startClaude(s.sessionId)}
-                className="w-full text-left px-3 py-1.5 hover:bg-[#2a2a4a] text-xs border-b border-[#2a2a4a]/50"
-              >
-                <span className="font-mono text-[var(--accent)]">{s.sessionId.slice(0, 12)}</span>
-                {s.firstPrompt && (
-                  <span className="text-gray-500 ml-2 truncate">{s.firstPrompt.slice(0, 60)}</span>
-                )}
-              </button>
-            ))
-          )}
-        </div>
-      )}
 
       {/* Terminal */}
       <div ref={containerRef} className="flex-1 min-h-0" />

@@ -108,7 +108,7 @@ export default function Dashboard({ user }: { user: any }) {
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              Code
+              Vibe Coding
             </button>
             <button
               onClick={() => setViewMode('docs')}
@@ -250,11 +250,14 @@ export default function Dashboard({ user }: { user: any }) {
               }, 100);
             }}
           />
-        ) : viewMode === 'docs' ? (
+        ) : null}
+
+        {/* Docs — always mounted to keep terminal session alive */}
+        <div className={`flex-1 min-h-0 flex ${viewMode === 'docs' ? '' : 'hidden'}`}>
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
             <DocsViewer />
           </Suspense>
-        ) : null}
+        </div>
 
         {/* Code — terminal + file browser, always mounted to keep terminal sessions alive */}
         <div className={`flex-1 min-h-0 flex ${viewMode === 'terminal' ? '' : 'hidden'}`}>

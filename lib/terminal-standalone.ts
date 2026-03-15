@@ -28,7 +28,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import { execSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const PORT = Number(process.env.TERMINAL_PORT) || 3001;
@@ -116,6 +116,19 @@ function listTmuxSessions(): { name: string; created: string; attached: boolean;
 
 const MAX_SESSIONS = 10;
 
+function getDefaultCwd(): string {
+  try {
+    const settingsPath = join(homedir(), '.forge', 'settings.yaml');
+    const raw = readFileSync(settingsPath, 'utf-8');
+    const match = raw.match(/projectRoots:\s*\n((?:\s+-\s+.+\n?)*)/);
+    if (match) {
+      const first = match[1].split('\n').map(l => l.replace(/^\s+-\s+/, '').trim()).filter(Boolean)[0];
+      if (first) return first.replace(/^~/, homedir());
+    }
+  } catch {}
+  return homedir();
+}
+
 function createTmuxSession(cols: number, rows: number): string {
   // Auto-cleanup: if too many sessions, kill the oldest idle ones
   const existing = listTmuxSessions();
@@ -132,7 +145,7 @@ function createTmuxSession(cols: number, rows: number): string {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const name = `${SESSION_PREFIX}${id}`;
   execSync(`${TMUX} new-session -d -s ${name} -x ${cols} -y ${rows}`, {
-    cwd: homedir(),
+    cwd: getDefaultCwd(),
     env: { ...process.env, TERM: 'xterm-256color' },
   });
   // Enable mouse scrolling and set large scrollback buffer
