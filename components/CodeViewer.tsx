@@ -339,6 +339,39 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
     window.addEventListener('mouseup', onUp);
   };
 
+  // Git operations
+  const [commitMsg, setCommitMsg] = useState('');
+  const [gitLoading, setGitLoading] = useState(false);
+  const [gitResult, setGitResult] = useState<{ ok?: boolean; error?: string } | null>(null);
+
+  const gitAction = useCallback(async (action: string, extra?: any) => {
+    if (!currentDir) return;
+    setGitLoading(true);
+    setGitResult(null);
+    try {
+      const res = await fetch('/api/git', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, dir: currentDir, ...extra }),
+      });
+      const data = await res.json();
+      setGitResult(data);
+      // Refresh git status
+      if (data.ok) {
+        const r = await fetch(`/api/code?dir=${encodeURIComponent(currentDir)}`);
+        const d = await r.json();
+        setGitChanges(d.gitChanges || []);
+        setGitRepos(d.gitRepos || []);
+        setGitBranch(d.gitBranch || '');
+        if (action === 'commit') setCommitMsg('');
+      }
+    } catch (e: any) {
+      setGitResult({ error: e.message });
+    }
+    setGitLoading(false);
+    setTimeout(() => setGitResult(null), 5000);
+  }, [currentDir]);
+
   const handleActiveSession = useCallback((session: string | null) => {
     setActiveSession(session);
   }, []);
@@ -505,6 +538,49 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
                 ))
               )}
             </div>
+
+            {/* Git actions — bottom of sidebar */}
+            {currentDir && gitChanges.length > 0 && (
+              <div className="border-t border-[var(--border)] shrink-0 p-2 space-y-1.5">
+                <div className="flex gap-1.5">
+                  <input
+                    value={commitMsg}
+                    onChange={e => setCommitMsg(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && commitMsg.trim() && gitAction('commit', { message: commitMsg.trim() })}
+                    placeholder="Commit message..."
+                    className="flex-1 text-[10px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                  <button
+                    onClick={() => commitMsg.trim() && gitAction('commit', { message: commitMsg.trim() })}
+                    disabled={gitLoading || !commitMsg.trim()}
+                    className="text-[9px] px-2 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50 shrink-0"
+                  >
+                    Commit
+                  </button>
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => gitAction('push')}
+                    disabled={gitLoading}
+                    className="flex-1 text-[9px] py-1 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white disabled:opacity-50"
+                  >
+                    Push
+                  </button>
+                  <button
+                    onClick={() => gitAction('pull')}
+                    disabled={gitLoading}
+                    className="flex-1 text-[9px] py-1 text-[var(--text-secondary)] border border-[var(--border)] rounded hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)] disabled:opacity-50"
+                  >
+                    Pull
+                  </button>
+                </div>
+                {gitResult && (
+                  <div className={`text-[9px] ${gitResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                    {gitResult.ok ? '✅ Done' : `❌ ${gitResult.error}`}
+                  </div>
+                )}
+              </div>
+            )}
           </aside>
         )}
 
