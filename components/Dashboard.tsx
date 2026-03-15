@@ -35,7 +35,7 @@ interface ProjectInfo {
 }
 
 export default function Dashboard({ user }: { user: any }) {
-  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs'>('tasks');
+  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs'>('terminal');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
@@ -81,26 +81,6 @@ export default function Dashboard({ user }: { user: any }) {
           {/* View mode toggle */}
           <div className="flex bg-[var(--bg-tertiary)] rounded p-0.5">
             <button
-              onClick={() => setViewMode('tasks')}
-              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
-                viewMode === 'tasks'
-                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Tasks
-            </button>
-            <button
-              onClick={() => setViewMode('sessions')}
-              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
-                viewMode === 'sessions'
-                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Sessions
-            </button>
-            <button
               onClick={() => setViewMode('terminal')}
               className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
                 viewMode === 'terminal'
@@ -119,6 +99,26 @@ export default function Dashboard({ user }: { user: any }) {
               }`}
             >
               Docs
+            </button>
+            <button
+              onClick={() => setViewMode('tasks')}
+              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
+                viewMode === 'tasks'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Tasks
+            </button>
+            <button
+              onClick={() => setViewMode('sessions')}
+              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
+                viewMode === 'sessions'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Sessions
             </button>
           </div>
 
