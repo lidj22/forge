@@ -231,7 +231,7 @@ export default function TaskDetail({
 
       {editing && (
         <NewTaskModal
-          editTask={{ id: task.id, projectName: task.projectName, prompt: task.prompt, priority: task.priority, mode: task.mode }}
+          editTask={{ id: task.id, projectName: task.projectName, prompt: task.prompt, priority: task.priority, mode: task.mode, scheduledAt: task.scheduledAt }}
           onClose={() => setEditing(false)}
           onCreate={async (data) => {
             await fetch(`/api/tasks/${task.id}`, {

@@ -133,7 +133,7 @@ export function deleteTask(id: string): boolean {
   return true;
 }
 
-export function updateTask(id: string, updates: { prompt?: string; projectName?: string; projectPath?: string; priority?: number; restart?: boolean }): Task | null {
+export function updateTask(id: string, updates: { prompt?: string; projectName?: string; projectPath?: string; priority?: number; scheduledAt?: string; restart?: boolean }): Task | null {
   const task = getTask(id);
   if (!task) return null;
 
@@ -146,6 +146,7 @@ export function updateTask(id: string, updates: { prompt?: string; projectName?:
   if (updates.projectName !== undefined) { fields.push('project_name = ?'); values.push(updates.projectName); }
   if (updates.projectPath !== undefined) { fields.push('project_path = ?'); values.push(updates.projectPath); }
   if (updates.priority !== undefined) { fields.push('priority = ?'); values.push(updates.priority); }
+  if (updates.scheduledAt !== undefined) { fields.push('scheduled_at = ?'); values.push(updates.scheduledAt || null); }
 
   // Reset to queued so it runs again
   if (updates.restart) {

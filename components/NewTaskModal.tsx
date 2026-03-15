@@ -35,7 +35,7 @@ export default function NewTaskModal({
 }: {
   onClose: () => void;
   onCreate: (data: TaskData) => void;
-  editTask?: { id: string; projectName: string; prompt: string; priority: number; mode: TaskMode };
+  editTask?: { id: string; projectName: string; prompt: string; priority: number; mode: TaskMode; scheduledAt?: string };
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState(editTask?.projectName || '');
@@ -60,9 +60,9 @@ export default function NewTaskModal({
   const [autoSessionId, setAutoSessionId] = useState<string | null>(null);
 
   // Scheduling
-  const [scheduleMode, setScheduleMode] = useState<'now' | 'delay' | 'time'>('now');
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'delay' | 'time'>(editTask?.scheduledAt ? 'time' : 'now');
   const [delayMinutes, setDelayMinutes] = useState(30);
-  const [scheduledTime, setScheduledTime] = useState('');
+  const [scheduledTime, setScheduledTime] = useState(editTask?.scheduledAt ? new Date(editTask.scheduledAt).toISOString().slice(0, 16) : '');
 
   useEffect(() => {
     fetch('/api/projects').then(r => r.json()).then((p: Project[]) => {

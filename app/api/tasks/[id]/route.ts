@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getTask, cancelTask, deleteTask, retryTask, updateTask } from '@/lib/task-manager';
+import { getProjectInfo } from '@/lib/projects';
 
 // Get task details (including full log)
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -28,12 +29,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
 }
 
-// Edit a queued task
+// Edit a task
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
+  // Resolve projectName to projectPath if changed
+  if (body.projectName && !body.projectPath) {
+    const project = getProjectInfo(body.projectName);
+    if (project) body.projectPath = project.path;
+  }
   const updated = updateTask(id, body);
-  if (!updated) return NextResponse.json({ error: 'Cannot edit (only queued tasks)' }, { status: 400 });
+  if (!updated) return NextResponse.json({ error: 'Cannot edit this task' }, { status: 400 });
   return NextResponse.json(updated);
 }
 
