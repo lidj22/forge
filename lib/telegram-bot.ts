@@ -19,8 +19,8 @@ import type { Task, TaskLogEntry } from '@/src/types';
 // Prevent duplicate polling and state loss across hot-reloads
 const globalKey = Symbol.for('mw-telegram-state');
 const g = globalThis as any;
-if (!g[globalKey]) g[globalKey] = { polling: false, pollTimer: null, lastUpdateId: 0 };
-const botState: { polling: boolean; pollTimer: ReturnType<typeof setTimeout> | null; lastUpdateId: number } = g[globalKey];
+if (!g[globalKey]) g[globalKey] = { polling: false, pollTimer: null, lastUpdateId: 0, taskListenerAttached: false, pollActive: false };
+const botState: { polling: boolean; pollTimer: ReturnType<typeof setTimeout> | null; lastUpdateId: number; taskListenerAttached: boolean; pollActive: boolean } = g[globalKey];
 
 // Track which Telegram message maps to which task (for reply-based interaction)
 const taskMessageMap = new Map<number, string>(); // messageId → taskId
@@ -56,54 +56,82 @@ export function startTelegramBot() {
   // Set bot command menu
   setBotCommands(settings.telegramBotToken);
 
-  // Listen for task events → stream to Telegram
-  onTaskEvent((taskId, event, data) => {
-    const settings = loadSettings();
-    if (!settings.telegramBotToken || !settings.telegramChatId) return;
-    const chatId = Number(settings.telegramChatId);
+  // Listen for task events → stream to Telegram (only once)
+  if (!botState.taskListenerAttached) {
+    botState.taskListenerAttached = true;
+    onTaskEvent((taskId, event, data) => {
+      const settings = loadSettings();
+      if (!settings.telegramBotToken || !settings.telegramChatId) return;
+      const chatId = Number(settings.telegramChatId.split(',')[0].trim());
 
-    if (event === 'log') {
-      bufferLogEntry(taskId, chatId, data as TaskLogEntry);
-    } else if (event === 'status') {
-      handleStatusChange(taskId, chatId, data as string);
-    }
-  });
+      if (event === 'log') {
+        bufferLogEntry(taskId, chatId, data as TaskLogEntry);
+      } else if (event === 'status') {
+        handleStatusChange(taskId, chatId, data as string);
+      }
+    });
+  }
 
-  poll();
+  // Skip stale updates on startup — set offset to -1 to get only new messages
+  if (botState.lastUpdateId === 0) {
+    fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/getUpdates?offset=-1`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.result?.length > 0) {
+          botState.lastUpdateId = data.result[data.result.length - 1].update_id;
+        }
+        poll();
+      })
+      .catch(() => poll());
+  } else {
+    poll();
+  }
 }
 
 export function stopTelegramBot() {
   botState.polling = false;
+  botState.pollActive = false;
   if (botState.pollTimer) { clearTimeout(botState.pollTimer); botState.pollTimer = null; }
 }
 
 // ─── Polling ─────────────────────────────────────────────────
 
+function schedulePoll(delay: number = 1000) {
+  if (botState.pollTimer) clearTimeout(botState.pollTimer);
+  botState.pollTimer = setTimeout(poll, delay);
+}
+
 async function poll() {
-  if (!botState.polling) return;
+  // Prevent concurrent polls — main cause of duplicate messages after sleep/wake
+  if (!botState.polling || botState.pollActive) return;
+  botState.pollActive = true;
 
   try {
     const settings = loadSettings();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 35000);
+
     const url = `https://api.telegram.org/bot${settings.telegramBotToken}/getUpdates?offset=${botState.lastUpdateId + 1}&timeout=30`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+
     const data = await res.json();
 
     if (data.ok && data.result) {
       for (const update of data.result) {
+        if (update.update_id <= botState.lastUpdateId) continue;
         botState.lastUpdateId = update.update_id;
         if (update.message?.text) {
           await handleMessage(update.message);
         }
       }
     }
-  } catch (err: any) {
-    const isNetworkError = err?.cause?.code === 'ECONNRESET' || err?.message?.includes('fetch failed');
-    if (!isNetworkError) {
-      console.error('[telegram] Poll error:', err);
-    }
+  } catch {
+    // Network errors during sleep/wake — silent
   }
 
-  botState.pollTimer = setTimeout(poll, 1000);
+  botState.pollActive = false;
+  if (botState.polling) schedulePoll(1000);
 }
 
 // ─── Message Handler ─────────────────────────────────────────
