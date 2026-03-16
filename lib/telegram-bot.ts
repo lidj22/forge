@@ -16,13 +16,11 @@ import { startTunnel, stopTunnel, getTunnelStatus } from './cloudflared';
 import { getPassword } from './password';
 import type { Task, TaskLogEntry } from '@/src/types';
 
-let polling = false;
-let pollTimer: ReturnType<typeof setTimeout> | null = null;
-let lastUpdateId = 0;
-
-// Prevent duplicate polling across hot-reloads
-const globalKey = Symbol.for('mw-telegram-polling');
+// Prevent duplicate polling and state loss across hot-reloads
+const globalKey = Symbol.for('mw-telegram-state');
 const g = globalThis as any;
+if (!g[globalKey]) g[globalKey] = { polling: false, pollTimer: null, lastUpdateId: 0 };
+const botState: { polling: boolean; pollTimer: ReturnType<typeof setTimeout> | null; lastUpdateId: number } = g[globalKey];
 
 // Track which Telegram message maps to which task (for reply-based interaction)
 const taskMessageMap = new Map<number, string>(); // messageId → taskId
@@ -48,12 +46,11 @@ const logBuffers = new Map<string, { entries: string[]; timer: ReturnType<typeof
 // ─── Start/Stop ──────────────────────────────────────────────
 
 export function startTelegramBot() {
-  if (polling || g[globalKey]) return;
+  if (botState.polling) return;
   const settings = loadSettings();
   if (!settings.telegramBotToken || !settings.telegramChatId) return;
 
-  polling = true;
-  g[globalKey] = true;
+  botState.polling = true;
   console.log('[telegram] Bot started');
 
   // Set bot command menu
@@ -76,39 +73,37 @@ export function startTelegramBot() {
 }
 
 export function stopTelegramBot() {
-  polling = false;
-  g[globalKey] = false;
-  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  botState.polling = false;
+  if (botState.pollTimer) { clearTimeout(botState.pollTimer); botState.pollTimer = null; }
 }
 
 // ─── Polling ─────────────────────────────────────────────────
 
 async function poll() {
-  if (!polling) return;
+  if (!botState.polling) return;
 
   try {
     const settings = loadSettings();
-    const url = `https://api.telegram.org/bot${settings.telegramBotToken}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`;
+    const url = `https://api.telegram.org/bot${settings.telegramBotToken}/getUpdates?offset=${botState.lastUpdateId + 1}&timeout=30`;
     const res = await fetch(url);
     const data = await res.json();
 
     if (data.ok && data.result) {
       for (const update of data.result) {
-        lastUpdateId = update.update_id;
+        botState.lastUpdateId = update.update_id;
         if (update.message?.text) {
           await handleMessage(update.message);
         }
       }
     }
   } catch (err: any) {
-    // Network errors (ECONNRESET, fetch failed) are normal during sleep/wake — silent retry
     const isNetworkError = err?.cause?.code === 'ECONNRESET' || err?.message?.includes('fetch failed');
     if (!isNetworkError) {
       console.error('[telegram] Poll error:', err);
     }
   }
 
-  pollTimer = setTimeout(poll, 1000);
+  botState.pollTimer = setTimeout(poll, 1000);
 }
 
 // ─── Message Handler ─────────────────────────────────────────
