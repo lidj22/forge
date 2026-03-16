@@ -4,30 +4,39 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 
-const CONFIG_FILE = join(homedir(), '.forge', 'preview.json');
+const CONFIG_FILE = join(process.env.FORGE_DATA_DIR || join(homedir(), '.forge'), 'preview.json');
 
-// Persist tunnel state across hot-reloads
+interface PreviewEntry {
+  port: number;
+  url: string | null;
+  status: string;
+  label?: string;
+}
+
+// Persist state across hot-reloads
 const stateKey = Symbol.for('mw-preview-state');
 const g = globalThis as any;
-if (!g[stateKey]) g[stateKey] = { process: null, port: 0, url: null, status: 'stopped' };
-const state: { process: ChildProcess | null; port: number; url: string | null; status: string } = g[stateKey];
+if (!g[stateKey]) g[stateKey] = { entries: new Map<number, { process: ChildProcess | null; url: string | null; status: string; label: string }>() };
+const state: { entries: Map<number, { process: ChildProcess | null; url: string | null; status: string; label: string }> } = g[stateKey];
 
-function getConfig(): { port: number } {
+function getConfig(): PreviewEntry[] {
   try {
-    return JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
+    const data = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
+    return Array.isArray(data) ? data : data.port ? [data] : [];
   } catch {
-    return { port: 0 };
+    return [];
   }
 }
 
-function saveConfig(config: { port: number }) {
+function saveConfig(entries: PreviewEntry[]) {
   const dir = dirname(CONFIG_FILE);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  writeFileSync(CONFIG_FILE, JSON.stringify(entries, null, 2));
 }
 
 function getCloudflaredPath(): string | null {
-  const binPath = join(homedir(), '.forge', 'bin', 'cloudflared');
+  const dataDir = process.env.FORGE_DATA_DIR || join(homedir(), '.forge');
+  const binPath = join(dataDir, 'bin', 'cloudflared');
   if (existsSync(binPath)) return binPath;
   try {
     return execSync('which cloudflared', { encoding: 'utf-8' }).trim();
@@ -36,100 +45,105 @@ function getCloudflaredPath(): string | null {
   }
 }
 
-// GET — get current preview status
+// GET — list all previews
 export async function GET() {
-  return NextResponse.json({
-    port: state.port,
-    url: state.url,
-    status: state.status,
-  });
+  const entries: PreviewEntry[] = [];
+  for (const [port, s] of state.entries) {
+    entries.push({ port, url: s.url, status: s.status, label: s.label });
+  }
+  return NextResponse.json(entries);
 }
 
-// POST — start/stop preview tunnel
+// POST — start/stop/manage previews
 export async function POST(req: Request) {
-  const { port, action } = await req.json();
+  const body = await req.json();
 
-  if (action === 'stop' || port === 0) {
-    if (state.process) {
-      state.process.kill('SIGTERM');
-      state.process = null;
+  // Stop a preview
+  if (body.action === 'stop' && body.port) {
+    const entry = state.entries.get(body.port);
+    if (entry?.process) {
+      entry.process.kill('SIGTERM');
     }
-    state.port = 0;
-    state.url = null;
-    state.status = 'stopped';
-    saveConfig({ port: 0 });
-    return NextResponse.json({ port: 0, url: null, status: 'stopped' });
+    state.entries.delete(body.port);
+    syncConfig();
+    return NextResponse.json({ ok: true });
   }
 
-  const p = parseInt(port) || 0;
-  if (!p || p < 1 || p > 65535) {
-    return NextResponse.json({ error: 'Invalid port' }, { status: 400 });
-  }
+  // Start a new preview
+  if (body.action === 'start' && body.port) {
+    const port = parseInt(body.port);
+    if (!port || port < 1 || port > 65535) {
+      return NextResponse.json({ error: 'Invalid port' }, { status: 400 });
+    }
 
-  // Kill existing tunnel if any
-  if (state.process) {
-    state.process.kill('SIGTERM');
-    state.process = null;
-  }
+    // Already running?
+    const existing = state.entries.get(port);
+    if (existing && existing.status === 'running') {
+      return NextResponse.json({ port, url: existing.url, status: 'running', label: existing.label });
+    }
 
-  const binPath = getCloudflaredPath();
-  if (!binPath) {
-    return NextResponse.json({ error: 'cloudflared not installed. Start the main tunnel first to auto-download it.' }, { status: 500 });
-  }
+    const binPath = getCloudflaredPath();
+    if (!binPath) {
+      return NextResponse.json({ error: 'cloudflared not installed. Start the main tunnel first.' }, { status: 500 });
+    }
 
-  state.port = p;
-  state.status = 'starting';
-  state.url = null;
-  saveConfig({ port: p });
+    const label = body.label || `localhost:${port}`;
+    state.entries.set(port, { process: null, url: null, status: 'starting', label });
+    syncConfig();
 
-  // Start tunnel
-  return new Promise<NextResponse>((resolve) => {
-    let resolved = false;
+    // Start tunnel
+    return new Promise<NextResponse>((resolve) => {
+      let resolved = false;
+      const child = spawn(binPath, ['tunnel', '--url', `http://localhost:${port}`], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
-    const child = spawn(binPath, ['tunnel', '--url', `http://localhost:${p}`], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    state.process = child;
+      const entry = state.entries.get(port)!;
+      entry.process = child;
 
-    const handleOutput = (data: Buffer) => {
-      const text = data.toString();
-      const urlMatch = text.match(/(https:\/\/[a-z0-9-]+\.trycloudflare\.com)/);
-      if (urlMatch && !state.url) {
-        state.url = urlMatch[1];
-        state.status = 'running';
+      const handleOutput = (data: Buffer) => {
+        const urlMatch = data.toString().match(/(https:\/\/[a-z0-9-]+\.trycloudflare\.com)/);
+        if (urlMatch && !entry.url) {
+          entry.url = urlMatch[1];
+          entry.status = 'running';
+          syncConfig();
+          if (!resolved) {
+            resolved = true;
+            resolve(NextResponse.json({ port, url: entry.url, status: 'running', label }));
+          }
+        }
+      };
+
+      child.stdout?.on('data', handleOutput);
+      child.stderr?.on('data', handleOutput);
+
+      child.on('exit', () => {
+        entry.process = null;
+        entry.status = 'stopped';
+        entry.url = null;
+        syncConfig();
         if (!resolved) {
           resolved = true;
-          resolve(NextResponse.json({ port: p, url: state.url, status: 'running' }));
+          resolve(NextResponse.json({ port, url: null, status: 'stopped', error: 'Tunnel exited' }));
         }
-      }
-    };
+      });
 
-    child.stdout?.on('data', handleOutput);
-    child.stderr?.on('data', handleOutput);
-
-    child.on('exit', () => {
-      state.process = null;
-      state.status = 'stopped';
-      state.url = null;
-      if (!resolved) {
-        resolved = true;
-        resolve(NextResponse.json({ port: p, url: null, status: 'stopped', error: 'Tunnel exited' }));
-      }
+      setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve(NextResponse.json({ port, url: null, status: entry.status, error: 'Timeout' }));
+        }
+      }, 30000);
     });
+  }
 
-    child.on('error', (err) => {
-      state.status = 'error';
-      if (!resolved) {
-        resolved = true;
-        resolve(NextResponse.json({ error: err.message }, { status: 500 }));
-      }
-    });
+  return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
+}
 
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve(NextResponse.json({ port: p, url: null, status: state.status, error: 'Timeout waiting for tunnel URL' }));
-      }
-    }, 30000);
-  });
+function syncConfig() {
+  const entries: PreviewEntry[] = [];
+  for (const [port, s] of state.entries) {
+    entries.push({ port, url: s.url, status: s.status, label: s.label });
+  }
+  saveConfig(entries);
 }

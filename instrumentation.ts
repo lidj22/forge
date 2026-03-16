@@ -9,7 +9,8 @@ export async function register() {
     const { existsSync, readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const { homedir } = await import('node:os');
-    const envFile = join(homedir(), '.forge', '.env.local');
+    const dataDir = process.env.FORGE_DATA_DIR || join(homedir(), '.forge');
+    const envFile = join(dataDir, '.env.local');
     if (existsSync(envFile)) {
       for (const line of readFileSync(envFile, 'utf-8').split('\n')) {
         const trimmed = line.trim();

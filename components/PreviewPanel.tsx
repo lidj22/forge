@@ -1,134 +1,154 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+
+interface PreviewEntry {
+  port: number;
+  url: string | null;
+  status: string;
+  label?: string;
+}
 
 export default function PreviewPanel() {
-  const [port, setPort] = useState(0);
+  const [previews, setPreviews] = useState<PreviewEntry[]>([]);
   const [inputPort, setInputPort] = useState('');
-  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('stopped');
+  const [inputLabel, setInputLabel] = useState('');
+  const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
+  const [activePreview, setActivePreview] = useState<number | null>(null);
   const [isRemote, setIsRemote] = useState(false);
 
   useEffect(() => {
     setIsRemote(!['localhost', '127.0.0.1'].includes(window.location.hostname));
-    fetch('/api/preview')
-      .then(r => r.json())
-      .then(d => {
-        if (d.port) {
-          setPort(d.port);
-          setInputPort(String(d.port));
-          setTunnelUrl(d.url || null);
-          setStatus(d.status || 'stopped');
-        }
-      })
-      .catch(() => {});
   }, []);
+
+  const fetchPreviews = useCallback(async () => {
+    try {
+      const res = await fetch('/api/preview');
+      const data = await res.json();
+      if (Array.isArray(data)) setPreviews(data);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchPreviews();
+    const timer = setInterval(fetchPreviews, 5000);
+    return () => clearInterval(timer);
+  }, [fetchPreviews]);
 
   const handleStart = async () => {
     const p = parseInt(inputPort);
-    if (!p || p < 1 || p > 65535) {
-      setError('Invalid port');
-      return;
-    }
+    if (!p || p < 1 || p > 65535) { setError('Invalid port'); return; }
     setError('');
-    setStatus('starting');
+    setStarting(true);
     try {
       const res = await fetch('/api/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ port: p }),
+        body: JSON.stringify({ action: 'start', port: p, label: inputLabel || undefined }),
       });
       const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-        setStatus('error');
-      } else {
-        setPort(data.port);
-        setTunnelUrl(data.url || null);
-        setStatus(data.status || 'running');
+      if (data.error) setError(data.error);
+      else {
+        setInputPort('');
+        setInputLabel('');
+        setActivePreview(p);
       }
-    } catch {
-      setError('Failed to start tunnel');
-      setStatus('error');
-    }
+      fetchPreviews();
+    } catch { setError('Failed'); }
+    setStarting(false);
   };
 
-  const handleStop = async () => {
+  const handleStop = async (port: number) => {
     await fetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'stop' }),
+      body: JSON.stringify({ action: 'stop', port }),
     });
-    setPort(0);
-    setTunnelUrl(null);
-    setStatus('stopped');
+    if (activePreview === port) setActivePreview(null);
+    fetchPreviews();
   };
 
-  // What to show in iframe: tunnel URL for remote, localhost for local
-  const previewSrc = isRemote
-    ? tunnelUrl
-    : port ? `http://localhost:${port}` : null;
+  const active = previews.find(p => p.port === activePreview);
+  const previewSrc = active
+    ? (isRemote ? active.url : `http://localhost:${active.port}`)
+    : null;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Control bar */}
-      <div className="px-4 py-2 border-b border-[var(--border)] flex items-center gap-3 shrink-0 flex-wrap">
-        <span className="text-[11px] font-semibold text-[var(--text-primary)]">Preview</span>
+      {/* Top bar */}
+      <div className="px-4 py-2 border-b border-[var(--border)] shrink-0 space-y-2">
+        {/* Preview list */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-semibold text-[var(--text-primary)]">Demo Preview</span>
+          {previews.map(p => (
+            <div key={p.port} className="flex items-center gap-1">
+              <button
+                onClick={() => setActivePreview(p.port)}
+                className={`text-[10px] px-2 py-0.5 rounded ${activePreview === p.port ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+              >
+                <span className={`mr-1 ${p.status === 'running' ? 'text-green-400' : 'text-gray-500'}`}>●</span>
+                {p.label || `:${p.port}`}
+              </button>
+              {p.url && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(p.url!)}
+                  className="text-[8px] text-green-400 hover:text-green-300 truncate max-w-[150px]"
+                  title={`Copy: ${p.url}`}
+                >
+                  {p.url.replace('https://', '').slice(0, 20)}...
+                </button>
+              )}
+              <button
+                onClick={() => handleStop(p.port)}
+                className="text-[9px] text-red-400 hover:text-red-300"
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
 
-        <input
-          type="number"
-          value={inputPort}
-          onChange={e => setInputPort(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleStart()}
-          placeholder="Port"
-          className="w-24 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] font-mono"
-        />
-
-        {status === 'stopped' || status === 'error' ? (
+        {/* Add new */}
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            value={inputPort}
+            onChange={e => setInputPort(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleStart()}
+            placeholder="Port"
+            className="w-20 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] font-mono"
+          />
+          <input
+            value={inputLabel}
+            onChange={e => setInputLabel(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleStart()}
+            placeholder="Label (optional)"
+            className="w-32 text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
+          />
           <button
             onClick={handleStart}
-            disabled={!inputPort}
+            disabled={!inputPort || starting}
             className="text-[10px] px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
           >
-            Start Tunnel
+            {starting ? 'Starting...' : '+ Add'}
           </button>
-        ) : status === 'starting' ? (
-          <span className="text-[10px] text-yellow-400">Starting tunnel...</span>
-        ) : (
-          <>
-            <span className="text-[10px] text-green-400">● localhost:{port}</span>
-            {tunnelUrl && (
-              <button
-                onClick={() => { navigator.clipboard.writeText(tunnelUrl); }}
-                className="text-[10px] text-green-400 hover:text-green-300 truncate max-w-[250px]"
-                title={`Click to copy: ${tunnelUrl}`}
-              >
-                {tunnelUrl.replace('https://', '')}
-              </button>
-            )}
+          {active && (
             <a
               href={previewSrc || '#'}
               target="_blank"
               rel="noopener"
-              className="text-[10px] text-[var(--accent)] hover:underline"
+              className="text-[10px] text-[var(--accent)] hover:underline ml-auto"
             >
               Open ↗
             </a>
-            <button
-              onClick={handleStop}
-              className="text-[10px] text-red-400 hover:text-red-300"
-            >
-              Stop
-            </button>
-          </>
-        )}
-
-        {error && <span className="text-[10px] text-red-400">{error}</span>}
+          )}
+          {error && <span className="text-[10px] text-red-400">{error}</span>}
+        </div>
       </div>
 
       {/* Preview iframe */}
-      {previewSrc && status === 'running' ? (
+      {previewSrc && active?.status === 'running' ? (
         <iframe
           src={previewSrc}
           className="flex-1 w-full border-0 bg-white"
@@ -137,15 +157,8 @@ export default function PreviewPanel() {
       ) : (
         <div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">
           <div className="text-center space-y-3 max-w-md">
-            <p className="text-sm">Preview a local dev server</p>
-            <p className="text-xs">Enter the port of your running dev server and click Start Tunnel.</p>
-            <p className="text-xs">A dedicated Cloudflare Tunnel will be created for that port, giving it its own public URL — no path prefix issues.</p>
-            <div className="text-[10px] text-left bg-[var(--bg-tertiary)] rounded p-3 space-y-1">
-              <p>1. Start your dev server: <code className="text-[var(--accent)]">npm run dev</code></p>
-              <p>2. Enter its port (e.g. <code className="text-[var(--accent)]">4321</code>)</p>
-              <p>3. Click <strong>Start Tunnel</strong></p>
-              <p>4. Share the generated URL — it maps directly to your dev server</p>
-            </div>
+            <p className="text-sm">{previews.length > 0 ? 'Select a preview to display' : 'Preview local dev servers'}</p>
+            <p className="text-xs">Enter a port, add a label, and click Add. Each preview gets its own Cloudflare Tunnel URL.</p>
           </div>
         </div>
       )}

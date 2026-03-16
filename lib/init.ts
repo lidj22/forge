@@ -22,7 +22,7 @@ export function ensureInitialized() {
   // Display login password (auto-generated, rotates daily)
   const password = getPassword();
   console.log(`[init] Login password: ${password} (valid today)`);
-  console.log('[init] Forgot? Run: mw password');
+  console.log('[init] Forgot? Run: forge password');
 
   // Start background task runner
   ensureRunnerStarted();
@@ -61,11 +61,12 @@ function startTerminalProcess() {
 
   const termPort = Number(process.env.TERMINAL_PORT) || 3001;
 
-  // Check if port is already in use
+  // Check if port is already in use — kill stale process if needed
   const net = require('node:net');
   const tester = net.createServer();
   tester.once('error', () => {
-    console.log(`[terminal] Port ${termPort} already in use, skipping`);
+    // Port in use — terminal server already running, reuse it
+    console.log(`[terminal] Port ${termPort} already in use, reusing existing`);
   });
   tester.once('listening', () => {
     tester.close();

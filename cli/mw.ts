@@ -31,6 +31,19 @@ async function api(path: string, opts?: RequestInit) {
 }
 
 async function main() {
+  if (cmd === '--version' || cmd === '-v') {
+    const { readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    try {
+      const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'));
+      console.log(`@aion0/forge v${pkg.version}`);
+    } catch {
+      console.log('forge (version unknown)');
+    }
+    process.exit(0);
+  }
+
   switch (cmd) {
     case 'task':
     case 't': {

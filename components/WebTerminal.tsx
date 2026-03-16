@@ -1080,7 +1080,17 @@ const MemoTerminalPane = memo(function TerminalPane({
               }, 500);
             }
           } else if (msg.type === 'error') {
-            term.write(`\r\n\x1b[93m[${msg.message || 'error'}]\x1b[0m\r\n`);
+            // Session no longer exists — auto-create a new one
+            if (!connectedSession && msg.message?.includes('no longer exists') && createRetries < MAX_CREATE_RETRIES) {
+              createRetries++;
+              isNewlyCreated = true;
+              term.write(`\r\n\x1b[93m[${msg.message} — creating new session...]\x1b[0m\r\n`);
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+              }
+            } else {
+              term.write(`\r\n\x1b[93m[${msg.message || 'error'}]\x1b[0m\r\n`);
+            }
           } else if (msg.type === 'exit') {
             term.write('\r\n\x1b[90m[session ended]\x1b[0m\r\n');
           }

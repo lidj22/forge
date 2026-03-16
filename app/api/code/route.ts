@@ -197,7 +197,7 @@ export async function GET(req: Request) {
 
   // Check if root is a git repo
   try {
-    execSync('git rev-parse --git-dir', { cwd: resolvedDir, encoding: 'utf-8', timeout: 2000 });
+    execSync('git rev-parse --git-dir', { cwd: resolvedDir, encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
     scanGitStatus(resolvedDir, '.', '');
   } catch {
     // Root is not a git repo — scan subdirectories
@@ -206,7 +206,7 @@ export async function GET(req: Request) {
         if (!entry.isDirectory() || entry.name.startsWith('.') || IGNORE.has(entry.name)) continue;
         const subDir = join(resolvedDir, entry.name);
         try {
-          execSync('git rev-parse --git-dir', { cwd: subDir, encoding: 'utf-8', timeout: 2000 });
+          execSync('git rev-parse --git-dir', { cwd: subDir, encoding: 'utf-8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'] });
           scanGitStatus(subDir, entry.name, entry.name);
         } catch {}
       }

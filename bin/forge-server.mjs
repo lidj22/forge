@@ -12,6 +12,7 @@
  *   forge-server --port 4000              Custom web port (default: 3000)
  *   forge-server --terminal-port 4001     Custom terminal port (default: 3001)
  *   forge-server --dir ~/.forge-test      Custom data directory (default: ~/.forge)
+ *   forge-server --reset-terminal         Kill terminal server before start (loses tmux sessions)
  *
  * Examples:
  *   forge-server --background --port 4000 --terminal-port 4001 --dir ~/.forge-staging
@@ -35,11 +36,19 @@ function getArg(name) {
   return process.argv[idx + 1];
 }
 
+// ── Version ──
+if (process.argv.includes('--version') || process.argv.includes('-v')) {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
+  console.log(`@aion0/forge v${pkg.version}`);
+  process.exit(0);
+}
+
 const isDev = process.argv.includes('--dev');
 const isBackground = process.argv.includes('--background');
 const isStop = process.argv.includes('--stop');
 const isRestart = process.argv.includes('--restart');
 const isRebuild = process.argv.includes('--rebuild');
+const resetTerminal = process.argv.includes('--reset-terminal');
 
 const webPort = parseInt(getArg('--port')) || 3000;
 const terminalPort = parseInt(getArg('--terminal-port')) || 3001;
@@ -69,6 +78,20 @@ if (existsSync(envFile)) {
 process.env.PORT = String(webPort);
 process.env.TERMINAL_PORT = String(terminalPort);
 process.env.FORGE_DATA_DIR = DATA_DIR;
+
+// ── Reset terminal server (kill port + tmux sessions) ──
+if (resetTerminal) {
+  console.log(`[forge] Resetting terminal server (port ${terminalPort})...`);
+  try {
+    const pids = execSync(`lsof -ti:${terminalPort}`, { encoding: 'utf-8' }).trim();
+    for (const pid of pids.split('\n').filter(Boolean)) {
+      try { execSync(`kill ${pid.trim()}`); } catch {}
+    }
+    console.log(`[forge] Killed terminal server on port ${terminalPort}`);
+  } catch {
+    console.log(`[forge] No process on port ${terminalPort}`);
+  }
+}
 
 // ── Helper: stop running instance ──
 function stopServer() {
