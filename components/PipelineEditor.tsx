@@ -64,7 +64,7 @@ const nodeTypes = { pipeline: PipelineNode };
 
 function NodeEditModal({ node, projects, onSave, onClose }: {
   node: { id: string; project: string; prompt: string; outputs: { name: string; extract: string }[] };
-  projects: string[];
+  projects: { name: string; root: string }[];
   onSave: (data: { id: string; project: string; prompt: string; outputs: { name: string; extract: string }[] }) => void;
   onClose: () => void;
 }) {
@@ -96,8 +96,13 @@ function NodeEditModal({ node, projects, onSave, onClose }: {
               className="w-full text-xs bg-[#12122a] border border-[#3a3a5a] rounded px-2 py-1.5 text-white"
             >
               <option value="">Select project...</option>
-              <option value="{{vars.project}}">{'{{vars.project}}'}</option>
-              {projects.map(p => <option key={p} value={p}>{p}</option>)}
+              {[...new Set(projects.map(p => p.root))].map(root => (
+                <optgroup key={root} label={root.split('/').pop() || root}>
+                  {projects.filter(p => p.root === root).map((p, i) => (
+                    <option key={`${p.name}-${i}`} value={p.name}>{p.name}</option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
           </div>
           <div>
@@ -166,12 +171,12 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
   const [workflowName, setWorkflowName] = useState('my-workflow');
   const [workflowDesc, setWorkflowDesc] = useState('');
   const [varsProject, setVarsProject] = useState('');
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<{ name: string; root: string }[]>([]);
   const nextNodeId = useRef(1);
 
   useEffect(() => {
     fetch('/api/projects').then(r => r.json())
-      .then((p: { name: string }[]) => { if (Array.isArray(p)) setProjects(p.map(x => x.name)); })
+      .then((p: { name: string; root: string }[]) => { if (Array.isArray(p)) setProjects(p); })
       .catch(() => {});
   }, []);
 
