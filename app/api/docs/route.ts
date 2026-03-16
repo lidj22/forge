@@ -8,8 +8,11 @@ interface FileNode {
   name: string;
   path: string;      // relative to docRoot
   type: 'file' | 'dir';
+  fileType?: 'md' | 'image' | 'other';
   children?: FileNode[];
 }
+
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico', '.avif']);
 
 function scanDir(dir: string, base: string, depth: number = 0): FileNode[] {
   if (depth > 6) return [];
@@ -35,8 +38,15 @@ function scanDir(dir: string, base: string, depth: number = 0): FileNode[] {
         if (children.length > 0) {
           nodes.push({ name: entry.name, path: relPath, type: 'dir', children });
         }
-      } else if (extname(entry.name) === '.md') {
-        nodes.push({ name: entry.name, path: relPath, type: 'file' });
+      } else {
+        const ext = extname(entry.name).toLowerCase();
+        if (ext === '.md') {
+          nodes.push({ name: entry.name, path: relPath, type: 'file', fileType: 'md' });
+        } else if (IMAGE_EXTS.has(ext)) {
+          nodes.push({ name: entry.name, path: relPath, type: 'file', fileType: 'image' });
+        } else if (!entry.name.startsWith('.')) {
+          nodes.push({ name: entry.name, path: relPath, type: 'file', fileType: 'other' });
+        }
       }
     }
     return nodes;
@@ -59,6 +69,31 @@ export async function GET(req: Request) {
   }
 
   const rootNames = docRoots.map(r => r.split('/').pop() || r);
+
+  // Serve image
+  const imagePath = searchParams.get('image');
+  if (imagePath && rootIdx < docRoots.length) {
+    const root = docRoots[rootIdx];
+    const fullPath = join(root, imagePath);
+    if (!fullPath.startsWith(root)) {
+      return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+    }
+    try {
+      const { readFileSync: readBin } = require('node:fs');
+      const data = readBin(fullPath);
+      const ext = extname(fullPath).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+        '.bmp': 'image/bmp', '.ico': 'image/x-icon', '.avif': 'image/avif',
+      };
+      return new Response(data, {
+        headers: { 'Content-Type': mimeMap[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=3600' },
+      });
+    } catch {
+      return NextResponse.json({ error: 'Image not found' }, { status: 404 });
+    }
+  }
 
   // Read file content
   if (filePath && rootIdx < docRoots.length) {

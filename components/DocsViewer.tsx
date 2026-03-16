@@ -9,6 +9,7 @@ interface FileNode {
   name: string;
   path: string;
   type: 'file' | 'dir';
+  fileType?: 'md' | 'image' | 'other';
   children?: FileNode[];
 }
 
@@ -41,16 +42,20 @@ function TreeNode({ node, depth, selected, onSelect }: {
   }
 
   const isSelected = selected === node.path;
+  const canOpen = node.fileType === 'md' || node.fileType === 'image';
+
   return (
     <button
-      onClick={() => onSelect(node.path)}
+      onClick={() => canOpen && onSelect(node.path)}
       className={`w-full text-left flex items-center gap-1 px-1 py-0.5 rounded text-xs truncate ${
-        isSelected ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+        !canOpen ? 'text-[var(--text-secondary)]/40 cursor-default'
+        : isSelected ? 'bg-[var(--accent)]/20 text-[var(--accent)]'
+        : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
       }`}
       style={{ paddingLeft: depth * 12 + 16 }}
       title={node.path}
     >
-      {node.name.replace(/\.md$/, '')}
+      {node.fileType === 'image' ? '🖼 ' : ''}{node.name.replace(/\.md$/, '')}
     </button>
   );
 }
@@ -95,10 +100,19 @@ export default function DocsViewer() {
   const [fileWarning, setFileWarning] = useState<string | null>(null);
 
   // Fetch file content
+  const isImageFile = (path: string) => /\.(png|jpg|jpeg|gif|svg|webp|bmp|ico|avif)$/i.test(path);
+
   const openFile = useCallback(async (path: string) => {
     setSelectedFile(path);
-    setLoading(true);
     setFileWarning(null);
+
+    if (isImageFile(path)) {
+      setContent(null);
+      setLoading(false);
+      return; // images rendered directly via img tag
+    }
+
+    setLoading(true);
     const res = await fetch(`/api/docs?root=${activeRoot}&file=${encodeURIComponent(path)}`);
     const data = await res.json();
     if (data.tooLarge) {
@@ -245,6 +259,14 @@ export default function DocsViewer() {
                 <div className="text-3xl">⚠️</div>
                 <p className="text-sm">{fileWarning}</p>
               </div>
+            </div>
+          ) : selectedFile && isImageFile(selectedFile) ? (
+            <div className="flex-1 overflow-auto flex items-center justify-center p-6 bg-[var(--bg-tertiary)]">
+              <img
+                src={`/api/docs?root=${activeRoot}&image=${encodeURIComponent(selectedFile)}`}
+                alt={selectedFile}
+                className="max-w-full max-h-full object-contain rounded shadow-lg"
+              />
             </div>
           ) : selectedFile && content ? (
             <div className="flex-1 overflow-y-auto px-8 py-6">
