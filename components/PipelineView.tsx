@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+
+const PipelineEditor = lazy(() => import('./PipelineEditor'));
 
 interface WorkflowNode {
   id: string;
@@ -66,6 +68,7 @@ export default function PipelineView() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>('');
   const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
 
   const fetchData = useCallback(async () => {
     const [pRes, wRes] = await Promise.all([
@@ -148,10 +151,16 @@ export default function PipelineView() {
         <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between">
           <span className="text-[11px] font-semibold text-[var(--text-primary)]">Pipelines</span>
           <button
+            onClick={() => setShowEditor(true)}
+            className="text-[10px] px-2 py-0.5 rounded text-green-400 hover:bg-green-400/10"
+          >
+            Editor
+          </button>
+          <button
             onClick={() => setShowCreate(v => !v)}
             className={`text-[10px] px-2 py-0.5 rounded ${showCreate ? 'text-white bg-[var(--accent)]' : 'text-[var(--accent)] hover:bg-[var(--accent)]/10'}`}
           >
-            + New
+            + Run
           </button>
         </div>
 
@@ -402,6 +411,25 @@ nodes:
           </div>
         )}
       </main>
+
+      {/* Visual Editor */}
+      {showEditor && (
+        <Suspense fallback={null}>
+          <PipelineEditor
+            onSave={async (yaml) => {
+              // Save YAML to ~/.forge/flows/
+              await fetch('/api/pipelines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'save-workflow', yaml }),
+              });
+              setShowEditor(false);
+              fetchData();
+            }}
+            onClose={() => setShowEditor(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

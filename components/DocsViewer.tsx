@@ -97,6 +97,15 @@ export default function DocsViewer() {
 
   useEffect(() => { fetchTree(activeRoot); }, [activeRoot, fetchTree]);
 
+  // Re-fetch when tab becomes visible (settings may have changed)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!document.hidden) fetchTree(activeRoot);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [activeRoot, fetchTree]);
+
   const [fileWarning, setFileWarning] = useState<string | null>(null);
 
   // Fetch file content
@@ -167,7 +176,7 @@ export default function DocsViewer() {
         {sidebarOpen && (
           <aside className="w-56 border-r border-[var(--border)] flex flex-col shrink-0">
             {/* Root selector */}
-            {roots.length > 1 && (
+            {roots.length > 0 && (
               <div className="p-2 border-b border-[var(--border)]">
                 <select
                   value={activeRoot}
