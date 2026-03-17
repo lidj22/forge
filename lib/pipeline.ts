@@ -18,8 +18,11 @@ import type { Task } from '@/src/types';
 const PIPELINES_DIR = join(homedir(), '.forge', 'pipelines');
 const WORKFLOWS_DIR = join(homedir(), '.forge', 'flows');
 
-// Track pipeline task IDs so terminal notifications can skip them
-export const pipelineTaskIds = new Set<string>();
+// Track pipeline task IDs so terminal notifications can skip them (persists across hot-reloads)
+const pipelineTaskKey = Symbol.for('mw-pipeline-task-ids');
+const gPipeline = globalThis as any;
+if (!gPipeline[pipelineTaskKey]) gPipeline[pipelineTaskKey] = new Set<string>();
+export const pipelineTaskIds: Set<string> = gPipeline[pipelineTaskKey];
 
 // ─── Types ────────────────────────────────────────────────
 

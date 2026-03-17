@@ -62,6 +62,13 @@ export function startTelegramBot() {
     onTaskEvent((taskId, event, data) => {
       const settings = loadSettings();
       if (!settings.telegramBotToken || !settings.telegramChatId) return;
+
+      // Skip pipeline tasks — they have their own notification
+      try {
+        const { pipelineTaskIds } = require('./pipeline');
+        if (pipelineTaskIds.has(taskId)) return;
+      } catch {}
+
       const chatId = Number(settings.telegramChatId.split(',')[0].trim());
 
       if (event === 'log') {

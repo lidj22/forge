@@ -6,6 +6,9 @@ import { loadSettings } from './settings';
 import type { Task } from '@/src/types';
 
 export async function notifyTaskComplete(task: Task) {
+  // Skip pipeline tasks
+  try { const { pipelineTaskIds } = require('./pipeline'); if (pipelineTaskIds.has(task.id)) return; } catch {}
+
   const settings = loadSettings();
   if (!settings.notifyOnComplete) return;
 
@@ -25,6 +28,9 @@ export async function notifyTaskComplete(task: Task) {
 }
 
 export async function notifyTaskFailed(task: Task) {
+  // Skip pipeline tasks
+  try { const { pipelineTaskIds } = require('./pipeline'); if (pipelineTaskIds.has(task.id)) return; } catch {}
+
   const settings = loadSettings();
   if (!settings.notifyOnFailure) return;
 
