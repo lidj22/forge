@@ -1202,12 +1202,11 @@ async function handleDocs(chatId: number, input: string) {
   } catch {}
 
   const recent = entries.slice(-8).join('\n\n');
-  const header = `📖 Docs: ${docRoot.split('/').pop()}\n📋 Session: ${sessionId.slice(0, 12)}${summary ? ` • AI: ${tModel}` : ''}\n`;
-
   const tModel = loadSettings().telegramModel || 'sonnet';
   const summary = entries.length > 3
     ? await aiSummarize(entries.slice(-15).join('\n'), 'Summarize this Claude Code session in 2-3 sentences. What was the user working on? What is the current status? Answer in the same language as the content.')
     : '';
+  const header = `📖 Docs: ${docRoot.split('/').pop()}\n📋 Session: ${sessionId.slice(0, 12)}${summary ? ` • AI: ${tModel}` : ''}\n`;
   const summaryBlock = summary ? `\n📝 (${tModel}) ${summary}\n` : '';
 
   const fullText = header + summaryBlock + '\n--- Recent ---\n' + recent;

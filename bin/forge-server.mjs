@@ -180,7 +180,7 @@ if (isDev) {
   });
   child.on('exit', (code) => process.exit(code || 0));
 } else {
-  if (!existsSync(join(ROOT, '.next'))) {
+  if (!existsSync(join(ROOT, '.next', 'BUILD_ID'))) {
     console.log('[forge] Building...');
     execSync('npx next build', { cwd: ROOT, stdio: 'inherit', env: { ...process.env } });
   }
