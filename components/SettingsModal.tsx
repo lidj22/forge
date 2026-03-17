@@ -12,6 +12,9 @@ interface Settings {
   notifyOnFailure: boolean;
   tunnelAutoStart: boolean;
   telegramTunnelPassword: string;
+  taskModel: string;
+  pipelineModel: string;
+  telegramModel: string;
 }
 
 interface TunnelStatus {
@@ -33,6 +36,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     notifyOnFailure: true,
     tunnelAutoStart: false,
     telegramTunnelPassword: '',
+    taskModel: 'sonnet',
+    pipelineModel: 'sonnet',
+    telegramModel: 'sonnet',
   });
   const [newRoot, setNewRoot] = useState('');
   const [newDocRoot, setNewDocRoot] = useState('');
@@ -260,6 +266,57 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 Test
               </button>
             )}
+          </div>
+        </div>
+
+        {/* Model Settings */}
+        <div className="space-y-2">
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
+            Models
+          </label>
+          <p className="text-[10px] text-[var(--text-secondary)]">
+            Claude model for each feature. Uses your Claude Code subscription. Options: sonnet, opus, haiku, or default (subscription default).
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[9px] text-[var(--text-secondary)] block mb-0.5">Tasks</label>
+              <select
+                value={settings.taskModel || 'sonnet'}
+                onChange={e => setSettings({ ...settings, taskModel: e.target.value })}
+                className="w-full text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
+              >
+                <option value="default">Default</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] text-[var(--text-secondary)] block mb-0.5">Pipelines</label>
+              <select
+                value={settings.pipelineModel || 'sonnet'}
+                onChange={e => setSettings({ ...settings, pipelineModel: e.target.value })}
+                className="w-full text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
+              >
+                <option value="default">Default</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[9px] text-[var(--text-secondary)] block mb-0.5">Telegram</label>
+              <select
+                value={settings.telegramModel || 'sonnet'}
+                onChange={e => setSettings({ ...settings, telegramModel: e.target.value })}
+                className="w-full text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
+              >
+                <option value="default">Default</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </select>
+            </div>
           </div>
         </div>
 

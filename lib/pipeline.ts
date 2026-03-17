@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import YAML from 'yaml';
-import { createTask, getTask, onTaskEvent } from './task-manager';
+import { createTask, getTask, onTaskEvent, taskModelOverrides } from './task-manager';
 import { getProjectInfo } from './projects';
 import { loadSettings } from './settings';
 import type { Task } from '@/src/types';
@@ -349,13 +349,17 @@ function scheduleReadyNodes(pipeline: Pipeline, workflow: Workflow) {
       continue;
     }
 
-    // Create task
+    // Create task with pipeline model
     const task = createTask({
       projectName: projectInfo.name,
       projectPath: projectInfo.path,
       prompt,
     });
     pipelineTaskIds.add(task.id);
+    const pipelineModel = loadSettings().pipelineModel;
+    if (pipelineModel && pipelineModel !== 'default') {
+      taskModelOverrides.set(task.id, pipelineModel);
+    }
 
     nodeState.status = 'running';
     nodeState.taskId = task.id;

@@ -39,6 +39,9 @@ function db() {
   return getDb(getDbPath());
 }
 
+// Per-task model overrides (used by pipeline to set pipelineModel)
+export const taskModelOverrides = new Map<string, string>();
+
 // ─── CRUD ────────────────────────────────────────────────────
 
 export function createTask(opts: {
@@ -238,6 +241,12 @@ function executeTask(task: Task): Promise<void> {
     const claudePath = settings.claudePath || process.env.CLAUDE_PATH || 'claude';
 
     const args = ['-p', '--verbose', '--output-format', 'stream-json', '--dangerously-skip-permissions'];
+
+    // Use model override if set, otherwise fall back to taskModel setting
+    const model = taskModelOverrides.get(task.id) || settings.taskModel;
+    if (model && model !== 'default') {
+      args.push('--model', model);
+    }
 
     // Resume specific session to continue the conversation
     if (task.conversationId) {

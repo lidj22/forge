@@ -267,28 +267,22 @@ async function handleMessage(msg: any) {
         await sendProjectList(chatId);
         break;
       case '/watch':
-        await handleWatch(chatId, args[0], args[1]);
-        break;
-      case '/watchers':
       case '/w':
-        await sendWatcherList(chatId);
+        if (args.length > 0) {
+          await handleWatch(chatId, args[0], args[1]);
+        } else {
+          await sendWatcherList(chatId);
+        }
         break;
       case '/unwatch':
         await handleUnwatch(chatId, args[0]);
         break;
-      case '/peek':
-        if (args.length > 0) {
-          await handlePeek(chatId, args[0], args[1]);
-        } else {
-          await startPeekSelection(chatId);
-        }
-        break;
       case '/docs':
       case '/doc':
+      case '/peek':
         await handleDocs(chatId, args.join(' '));
         break;
       case '/note':
-      case '/docs_write':
         await handleDocsWrite(chatId, args.join(' '));
         break;
       case '/cancel':
@@ -336,23 +330,18 @@ async function handleMessage(msg: any) {
 async function sendHelp(chatId: number) {
   await send(chatId,
     `🤖 Forge\n\n` +
-    `📋 /tasks — numbered task list\n` +
-    `/tasks running — filter by status\n` +
-    `🔍 /sessions — browse session content\n` +
-    `/sessions <project> — sessions for project\n\n` +
-    `👁 /watch <project> [sessionId] — monitor session\n` +
-    `/watchers — list active watchers\n` +
-    `/unwatch <id> — stop watching\n\n` +
-    `📝 Submit task:\nproject-name: your instructions\n\n` +
-    `👀 /peek [project] [sessionId] — session summary\n` +
-    `📖 /docs — docs session summary\n` +
-    `/docs <filename> — view doc file\n` +
-    `📝 /note — quick note to docs claude\n\n` +
+    `📋 /task — create task (interactive)\n` +
+    `/tasks — task list\n\n` +
+    `📖 /docs — session summary / view file\n` +
+    `📝 /note — quick note to docs\n\n` +
+    `👁 /watch <project> — monitor session\n` +
+    `/watch — list watchers\n` +
+    `/unwatch <id> — stop\n\n` +
     `🔧 /cancel <id>  /retry <id>\n` +
+    `/sessions — browse sessions\n` +
     `/projects — list projects\n\n` +
-    `🌐 /tunnel — tunnel status\n` +
-    `/tunnel_start — start tunnel\n` +
-    `/tunnel_stop — stop tunnel\n` +
+    `🌐 /tunnel — status\n` +
+    `/tunnel_start / /tunnel_stop\n` +
     `/tunnel_password <pw> — get login password\n\n` +
     `Reply number to select`
   );
@@ -664,33 +653,7 @@ async function handlePeek(chatId: number, projectArg?: string, sessionArg?: stri
     contextLen += line.length;
   }
 
-  // AI summary
-  let summary = '';
-  try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (apiKey) {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 500,
-          messages: [{
-            role: 'user',
-            content: `Summarize this Claude Code session in 2-3 sentences. What was the user trying to do? What's the current status? Answer in the same language as the session content.\n\n${contextEntries.join('\n')}`,
-          }],
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        summary = data.content?.[0]?.text || '';
-      }
-    }
-  } catch {}
+  const summary = '';
 
   // Format output
   const header = `📋 ${project.name} / ${session.sessionId.slice(0, 8)}\n${entries.length} entries${session.gitBranch ? ` • ${session.gitBranch}` : ''}`;
@@ -1167,37 +1130,7 @@ async function handleDocs(chatId: number, input: string) {
   const recent = entries.slice(-8).join('\n\n');
   const header = `📖 Docs: ${docRoot.split('/').pop()}\n📋 Session: ${sessionId.slice(0, 12)}\n`;
 
-  // Try AI summary if available
-  let summary = '';
-  try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (apiKey && entries.length > 2) {
-      const contextText = entries.slice(-15).join('\n');
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 300,
-          messages: [{
-            role: 'user',
-            content: `Summarize this Claude Code session in 2-3 sentences. What was the user working on? What's the current status? Answer in the same language as the content.\n\n${contextText}`,
-          }],
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        summary = data.content?.[0]?.text || '';
-      }
-    }
-  } catch {}
-
-  const summaryBlock = summary ? `\n📝 ${summary}\n` : '';
-  const fullText = header + summaryBlock + '\n--- Recent ---\n' + recent;
+  const fullText = header + '\n--- Recent ---\n' + recent;
 
   const chunks = splitMessage(fullText, 4000);
   for (const chunk of chunks) {
@@ -1400,19 +1333,15 @@ async function setBotCommands(token: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         commands: [
+          { command: 'task', description: 'Create task' },
           { command: 'tasks', description: 'List tasks' },
-          { command: 'task', description: 'Create task (interactive or /task project prompt)' },
-          { command: 'sessions', description: 'Browse sessions' },
-          { command: 'projects', description: 'List projects' },
+          { command: 'docs', description: 'Session summary / view file' },
+          { command: 'note', description: 'Quick note to docs' },
+          { command: 'watch', description: 'Monitor session / list watchers' },
           { command: 'tunnel', description: 'Tunnel status' },
           { command: 'tunnel_start', description: 'Start tunnel' },
           { command: 'tunnel_stop', description: 'Stop tunnel' },
           { command: 'tunnel_password', description: 'Get login password' },
-          { command: 'peek', description: 'Session summary (AI + recent)' },
-          { command: 'docs', description: 'Docs session summary / view file' },
-          { command: 'note', description: 'Quick note to docs Claude' },
-          { command: 'watch', description: 'Monitor session' },
-          { command: 'watchers', description: 'List watchers' },
           { command: 'help', description: 'Show help' },
         ],
       }),

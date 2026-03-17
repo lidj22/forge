@@ -16,6 +16,9 @@ export interface Settings {
   notifyOnFailure: boolean;     // Notify when task fails
   tunnelAutoStart: boolean;     // Auto-start Cloudflare Tunnel on startup
   telegramTunnelPassword: string; // Password for getting login password via Telegram
+  taskModel: string;              // Model for tasks (default: sonnet)
+  pipelineModel: string;          // Model for pipelines (default: sonnet)
+  telegramModel: string;          // Model for Telegram AI features (default: sonnet)
 }
 
 const defaults: Settings = {
@@ -28,6 +31,9 @@ const defaults: Settings = {
   notifyOnFailure: true,
   tunnelAutoStart: false,
   telegramTunnelPassword: '',
+  taskModel: 'sonnet',
+  pipelineModel: 'sonnet',
+  telegramModel: 'sonnet',
 };
 
 export function loadSettings(): Settings {
