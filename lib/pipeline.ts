@@ -18,6 +18,9 @@ import type { Task } from '@/src/types';
 const PIPELINES_DIR = join(homedir(), '.forge', 'pipelines');
 const WORKFLOWS_DIR = join(homedir(), '.forge', 'flows');
 
+// Track pipeline task IDs so terminal notifications can skip them
+export const pipelineTaskIds = new Set<string>();
+
 // ─── Types ────────────────────────────────────────────────
 
 export interface WorkflowNode {
@@ -349,6 +352,7 @@ function scheduleReadyNodes(pipeline: Pipeline, workflow: Workflow) {
       projectPath: projectInfo.path,
       prompt,
     });
+    pipelineTaskIds.add(task.id);
 
     nodeState.status = 'running';
     nodeState.taskId = task.id;

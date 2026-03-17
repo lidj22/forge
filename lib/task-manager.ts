@@ -381,6 +381,12 @@ function executeTask(task: Task): Promise<void> {
  * Sends a visible bell character so the user knows to resume.
  */
 function notifyTerminalSession(task: Task, status: 'done' | 'failed', sessionId?: string) {
+  // Skip pipeline tasks — they have their own notification system
+  try {
+    const { pipelineTaskIds } = require('./pipeline');
+    if (pipelineTaskIds.has(task.id)) return;
+  } catch {}
+
   try {
     const out = execSync(
       `tmux list-sessions -F "#{session_name}" 2>/dev/null`,
