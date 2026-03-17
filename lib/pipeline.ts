@@ -446,7 +446,7 @@ function setupTaskListener(pipelineId: string) {
       }
 
       savePipeline(pipeline);
-      notifyStep(pipeline, nodeId, 'done');
+      // No per-step done notification — only notify on start and failure
     } else if (data === 'failed') {
       nodeState.status = 'failed';
       nodeState.error = task?.error || 'Task failed';
