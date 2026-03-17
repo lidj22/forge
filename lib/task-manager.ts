@@ -263,7 +263,7 @@ function executeTask(task: Task): Promise<void> {
 
     // Resolve the actual claude CLI script path (claude is a symlink to a .js file)
     const resolvedClaude = resolveClaudePath(claudePath);
-    console.log(`[task] ${task.projectName}: "${task.prompt.slice(0, 60)}..."`);
+    console.log(`[task] ${task.projectName} [${model || 'default'}]: "${task.prompt.slice(0, 60)}..."`);
 
     const child = spawn(resolvedClaude.cmd, [...resolvedClaude.prefix, ...args], {
       cwd: task.projectPath,
@@ -275,6 +275,7 @@ function executeTask(task: Task): Promise<void> {
     let resultText = '';
     let totalCost = 0;
     let sessionId = '';
+    let modelUsed = '';
 
     child.on('error', (err) => {
       console.error(`[task-runner] Spawn error:`, err.message);
@@ -305,6 +306,9 @@ function executeTask(task: Task): Promise<void> {
           }
 
           if (parsed.session_id) sessionId = parsed.session_id;
+          if (parsed.type === 'system' && parsed.subtype === 'init' && parsed.model) {
+            modelUsed = parsed.model;
+          }
           if (parsed.type === 'result') {
             resultText = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result);
             totalCost = parsed.total_cost_usd || 0;

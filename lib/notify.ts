@@ -16,11 +16,13 @@ export async function notifyTaskComplete(task: Task) {
   const duration = task.startedAt && task.completedAt
     ? formatDuration(new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime())
     : 'unknown';
+  const model = task.log?.find(e => e.subtype === 'init' && e.content.startsWith('Model:'))?.content.replace('Model: ', '') || 'unknown';
 
   await sendTelegram(
     `✅ *Task Done*\n\n` +
     `*Project:* ${esc(task.projectName)}\n` +
     `*Task:* ${esc(task.prompt.slice(0, 200))}\n` +
+    `*Model:* ${esc(model)}\n` +
     `*Duration:* ${duration}\n` +
     `*Cost:* ${cost}\n\n` +
     `${task.resultSummary ? `*Result:*\n${esc(task.resultSummary.slice(0, 500))}` : '_No summary_'}`

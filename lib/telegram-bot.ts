@@ -19,8 +19,8 @@ import type { Task, TaskLogEntry } from '@/src/types';
 // Prevent duplicate polling and state loss across hot-reloads
 const globalKey = Symbol.for('mw-telegram-state');
 const g = globalThis as any;
-if (!g[globalKey]) g[globalKey] = { polling: false, pollTimer: null, lastUpdateId: 0, taskListenerAttached: false, pollActive: false };
-const botState: { polling: boolean; pollTimer: ReturnType<typeof setTimeout> | null; lastUpdateId: number; taskListenerAttached: boolean; pollActive: boolean } = g[globalKey];
+if (!g[globalKey]) g[globalKey] = { polling: false, pollTimer: null, lastUpdateId: 0, taskListenerAttached: false, pollActive: false, processedMsgIds: new Set<number>(), pollGeneration: 0 };
+const botState: { polling: boolean; pollTimer: ReturnType<typeof setTimeout> | null; lastUpdateId: number; taskListenerAttached: boolean; pollActive: boolean; processedMsgIds: Set<number>; pollGeneration: number } = g[globalKey];
 
 // Track which Telegram message maps to which task (for reply-based interaction)
 const taskMessageMap = new Map<number, string>(); // messageId → taskId
@@ -46,9 +46,15 @@ const logBuffers = new Map<string, { entries: string[]; timer: ReturnType<typeof
 // ─── Start/Stop ──────────────────────────────────────────────
 
 export function startTelegramBot() {
-  if (botState.polling) return;
   const settings = loadSettings();
   if (!settings.telegramBotToken || !settings.telegramChatId) return;
+
+  // Kill any existing poll loop (handles hot-reload creating duplicates)
+  if (botState.polling) {
+    botState.pollGeneration++;
+    if (botState.pollTimer) { clearTimeout(botState.pollTimer); botState.pollTimer = null; }
+    botState.pollActive = false;
+  }
 
   botState.polling = true;
   console.log('[telegram] Bot started');
@@ -109,7 +115,9 @@ function schedulePoll(delay: number = 1000) {
 }
 
 async function poll() {
-  // Prevent concurrent polls — main cause of duplicate messages after sleep/wake
+  const myGeneration = botState.pollGeneration;
+
+  // Prevent concurrent polls
   if (!botState.polling || botState.pollActive) return;
   botState.pollActive = true;
 
@@ -124,11 +132,13 @@ async function poll() {
 
     const data = await res.json();
 
-    if (data.ok && data.result) {
+    if (data.ok && data.result && data.result.length > 0) {
+      console.log(`[telegram] Poll got ${data.result.length} updates, lastId=${botState.lastUpdateId}`);
       for (const update of data.result) {
         if (update.update_id <= botState.lastUpdateId) continue;
         botState.lastUpdateId = update.update_id;
         if (update.message?.text) {
+          console.log(`[telegram] Processing msg ${update.message.message_id}: ${update.message.text.slice(0, 30)}`);
           await handleMessage(update.message);
         }
       }
@@ -138,7 +148,8 @@ async function poll() {
   }
 
   botState.pollActive = false;
-  if (botState.polling) schedulePoll(1000);
+  // Only continue polling if this is still the current generation
+  if (botState.polling && myGeneration === botState.pollGeneration) schedulePoll(1000);
 }
 
 // ─── Message Handler ─────────────────────────────────────────
@@ -154,6 +165,16 @@ async function handleMessage(msg: any) {
   }
 
   // Message received (logged silently)
+  // Dedup: skip if we already processed this message
+  const msgId = msg.message_id;
+  if (botState.processedMsgIds.has(msgId)) return;
+  botState.processedMsgIds.add(msgId);
+  // Keep set size bounded
+  if (botState.processedMsgIds.size > 200) {
+    const oldest = [...botState.processedMsgIds].slice(0, 100);
+    oldest.forEach(id => botState.processedMsgIds.delete(id));
+  }
+
   const text: string = msg.text.trim();
   const replyTo = msg.reply_to_message?.message_id;
 
@@ -279,8 +300,16 @@ async function handleMessage(msg: any) {
         break;
       case '/docs':
       case '/doc':
-      case '/peek':
         await handleDocs(chatId, args.join(' '));
+        break;
+      case '/peek':
+      case '/sessions':
+      case '/s':
+        if (args.length > 0) {
+          await handlePeek(chatId, args[0], args[1]);
+        } else {
+          await startPeekSelection(chatId);
+        }
         break;
       case '/note':
         await handleDocsWrite(chatId, args.join(' '));
@@ -332,7 +361,8 @@ async function sendHelp(chatId: number) {
     `🤖 Forge\n\n` +
     `📋 /task — create task (interactive)\n` +
     `/tasks — task list\n\n` +
-    `📖 /docs — session summary / view file\n` +
+    `👀 /sessions — session summary (select project)\n` +
+    `📖 /docs — docs summary / view file\n` +
     `📝 /note — quick note to docs\n\n` +
     `👁 /watch <project> — monitor session\n` +
     `/watch — list watchers\n` +
@@ -653,13 +683,16 @@ async function handlePeek(chatId: number, projectArg?: string, sessionArg?: stri
     contextLen += line.length;
   }
 
-  const summary = '';
+  const telegramModel = loadSettings().telegramModel || 'sonnet';
+  const summary = contextEntries.length > 3
+    ? await aiSummarize(contextEntries.join('\n'), 'Summarize this Claude Code session in 2-3 sentences. What was the user working on? What is the current status? Answer in the same language as the content.')
+    : '';
 
   // Format output
-  const header = `📋 ${project.name} / ${session.sessionId.slice(0, 8)}\n${entries.length} entries${session.gitBranch ? ` • ${session.gitBranch}` : ''}`;
+  const header = `📋 ${project.name} / ${session.sessionId.slice(0, 8)}\n${entries.length} entries${session.gitBranch ? ` • ${session.gitBranch}` : ''}${summary ? ` • AI: ${telegramModel}` : ''}`;
 
   const summaryBlock = summary
-    ? `\n\n📝 Summary:\n${summary}`
+    ? `\n\n📝 Summary (${telegramModel}):\n${summary}`
     : '';
 
   const rawBlock = `\n\n--- Recent ---\n${recentRaw.join('\n\n')}`;
@@ -1007,6 +1040,47 @@ async function handleTunnelPassword(chatId: number, password?: string, userMsgId
   }
 }
 
+// ─── AI Summarize (using Claude Code subscription) ───────────
+
+async function aiSummarize(content: string, instruction: string): Promise<string> {
+  try {
+    const settings = loadSettings();
+    const claudePath = settings.claudePath || process.env.CLAUDE_PATH || 'claude';
+    const model = settings.telegramModel || 'sonnet';
+    const { execSync } = require('child_process');
+    const { realpathSync } = require('fs');
+
+    // Resolve claude path
+    let cmd = claudePath;
+    try {
+      const which = execSync(`which ${claudePath}`, { encoding: 'utf-8' }).trim();
+      cmd = realpathSync(which);
+    } catch {}
+
+    const args = ['-p', '--model', model, '--max-turns', '1'];
+    const prompt = `${instruction}\n\nContent:\n${content.slice(0, 8000)}`;
+
+    let execCmd: string;
+    if (cmd.endsWith('.js') || cmd.endsWith('.mjs')) {
+      execCmd = `${process.execPath} ${cmd} ${args.join(' ')}`;
+    } else {
+      execCmd = `${cmd} ${args.join(' ')}`;
+    }
+
+    const result = execSync(execCmd, {
+      input: prompt,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, CLAUDECODE: undefined },
+    }).trim();
+
+    return result.slice(0, 1000);
+  } catch {
+    return '';
+  }
+}
+
 // ─── Docs ────────────────────────────────────────────────────
 
 async function handleDocs(chatId: number, input: string) {
@@ -1128,9 +1202,15 @@ async function handleDocs(chatId: number, input: string) {
   } catch {}
 
   const recent = entries.slice(-8).join('\n\n');
-  const header = `📖 Docs: ${docRoot.split('/').pop()}\n📋 Session: ${sessionId.slice(0, 12)}\n`;
+  const header = `📖 Docs: ${docRoot.split('/').pop()}\n📋 Session: ${sessionId.slice(0, 12)}${summary ? ` • AI: ${tModel}` : ''}\n`;
 
-  const fullText = header + '\n--- Recent ---\n' + recent;
+  const tModel = loadSettings().telegramModel || 'sonnet';
+  const summary = entries.length > 3
+    ? await aiSummarize(entries.slice(-15).join('\n'), 'Summarize this Claude Code session in 2-3 sentences. What was the user working on? What is the current status? Answer in the same language as the content.')
+    : '';
+  const summaryBlock = summary ? `\n📝 (${tModel}) ${summary}\n` : '';
+
+  const fullText = header + summaryBlock + '\n--- Recent ---\n' + recent;
 
   const chunks = splitMessage(fullText, 4000);
   for (const chunk of chunks) {
@@ -1335,7 +1415,8 @@ async function setBotCommands(token: string) {
         commands: [
           { command: 'task', description: 'Create task' },
           { command: 'tasks', description: 'List tasks' },
-          { command: 'docs', description: 'Session summary / view file' },
+          { command: 'sessions', description: 'Session summary (AI)' },
+          { command: 'docs', description: 'Docs summary / view file' },
           { command: 'note', description: 'Quick note to docs' },
           { command: 'watch', description: 'Monitor session / list watchers' },
           { command: 'tunnel', description: 'Tunnel status' },

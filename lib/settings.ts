@@ -31,8 +31,8 @@ const defaults: Settings = {
   notifyOnFailure: true,
   tunnelAutoStart: false,
   telegramTunnelPassword: '',
-  taskModel: 'sonnet',
-  pipelineModel: 'sonnet',
+  taskModel: 'default',
+  pipelineModel: 'default',
   telegramModel: 'sonnet',
 };
 
