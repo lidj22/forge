@@ -8,6 +8,7 @@ import SessionView from './SessionView';
 import NewTaskModal from './NewTaskModal';
 import SettingsModal from './SettingsModal';
 import TunnelToggle from './TunnelToggle';
+import MonitorPanel from './MonitorPanel';
 import type { Task } from '@/src/types';
 import type { WebTerminalHandle } from './WebTerminal';
 
@@ -44,6 +45,7 @@ export default function Dashboard({ user }: { user: any }) {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMonitor, setShowMonitor] = useState(false);
   const [usage, setUsage] = useState<UsageSummary[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -201,6 +203,16 @@ export default function Dashboard({ user }: { user: any }) {
               Pipelines
             </button>
             <button
+              onClick={() => setViewMode('sessions')}
+              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
+                viewMode === 'sessions'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Sessions
+            </button>
+            <button
               onClick={() => setViewMode('preview')}
               className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
                 viewMode === 'preview'
@@ -238,8 +250,8 @@ export default function Dashboard({ user }: { user: any }) {
             </span>
           )}
           <button
-            onClick={() => setViewMode('sessions')}
-            className={`text-xs ${viewMode === 'sessions' ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+            onClick={() => setShowMonitor(true)}
+            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           >
             Monitor
           </button>
@@ -413,6 +425,8 @@ export default function Dashboard({ user }: { user: any }) {
           }}
         />
       )}
+
+      {showMonitor && <MonitorPanel onClose={() => setShowMonitor(false)} />}
 
       {showSettings && (
         <SettingsModal onClose={() => { setShowSettings(false); fetchData(); }} />
