@@ -190,7 +190,7 @@ function startBackground() {
   const child = spawn('npx', ['next', 'start', '-p', String(webPort)], {
     cwd: ROOT,
     stdio: ['ignore', logFd, logFd],
-    env: { ...process.env },
+    env: { ...process.env, FORGE_EXTERNAL_SERVICES: '1' },
     detached: true,
   });
 
