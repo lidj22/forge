@@ -2,18 +2,19 @@ import { NextResponse } from 'next/server';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Cache npm version check for 1 hour
-let cachedLatest: { version: string; checkedAt: number } | null = null;
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
-
-function getCurrentVersion(): string {
+// Read version once at module load (= server start), not on every request
+const CURRENT_VERSION = (() => {
   try {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf-8'));
-    return pkg.version;
+    return pkg.version as string;
   } catch {
     return '0.0.0';
   }
-}
+})();
+
+// Cache npm version check for 1 hour
+let cachedLatest: { version: string; checkedAt: number } | null = null;
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 async function getLatestVersion(): Promise<string> {
   if (cachedLatest && Date.now() - cachedLatest.checkedAt < CACHE_TTL) {
@@ -47,7 +48,7 @@ function compareVersions(a: string, b: string): number {
 }
 
 export async function GET() {
-  const current = getCurrentVersion();
+  const current = CURRENT_VERSION;
   const latest = await getLatestVersion();
   const hasUpdate = latest && compareVersions(current, latest) < 0;
 
