@@ -51,7 +51,7 @@ Forge is a self-hosted web platform that turns [Claude Code](https://docs.anthro
 
 ```bash
 npm install -g @aion0/forge
-forge-server
+forge server start
 ```
 
 Open `http://localhost:3000` — a login password is printed in the console.
@@ -74,7 +74,7 @@ pnpm install
 
 ## Quick Start
 
-1. **Start Forge** — `forge-server` or `./start.sh`
+1. **Start Forge** — `forge server start` or `./start.sh`
 2. **Open browser** — `http://localhost:3000`
 3. **Log in** — password is in the console output, rotates daily. Run `forge password` if you forget.
 4. **Configure** — Settings → add project directories and (optionally) Telegram bot token
@@ -314,7 +314,7 @@ echo "AUTH_SECRET=$(openssl rand -hex 32)" >> ~/.forge/.env.local
 <details>
 <summary><strong>Orphan processes after Ctrl+C</strong></summary>
 
-Use `./start.sh` or `forge-server` which clean up old processes on start. Or manually:
+Use `./start.sh` or `forge server start` which clean up old processes on start. Or manually:
 
 ```bash
 ./check-forge-status.sh  # see what's running
