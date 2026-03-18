@@ -202,6 +202,7 @@ interface Settings {
   pipelineModel: string;
   telegramModel: string;
   skipPermissions: boolean;
+  notificationRetentionDays: number;
   _secretStatus?: Record<string, boolean>;
 }
 
@@ -228,6 +229,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     pipelineModel: 'sonnet',
     telegramModel: 'sonnet',
     skipPermissions: false,
+    notificationRetentionDays: 30,
   });
   const [secretStatus, setSecretStatus] = useState<Record<string, boolean>>({});
   const [newRoot, setNewRoot] = useState('');
@@ -576,6 +578,27 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <p className="text-[9px] text-[var(--text-secondary)]">
             When enabled, all Claude Code tasks and pipelines run without permission prompts. Useful for background automation but less safe.
           </p>
+        </div>
+
+        {/* Notification Retention */}
+        <div className="space-y-2">
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
+            Notifications
+          </label>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-[var(--text-secondary)]">Auto-delete after</span>
+            <select
+              value={settings.notificationRetentionDays || 30}
+              onChange={e => setSettings({ ...settings, notificationRetentionDays: Number(e.target.value) })}
+              className="text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
+            >
+              <option value={7}>7 days</option>
+              <option value={14}>14 days</option>
+              <option value={30}>30 days</option>
+              <option value={60}>60 days</option>
+              <option value={90}>90 days</option>
+            </select>
+          </div>
         </div>
 
         {/* Remote Access (Cloudflare Tunnel) */}

@@ -21,6 +21,7 @@ export interface Settings {
   pipelineModel: string;          // Model for pipelines (default: sonnet)
   telegramModel: string;          // Model for Telegram AI features (default: sonnet)
   skipPermissions: boolean;       // Add --dangerously-skip-permissions to all claude invocations
+  notificationRetentionDays: number; // Auto-cleanup notifications older than N days
 }
 
 const defaults: Settings = {
@@ -37,6 +38,7 @@ const defaults: Settings = {
   pipelineModel: 'default',
   telegramModel: 'sonnet',
   skipPermissions: false,
+  notificationRetentionDays: 30,
 };
 
 /** Load settings with secrets decrypted (for internal use) */

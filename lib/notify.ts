@@ -3,20 +3,33 @@
  */
 
 import { loadSettings } from './settings';
+import { addNotification } from './notifications';
 import type { Task } from '@/src/types';
 
 export async function notifyTaskComplete(task: Task) {
   // Skip pipeline tasks
-  try { const { pipelineTaskIds } = require('./pipeline'); if (pipelineTaskIds.has(task.id)) return; } catch {}
-
-  const settings = loadSettings();
-  if (!settings.notifyOnComplete) return;
+  let isPipeline = false;
+  try { const { pipelineTaskIds } = require('./pipeline'); isPipeline = pipelineTaskIds.has(task.id); } catch {}
+  if (isPipeline) return;
 
   const cost = task.costUSD != null ? `$${task.costUSD.toFixed(4)}` : 'unknown';
   const duration = task.startedAt && task.completedAt
     ? formatDuration(new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime())
     : 'unknown';
   const model = task.log?.find(e => e.subtype === 'init' && e.content.startsWith('Model:'))?.content.replace('Model: ', '') || 'unknown';
+
+  // In-app notification (always)
+  try {
+    addNotification(
+      'task_done',
+      `Task done: ${task.projectName}`,
+      `${task.prompt.slice(0, 100)} — ${duration}, ${cost}`,
+      task.id
+    );
+  } catch {}
+
+  const settings = loadSettings();
+  if (!settings.notifyOnComplete) return;
 
   await sendTelegram(
     `✅ *Task Done*\n\n` +
@@ -31,7 +44,19 @@ export async function notifyTaskComplete(task: Task) {
 
 export async function notifyTaskFailed(task: Task) {
   // Skip pipeline tasks
-  try { const { pipelineTaskIds } = require('./pipeline'); if (pipelineTaskIds.has(task.id)) return; } catch {}
+  let isPipeline = false;
+  try { const { pipelineTaskIds } = require('./pipeline'); isPipeline = pipelineTaskIds.has(task.id); } catch {}
+  if (isPipeline) return;
+
+  // In-app notification (always)
+  try {
+    addNotification(
+      'task_failed',
+      `Task failed: ${task.projectName}`,
+      task.error || task.prompt.slice(0, 100),
+      task.id
+    );
+  } catch {}
 
   const settings = loadSettings();
   if (!settings.notifyOnFailure) return;

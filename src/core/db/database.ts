@@ -107,6 +107,19 @@ function initSchema(db: Database.Database) {
 
     CREATE INDEX IF NOT EXISTS idx_cached_sessions_project ON cached_sessions(project_name, modified);
 
+    -- In-app notifications
+    CREATE TABLE IF NOT EXISTS notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT,
+      read INTEGER NOT NULL DEFAULT 0,
+      task_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read, created_at);
+
     -- Session watchers — monitor sessions and notify via Telegram
     CREATE TABLE IF NOT EXISTS session_watchers (
       id TEXT PRIMARY KEY,

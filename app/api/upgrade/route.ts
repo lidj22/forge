@@ -1,20 +1,23 @@
 import { NextResponse } from 'next/server';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 
 export async function POST() {
   try {
-    // Run upgrade with cache bypass
-    const output = execSync(
-      'cd /tmp && npm install -g @aion0/forge@latest --prefer-online 2>&1',
-      { encoding: 'utf-8', timeout: 120000 }
-    );
-
-    // Verify the installed version
-    const pkgRoot = execSync('npm root -g', { encoding: 'utf-8', timeout: 5000 }).trim();
+    // Get global npm root first (before any cwd changes)
+    const pkgRoot = execSync('npm root -g', { encoding: 'utf-8', timeout: 5000, cwd: homedir() }).trim();
     const forgeRoot = join(pkgRoot, '@aion0', 'forge');
 
-    // Install devDependencies for build (npm -g doesn't install them)
+    // Upgrade from npm — use cwd instead of cd
+    execSync('npm install -g @aion0/forge@latest --prefer-online 2>&1', {
+      encoding: 'utf-8',
+      timeout: 120000,
+      cwd: homedir(),
+    });
+
+    // Install devDependencies for build
     try {
       execSync('npm install --include=dev 2>&1', { cwd: forgeRoot, timeout: 120000 });
     } catch {}
@@ -22,7 +25,7 @@ export async function POST() {
     // Read installed version
     let installedVersion = '';
     try {
-      const pkg = JSON.parse(require('fs').readFileSync(join(forgeRoot, 'package.json'), 'utf-8'));
+      const pkg = JSON.parse(readFileSync(join(forgeRoot, 'package.json'), 'utf-8'));
       installedVersion = pkg.version;
     } catch {}
 
@@ -34,7 +37,7 @@ export async function POST() {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({
       ok: false,
-      error: `Upgrade failed: ${msg.slice(0, 200)}`,
+      error: `Upgrade failed: ${msg.slice(0, 300)}`,
     });
   }
 }

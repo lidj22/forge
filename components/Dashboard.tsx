@@ -53,6 +53,9 @@ export default function Dashboard({ user }: { user: any }) {
   const [versionInfo, setVersionInfo] = useState<{ current: string; latest: string; hasUpdate: boolean } | null>(null);
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeResult, setUpgradeResult] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
   const terminalRef = useRef<WebTerminalHandle>(null);
 
   // Version check (on mount + every 10 min)
@@ -62,6 +65,20 @@ export default function Dashboard({ user }: { user: any }) {
     const id = setInterval(check, 10 * 60 * 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Notification polling
+  const fetchNotifications = useCallback(() => {
+    fetch('/api/notifications').then(r => r.json()).then(data => {
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unread || 0);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const id = setInterval(fetchNotifications, 10000);
+    return () => clearInterval(id);
+  }, [fetchNotifications]);
 
   // Heartbeat for online user tracking
   useEffect(() => {
@@ -249,6 +266,113 @@ export default function Dashboard({ user }: { user: any }) {
               )}
             </span>
           )}
+          <div className="relative">
+            <button
+              onClick={() => { setShowNotifications(v => !v); }}
+              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] relative"
+            >
+              Alerts
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] rounded-full bg-[var(--red)] text-[8px] text-white flex items-center justify-center px-1 font-bold">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                </span>
+              )}
+            </button>
+            {showNotifications && (
+              <div className="absolute right-0 top-8 w-[360px] max-h-[480px] bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl z-50 flex flex-col">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+                  <span className="text-xs font-bold text-[var(--text-primary)]">Notifications</span>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={async () => {
+                          await fetch('/api/notifications', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'markAllRead' }),
+                          });
+                          fetchNotifications();
+                        }}
+                        className="text-[9px] text-[var(--accent)] hover:underline"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowNotifications(false)}
+                      className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-[var(--text-secondary)]">No notifications</div>
+                  ) : (
+                    notifications.map((n: any) => (
+                      <div
+                        key={n.id}
+                        className={`group px-3 py-2 border-b border-[var(--border)]/50 hover:bg-[var(--bg-tertiary)] ${!n.read ? 'bg-[var(--accent)]/5' : ''}`}
+                      >
+                        <div className="flex items-start gap-2">
+                          <span className="text-[10px] mt-0.5 shrink-0">
+                            {n.type === 'task_done' ? '✅' : n.type === 'task_failed' ? '❌' : n.type === 'pipeline_done' ? '🔗' : n.type === 'pipeline_failed' ? '💔' : n.type === 'tunnel' ? '🌐' : 'ℹ️'}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1">
+                              <span className={`text-[11px] truncate ${!n.read ? 'font-semibold text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>
+                                {n.title}
+                              </span>
+                              {!n.read && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0" />}
+                            </div>
+                            {n.body && (
+                              <p className="text-[9px] text-[var(--text-secondary)] truncate mt-0.5">{n.body}</p>
+                            )}
+                            <span className="text-[8px] text-[var(--text-secondary)]">
+                              {new Date(n.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="hidden group-hover:flex items-center gap-1 shrink-0">
+                            {!n.read && (
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await fetch('/api/notifications', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'markRead', id: n.id }),
+                                  });
+                                  fetchNotifications();
+                                }}
+                                className="text-[8px] px-1 py-0.5 text-[var(--accent)] hover:underline"
+                              >
+                                read
+                              </button>
+                            )}
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await fetch('/api/notifications', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'delete', id: n.id }),
+                                });
+                                fetchNotifications();
+                              }}
+                              className="text-[8px] px-1 py-0.5 text-red-400 hover:underline"
+                            >
+                              del
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowMonitor(true)}
             className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"

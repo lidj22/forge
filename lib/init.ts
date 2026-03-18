@@ -67,6 +67,12 @@ export function ensureInitialized() {
   // Migrate plaintext secrets on startup
   migrateSecrets();
 
+  // Cleanup old notifications
+  try {
+    const { cleanupNotifications } = require('./notifications');
+    cleanupNotifications();
+  } catch {}
+
   // Auto-detect claude path if not configured
   autoDetectClaude();
 
