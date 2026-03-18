@@ -65,7 +65,7 @@ export async function GET(req: Request) {
       addNotification(
         'system',
         `Update available: v${latest}`,
-        `Current: v${current}. Run: forge upgrade`,
+        `Current: v${current}\nforge upgrade\nnpm install -g @aion0/forge@latest`,
       );
     } catch {}
   }

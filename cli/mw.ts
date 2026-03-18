@@ -553,7 +553,8 @@ Shortcuts: t=task, ls=tasks, w=watch, s=status, l=log, f=flows, p=projects, pw=p
   }
 }
 
-main().then(() => checkForUpdate()).catch(err => {
+const skipUpdateCheck = ['upgrade', 'uninstall', '--version', '-v'];
+main().then(() => { if (!skipUpdateCheck.includes(cmd)) return checkForUpdate(); }).catch(err => {
   console.error(err.message);
   process.exit(1);
 });

@@ -128,7 +128,7 @@ export default function Dashboard({ user }: { user: any }) {
               {versionInfo.hasUpdate && (
                 <span
                   className="text-[9px] px-1.5 py-0.5 bg-[var(--accent)]/15 text-[var(--accent)] rounded cursor-default"
-                  title="Run: forge upgrade"
+                  title={`forge upgrade\nnpm install -g @aion0/forge@latest`}
                 >
                   v{versionInfo.latest} available
                 </span>
