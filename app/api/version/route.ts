@@ -14,7 +14,7 @@ const CURRENT_VERSION = (() => {
 
 // Cache npm version check for 1 hour
 let cachedLatest: { version: string; checkedAt: number } | null = null;
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 async function getLatestVersion(): Promise<string> {
   if (cachedLatest && Date.now() - cachedLatest.checkedAt < CACHE_TTL) {

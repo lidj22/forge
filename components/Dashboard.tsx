@@ -55,9 +55,12 @@ export default function Dashboard({ user }: { user: any }) {
   const [upgradeResult, setUpgradeResult] = useState<string | null>(null);
   const terminalRef = useRef<WebTerminalHandle>(null);
 
-  // Version check (once on mount)
+  // Version check (on mount + every 10 min)
   useEffect(() => {
-    fetch('/api/version').then(r => r.json()).then(setVersionInfo).catch(() => {});
+    const check = () => fetch('/api/version').then(r => r.json()).then(setVersionInfo).catch(() => {});
+    check();
+    const id = setInterval(check, 10 * 60 * 1000);
+    return () => clearInterval(id);
   }, []);
 
   // Heartbeat for online user tracking
