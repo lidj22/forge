@@ -434,9 +434,9 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
   const detachedCount = tmuxSessions.filter(s => !usedSessions.includes(s.name)).length;
 
   return (
-    <div className="h-full w-full flex-1 flex flex-col bg-[#1a1a2e] overflow-hidden">
+    <div className="h-full w-full flex-1 flex flex-col bg-[var(--term-bg)] overflow-hidden">
       {/* Tab bar + toolbar */}
-      <div className="flex items-center bg-[#12122a] border-b border-[#2a2a4a] shrink-0">
+      <div className="flex items-center bg-[var(--term-bar)] border-b border-[var(--term-border)] shrink-0">
         {/* Tabs */}
         <div className="flex items-center overflow-x-auto">
           {tabs.map(tab => (
@@ -463,10 +463,10 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                 }
               }}
               onDragEnd={() => { dragTabRef.current = null; }}
-              className={`flex items-center gap-1 px-3 py-1 text-[11px] cursor-pointer border-r border-[#2a2a4a] select-none ${
+              className={`flex items-center gap-1 px-3 py-1 text-[11px] cursor-pointer border-r border-[var(--term-border)] select-none ${
                 tab.id === activeTabId
-                  ? 'bg-[#1a1a2e] text-white'
-                  : 'text-gray-500 hover:text-gray-300 hover:bg-[#1a1a2e]/50'
+                  ? 'bg-[var(--term-bg)] text-white'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-[var(--term-bg)]/50'
               }`}
               onClick={() => setActiveTabId(tab.id)}
             >
@@ -481,7 +481,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                     if (e.key === 'Escape') setEditingTabId(null);
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  className="bg-transparent border border-[#4a4a6a] rounded px-1 text-[11px] text-white outline-none w-20"
+                  className="bg-transparent border border-[var(--term-border)] rounded px-1 text-[11px] text-white outline-none w-20"
                 />
               ) : (
                 <span
@@ -507,7 +507,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
           ))}
           <button
             onClick={() => setShowNewTabModal(true)}
-            className="px-2 py-1 text-[11px] text-gray-500 hover:text-white hover:bg-[#2a2a4a]"
+            className="px-2 py-1 text-[11px] text-gray-500 hover:text-white hover:bg-[var(--term-border)]"
             title="New tab"
           >
             +
@@ -517,15 +517,15 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
         {/* Toolbar */}
         <div className="flex items-center gap-1 px-2 ml-auto">
           <span className="text-[9px] text-gray-600 mr-2">Shift+drag to copy</span>
-          <button onClick={() => onSplit('vertical')} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[#2a2a4a] rounded">
+          <button onClick={() => onSplit('vertical')} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[var(--term-border)] rounded">
             Split Right
           </button>
-          <button onClick={() => onSplit('horizontal')} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[#2a2a4a] rounded">
+          <button onClick={() => onSplit('horizontal')} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[var(--term-border)] rounded">
             Split Down
           </button>
           <button
             onClick={() => { refreshSessions(); setShowSessionPicker(v => !v); }}
-            className={`text-[10px] px-2 py-0.5 rounded relative ${showSessionPicker ? 'text-white bg-[#7c5bf0]/30' : 'text-gray-400 hover:text-white hover:bg-[#2a2a4a]'}`}
+            className={`text-[10px] px-2 py-0.5 rounded relative ${showSessionPicker ? 'text-white bg-[#7c5bf0]/30' : 'text-gray-400 hover:text-white hover:bg-[var(--term-border)]'}`}
           >
             Sessions
             {detachedCount > 0 && (
@@ -559,7 +559,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
             </button>
           )}
           {activeTab && countTerminals(activeTab.tree) > 1 && (
-            <button onClick={onClosePane} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-red-400 hover:bg-[#2a2a4a] rounded">
+            <button onClick={onClosePane} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-red-400 hover:bg-[var(--term-border)] rounded">
               Close Pane
             </button>
           )}
@@ -568,7 +568,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
 
       {/* Session management panel */}
       {showSessionPicker && (
-        <div className="bg-[#0e0e20] border-b border-[#2a2a4a] px-3 py-2 shrink-0 max-h-48 overflow-y-auto">
+        <div className="bg-[var(--term-bar)] border-b border-[var(--term-border)] px-3 py-2 shrink-0 max-h-48 overflow-y-auto">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] text-gray-400 font-semibold uppercase">Tmux Sessions</span>
             <button
@@ -583,7 +583,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
           ) : (
             <table className="w-full text-[10px]">
               <thead>
-                <tr className="text-gray-500 text-left border-b border-[#2a2a4a]">
+                <tr className="text-gray-500 text-left border-b border-[var(--term-border)]">
                   <th className="py-1 pr-3 font-medium">Session</th>
                   <th className="py-1 pr-3 font-medium">Created</th>
                   <th className="py-1 pr-3 font-medium">Status</th>
@@ -595,7 +595,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                   const inUse = usedSessions.includes(s.name);
                   const savedLabel = sessionLabelsRef.current[s.name];
                   return (
-                    <tr key={s.name} className="border-b border-[#2a2a4a]/50 hover:bg-[#1a1a2e]">
+                    <tr key={s.name} className="border-b border-[var(--term-border)]/50 hover:bg-[var(--term-bg)]">
                       <td className="py-1.5 pr-3 text-gray-300">
                         {savedLabel ? (
                           <><span>{savedLabel}</span> <span className="font-mono text-gray-600 text-[9px]">{s.name.replace('mw-', '')}</span></>
@@ -654,22 +654,22 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       {/* New tab modal */}
       {showNewTabModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowNewTabModal(false); setExpandedRoot(null); }}>
-          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-lg shadow-xl w-[350px] max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-4 py-3 border-b border-[#2a2a4a]">
+          <div className="bg-[var(--term-bg)] border border-[var(--term-border)] rounded-lg shadow-xl w-[350px] max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-[var(--term-border)]">
               <h3 className="text-sm font-semibold text-white">New Tab</h3>
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {/* Plain terminal */}
               <button
                 onClick={() => { addTab(); setShowNewTabModal(false); setExpandedRoot(null); }}
-                className="w-full text-left px-3 py-2 rounded hover:bg-[#2a2a4a] text-[12px] text-gray-300 flex items-center gap-2"
+                className="w-full text-left px-3 py-2 rounded hover:bg-[var(--term-border)] text-[12px] text-gray-300 flex items-center gap-2"
               >
                 <span className="text-gray-500">▸</span> Terminal
               </button>
 
               {/* Project roots */}
               {projectRoots.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-[#2a2a4a]">
+                <div className="mt-2 pt-2 border-t border-[var(--term-border)]">
                   <div className="px-3 py-1 text-[9px] text-gray-500 uppercase">Claude in Project</div>
                   {projectRoots.map(root => {
                     const rootName = root.split('/').pop() || root;
@@ -679,7 +679,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                       <div key={root}>
                         <button
                           onClick={() => setExpandedRoot(isExpanded ? null : root)}
-                          className="w-full text-left px-3 py-2 rounded hover:bg-[#2a2a4a] text-[12px] text-gray-300 flex items-center gap-2"
+                          className="w-full text-left px-3 py-2 rounded hover:bg-[var(--term-border)] text-[12px] text-gray-300 flex items-center gap-2"
                         >
                           <span className="text-gray-500 text-[10px] w-3">{isExpanded ? '▾' : '▸'}</span>
                           <span>{rootName}</span>
@@ -691,7 +691,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                               <button
                                 key={p.path}
                                 onClick={() => { addTab(p.path); setShowNewTabModal(false); setExpandedRoot(null); }}
-                                className="w-full text-left px-3 py-1.5 rounded hover:bg-[#2a2a4a] text-[11px] text-gray-300 flex items-center gap-2 truncate"
+                                className="w-full text-left px-3 py-1.5 rounded hover:bg-[var(--term-border)] text-[11px] text-gray-300 flex items-center gap-2 truncate"
                                 title={p.path}
                               >
                                 <span className="text-gray-600 text-[10px]">↳</span> {p.name}
@@ -708,7 +708,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                 </div>
               )}
             </div>
-            <div className="px-4 py-2 border-t border-[#2a2a4a]">
+            <div className="px-4 py-2 border-t border-[var(--term-border)]">
               <button
                 onClick={() => { setShowNewTabModal(false); setExpandedRoot(null); }}
                 className="w-full text-center text-[11px] text-gray-500 hover:text-gray-300 py-1"
@@ -723,7 +723,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       {/* Close confirmation dialog */}
       {closeConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setCloseConfirm(null)}>
-          <div className="bg-[#1a1a2e] border border-[#2a2a4a] rounded-lg p-4 shadow-xl max-w-sm" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[var(--term-bg)] border border-[var(--term-border)] rounded-lg p-4 shadow-xl max-w-sm" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-white mb-2">Close Tab</h3>
             <p className="text-xs text-gray-400 mb-1">
               This tab has {closeConfirm.sessions.length} active session{closeConfirm.sessions.length > 1 ? 's' : ''}:
@@ -950,17 +950,46 @@ const MemoTerminalPane = memo(function TerminalPane({
 
     let disposed = false; // guard against post-cleanup writes (React Strict Mode)
 
+    // Read terminal theme from CSS variables
+    const cs = getComputedStyle(document.documentElement);
+    const tv = (name: string) => cs.getPropertyValue(name).trim();
+    const termBg = tv('--term-bg') || '#1a1a2e';
+    const termFg = tv('--term-fg') || '#e0e0e0';
+    const termCursor = tv('--term-cursor') || '#7c5bf0';
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       scrollback: 10000,
       logger: { trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-      theme: {
-        background: '#1a1a2e',
-        foreground: '#e0e0e0',
-        cursor: '#7c5bf0',
-        selectionBackground: '#7c5bf066',
+      theme: isLight ? {
+        background: termBg,
+        foreground: termFg,
+        cursor: termCursor,
+        selectionBackground: termCursor + '44',
+        black: '#1a1a1a',
+        red: '#d32f2f',
+        green: '#388e3c',
+        yellow: '#f57f17',
+        blue: '#1976d2',
+        magenta: '#7b1fa2',
+        cyan: '#0097a7',
+        white: '#424242',
+        brightBlack: '#757575',
+        brightRed: '#e53935',
+        brightGreen: '#43a047',
+        brightYellow: '#f9a825',
+        brightBlue: '#1e88e5',
+        brightMagenta: '#8e24aa',
+        brightCyan: '#00acc1',
+        brightWhite: '#1a1a1a',
+      } : {
+        background: termBg,
+        foreground: termFg,
+        cursor: termCursor,
+        selectionBackground: termCursor + '66',
         black: '#1a1a2e',
         red: '#ff6b6b',
         green: '#69db7c',

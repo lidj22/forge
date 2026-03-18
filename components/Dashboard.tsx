@@ -54,7 +54,25 @@ export default function Dashboard({ user }: { user: any }) {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const terminalRef = useRef<WebTerminalHandle>(null);
+
+  // Theme: load from localStorage + apply
+  useEffect(() => {
+    const saved = localStorage.getItem('forge-theme') as 'dark' | 'light' | null;
+    if (saved) {
+      setTheme(saved);
+      document.documentElement.setAttribute('data-theme', saved === 'light' ? 'light' : '');
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.setAttribute('data-theme', next === 'light' ? 'light' : '');
+    localStorage.setItem('forge-theme', next);
+  };
 
   // Version check (on mount + every 10 min)
   useEffect(() => {
@@ -228,11 +246,11 @@ export default function Dashboard({ user }: { user: any }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           {viewMode === 'tasks' && (
             <button
               onClick={() => setShowNewTask(true)}
-              className="text-xs px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90"
+              className="text-[10px] px-2.5 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90"
             >
               + New Task
             </button>
@@ -242,24 +260,24 @@ export default function Dashboard({ user }: { user: any }) {
             <span className="text-[10px] text-[var(--text-secondary)] flex items-center gap-1" title={`${onlineCount.total} online${onlineCount.remote > 0 ? `, ${onlineCount.remote} remote` : ''}`}>
               <span className="text-green-500">●</span>
               {onlineCount.total}
-              {onlineCount.remote > 0 && (
-                <span className="text-[var(--accent)]">({onlineCount.remote} remote)</span>
-              )}
             </span>
           )}
+          {/* Alerts */}
           <div className="relative">
             <button
-              onClick={() => { setShowNotifications(v => !v); }}
-              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] relative"
+              onClick={() => { setShowNotifications(v => !v); setShowUserMenu(false); }}
+              className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] relative px-1"
             >
               Alerts
               {unreadCount > 0 && (
-                <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] rounded-full bg-[var(--red)] text-[8px] text-white flex items-center justify-center px-1 font-bold">
+                <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] rounded-full bg-[var(--red)] text-[8px] text-white flex items-center justify-center px-1 font-bold">
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
             {showNotifications && (
+              <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowNotifications(false)} />
               <div className="absolute right-0 top-8 w-[360px] max-h-[480px] bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl z-50 flex flex-col">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
                   <span className="text-xs font-bold text-[var(--text-primary)]">Notifications</span>
@@ -352,27 +370,44 @@ export default function Dashboard({ user }: { user: any }) {
                   )}
                 </div>
               </div>
+              </>
             )}
           </div>
-          <button
-            onClick={() => setShowMonitor(true)}
-            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-          >
-            Monitor
-          </button>
-          <button
-            onClick={() => setShowSettings(true)}
-            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-          >
-            Settings
-          </button>
-          <span className="text-xs text-[var(--text-secondary)]">{user?.name || 'local'}</span>
-          <button
-            onClick={() => signOut({ callbackUrl: '/login' })}
-            className="text-xs text-[var(--text-secondary)] hover:text-[var(--red)]"
-          >
-            Logout
-          </button>
+          {/* User menu */}
+          <div className="relative">
+            <button
+              onClick={() => { setShowUserMenu(v => !v); setShowNotifications(false); }}
+              className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 px-1"
+            >
+              {user?.name || 'local'} <span className="text-[8px]">▾</span>
+            </button>
+            {showUserMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(false)} />
+                <div className="absolute right-0 top-8 w-[140px] bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-xl z-50 py-1">
+                  <button
+                    onClick={() => { setShowMonitor(true); setShowUserMenu(false); }}
+                    className="w-full text-left text-[11px] px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    Monitor
+                  </button>
+                  <button
+                    onClick={() => { setShowSettings(true); setShowUserMenu(false); }}
+                    className="w-full text-left text-[11px] px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    Settings
+                  </button>
+                  <div className="border-t border-[var(--border)] my-1" />
+                  <button
+                    onClick={() => signOut({ callbackUrl: '/login' })}
+                    className="w-full text-left text-[11px] px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--red)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    Logout
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 

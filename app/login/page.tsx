@@ -12,6 +12,9 @@ export default function LoginPage() {
   useEffect(() => {
     const host = window.location.hostname;
     setIsRemote(!['localhost', '127.0.0.1'].includes(host));
+    // Restore theme
+    const saved = localStorage.getItem('forge-theme');
+    if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
   }, []);
 
   const handleLocal = async (e: React.FormEvent) => {

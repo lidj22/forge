@@ -35,6 +35,8 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
     if (!containerRef.current) return;
 
     let disposed = false;
+    const cs = getComputedStyle(document.documentElement);
+    const tv = (name: string) => cs.getPropertyValue(name).trim();
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,
@@ -42,10 +44,10 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
       scrollback: 5000,
       logger: { trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
       theme: {
-        background: '#1a1a2e',
-        foreground: '#e0e0e0',
-        cursor: '#7c5bf0',
-        selectionBackground: '#7c5bf066',
+        background: tv('--term-bg') || '#1a1a2e',
+        foreground: tv('--term-fg') || '#e0e0e0',
+        cursor: tv('--term-cursor') || '#7c5bf0',
+        selectionBackground: (tv('--term-cursor') || '#7c5bf0') + '44',
       },
     });
     const fit = new FitAddon();

@@ -11,6 +11,33 @@
   --green: #22c55e;
   --yellow: #eab308;
   --red: #ef4444;
+  /* Terminal */
+  --term-bg: #1a1a2e;
+  --term-bar: #12122a;
+  --term-border: #2a2a4a;
+  --term-fg: #e0e0e0;
+  --term-cursor: #7c5bf0;
+  --term-dim: #555;
+}
+
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e8e8e8;
+  --border: #d4d4d4;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666;
+  --accent: #2563eb;
+  --green: #16a34a;
+  --yellow: #ca8a04;
+  --red: #dc2626;
+  /* Terminal */
+  --term-bg: #fafafa;
+  --term-bar: #f0f0f0;
+  --term-border: #d0d0d0;
+  --term-fg: #1a1a1a;
+  --term-cursor: #2563eb;
+  --term-dim: #999;
 }
 
 body {
@@ -23,4 +50,3 @@ body {
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
