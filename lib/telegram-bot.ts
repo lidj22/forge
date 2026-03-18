@@ -16,11 +16,11 @@ import { startTunnel, stopTunnel, getTunnelStatus } from './cloudflared';
 import { getPassword } from './password';
 import type { Task, TaskLogEntry } from '@/src/types';
 
-// Prevent duplicate polling and state loss across hot-reloads
+// Persist state across hot-reloads
 const globalKey = Symbol.for('mw-telegram-state');
 const g = globalThis as any;
-if (!g[globalKey]) g[globalKey] = { polling: false, pollTimer: null, lastUpdateId: 0, taskListenerAttached: false, pollActive: false, processedMsgIds: new Set<number>(), pollGeneration: 0 };
-const botState: { polling: boolean; pollTimer: ReturnType<typeof setTimeout> | null; lastUpdateId: number; taskListenerAttached: boolean; pollActive: boolean; processedMsgIds: Set<number>; pollGeneration: number } = g[globalKey];
+if (!g[globalKey]) g[globalKey] = { taskListenerAttached: false, processedMsgIds: new Set<number>() };
+const botState: { taskListenerAttached: boolean; processedMsgIds: Set<number> } = g[globalKey];
 
 // Track which Telegram message maps to which task (for reply-based interaction)
 const taskMessageMap = new Map<number, string>(); // messageId → taskId

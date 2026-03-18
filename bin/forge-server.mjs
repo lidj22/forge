@@ -155,8 +155,6 @@ function stopServices() {
 // ── Helper: stop running instance ──
 function stopServer() {
   stopServices();
-  try { unlinkSync(join(DATA_DIR, 'init.lock')); } catch {}
-  try { unlinkSync(join(DATA_DIR, 'telegram.lock')); } catch {}
   try { unlinkSync(join(DATA_DIR, 'tunnel-state.json')); } catch {}
 
   try {
