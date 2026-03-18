@@ -14,6 +14,9 @@ export default function TunnelToggle() {
   const [copied, setCopied] = useState(false);
   const [isRemote, setIsRemote] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
 
   useEffect(() => {
     setIsRemote(!['localhost', '127.0.0.1'].includes(window.location.hostname));
@@ -50,16 +53,24 @@ export default function TunnelToggle() {
     setConfirmStop(false);
   };
 
-  const doStart = async () => {
+  const doStart = async (pw: string) => {
     setLoading(true);
+    setPasswordError('');
     try {
       const res = await fetch('/api/tunnel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start' }),
+        body: JSON.stringify({ action: 'start', password: pw }),
       });
       const data = await res.json();
+      if (res.status === 403) {
+        setPasswordError('Wrong password');
+        setLoading(false);
+        return;
+      }
       setTunnel(data);
+      setShowPasswordPrompt(false);
+      setPassword('');
     } catch {}
     setLoading(false);
   };
@@ -75,6 +86,38 @@ export default function TunnelToggle() {
   // Hide tunnel controls when accessing remotely
   if (isRemote) {
     return null;
+  }
+
+  // Password prompt
+  if (showPasswordPrompt) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <input
+          type="password"
+          value={password}
+          onChange={e => { setPassword(e.target.value); setPasswordError(''); }}
+          onKeyDown={e => e.key === 'Enter' && password && doStart(password)}
+          placeholder="Login password"
+          autoFocus
+          className={`w-[120px] text-[10px] px-2 py-0.5 bg-[var(--bg-tertiary)] border rounded font-mono focus:outline-none ${
+            passwordError ? 'border-[var(--red)]' : 'border-[var(--border)] focus:border-[var(--accent)]'
+          } text-[var(--text-primary)]`}
+        />
+        <button
+          onClick={() => password && doStart(password)}
+          disabled={!password || loading}
+          className="text-[10px] px-2 py-0.5 bg-[var(--green)] text-black rounded hover:opacity-90 disabled:opacity-50"
+        >
+          {loading ? 'Starting...' : 'Start'}
+        </button>
+        <button
+          onClick={() => { setShowPasswordPrompt(false); setPassword(''); setPasswordError(''); }}
+          className="text-[10px] px-1.5 py-0.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        >
+          Cancel
+        </button>
+      </div>
+    );
   }
 
   // Stop confirmation dialog
@@ -102,12 +145,12 @@ export default function TunnelToggle() {
   if (tunnel.status === 'stopped' && !tunnel.error) {
     return (
       <button
-        onClick={doStart}
+        onClick={() => setShowPasswordPrompt(true)}
         disabled={loading}
         className="text-[10px] px-2 py-0.5 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)] transition-colors disabled:opacity-50"
         title="Start Cloudflare Tunnel for remote access"
       >
-        {loading ? 'Starting...' : 'Tunnel'}
+        Tunnel
       </button>
     );
   }
@@ -149,7 +192,7 @@ export default function TunnelToggle() {
           Tunnel error
         </span>
         <button
-          onClick={doStart}
+          onClick={() => setShowPasswordPrompt(true)}
           disabled={loading}
           className="text-[10px] px-2 py-0.5 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
         >

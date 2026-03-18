@@ -1,77 +1,97 @@
 /**
- * Auto-generated login password.
- * Rotates daily. Saved to ~/.forge/password.json with date.
- * CLI can read it via `forge password`.
+ * Password management.
+ *
+ * - Admin password: set in Settings, encrypted in settings.yaml
+ *   Used for: local login, tunnel start, secret changes, Telegram commands
+ * - Session code: random 8-digit numeric, generated each time tunnel starts
+ *   Used for: remote login 2FA (admin password + session code)
+ *
+ * Local login: admin password only
+ * Remote login (tunnel): admin password + session code
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 
-const PASSWORD_FILE = join(homedir(), '.forge', 'password.json');
+const DATA_DIR = process.env.FORGE_DATA_DIR || join(homedir(), '.forge');
+const SESSION_CODE_FILE = join(DATA_DIR, 'session-code.json');
 
-function generatePassword(): string {
-  // 8-char alphanumeric, easy to type
-  return randomBytes(6).toString('base64url').slice(0, 8);
+/** Generate a random 8-digit numeric code */
+function generateSessionCode(): string {
+  return String(randomInt(10000000, 99999999));
 }
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-}
-
-interface PasswordData {
-  password: string;
-  date: string;
-}
-
-function readPasswordData(): PasswordData | null {
+function readSessionCode(): string {
   try {
-    if (!existsSync(PASSWORD_FILE)) return null;
-    return JSON.parse(readFileSync(PASSWORD_FILE, 'utf-8'));
+    if (!existsSync(SESSION_CODE_FILE)) return '';
+    const data = JSON.parse(readFileSync(SESSION_CODE_FILE, 'utf-8'));
+    return data?.code || '';
   } catch {
-    return null;
+    return '';
   }
 }
 
-function savePasswordData(data: PasswordData) {
-  const dir = dirname(PASSWORD_FILE);
+function saveSessionCode(code: string) {
+  const dir = dirname(SESSION_CODE_FILE);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(PASSWORD_FILE, JSON.stringify(data), { mode: 0o600 });
+  writeFileSync(SESSION_CODE_FILE, JSON.stringify({ code }), { mode: 0o600 });
+}
+
+/** Get the admin password from settings */
+export function getAdminPassword(): string {
+  try {
+    const { loadSettings } = require('./settings');
+    const settings = loadSettings();
+    return settings.telegramTunnelPassword || '';
+  } catch {
+    return '';
+  }
+}
+
+/** Get current session code (empty if none) */
+export function getSessionCode(): string {
+  return readSessionCode();
+}
+
+/** Generate new session code. Called on tunnel start. */
+export function rotateSessionCode(): string {
+  const code = generateSessionCode();
+  saveSessionCode(code);
+  console.log(`[password] New session code: ${code}`);
+  return code;
 }
 
 /**
- * Get the current password. Priority:
- * 1. MW_PASSWORD env var (user explicitly set, never rotates)
- * 2. Saved password file if still valid today
- * 3. Generate new one, save with today's date
+ * Verify login credentials.
+ * @param password - admin password
+ * @param sessionCode - session code (required for remote, empty for local)
+ * @param isRemote - true if accessing via tunnel
  */
-export function getPassword(): string {
-  // If user explicitly set MW_PASSWORD, use it (no rotation)
-  if (process.env.MW_PASSWORD && process.env.MW_PASSWORD !== 'auto') {
-    return process.env.MW_PASSWORD;
+export function verifyLogin(password: string, sessionCode?: string, isRemote?: boolean): boolean {
+  if (!password) return false;
+
+  const admin = getAdminPassword();
+  if (!admin) return false;
+  if (password !== admin) return false;
+
+  // Remote access requires session code as 2FA
+  if (isRemote) {
+    const currentCode = readSessionCode();
+    if (!currentCode || sessionCode !== currentCode) return false;
   }
 
-  const today = todayStr();
-  const saved = readPasswordData();
-
-  // Valid for today
-  if (saved && saved.date === today && saved.password) {
-    return saved.password;
-  }
-
-  // Expired or missing — generate new
-  const password = generatePassword();
-  savePasswordData({ password, date: today });
-  console.log(`[password] New daily password generated for ${today}`);
-  return password;
+  return true;
 }
 
-/** Read password from file (for CLI use) */
-export function readPasswordFile(): string | null {
-  const data = readPasswordData();
-  if (!data) return null;
-  // Only return if still valid today
-  if (data.date !== todayStr()) return null;
-  return data.password;
+/**
+ * Verify admin password for privileged operations
+ * (tunnel start, secret changes, Telegram commands).
+ */
+export function verifyAdmin(input: string): boolean {
+  if (!input) return false;
+  const admin = getAdminPassword();
+  return admin ? input === admin : false;
 }
+

@@ -7,18 +7,50 @@
 import { ensureRunnerStarted } from './task-manager';
 import { startTelegramBot, stopTelegramBot } from './telegram-bot';
 import { startWatcherLoop } from './session-watcher';
-import { getPassword } from './password';
-import { loadSettings } from './settings';
+import { getAdminPassword } from './password';
+import { loadSettings, saveSettings } from './settings';
 import { startTunnel } from './cloudflared';
+import { isEncrypted, SECRET_FIELDS } from './crypto';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 
 const initKey = Symbol.for('mw-initialized');
 const gInit = globalThis as any;
 
+/** Migrate plaintext secrets to encrypted on first run */
+function migrateSecrets() {
+  try {
+    const { existsSync, readFileSync } = require('node:fs');
+    const { homedir } = require('node:os');
+    const YAML = require('yaml');
+    const dataDir = process.env.FORGE_DATA_DIR || join(homedir(), '.forge');
+    const file = join(dataDir, 'settings.yaml');
+    if (!existsSync(file)) return;
+    const raw = YAML.parse(readFileSync(file, 'utf-8')) || {};
+    let needsSave = false;
+    for (const field of SECRET_FIELDS) {
+      if (raw[field] && typeof raw[field] === 'string' && !isEncrypted(raw[field])) {
+        needsSave = true;
+        break;
+      }
+    }
+    if (needsSave) {
+      // loadSettings returns decrypted, saveSettings encrypts
+      const settings = loadSettings();
+      saveSettings(settings);
+      console.log('[init] Migrated plaintext secrets to encrypted storage');
+    }
+  } catch (e) {
+    console.error('[init] Secret migration error:', e);
+  }
+}
+
 export function ensureInitialized() {
   if (gInit[initKey]) return;
   gInit[initKey] = true;
+
+  // Migrate plaintext secrets on startup
+  migrateSecrets();
 
   // Task runner is safe in every worker (DB-level coordination)
   ensureRunnerStarted();
@@ -28,17 +60,23 @@ export function ensureInitialized() {
 
   // If services are managed externally (forge-server), skip
   if (process.env.FORGE_EXTERNAL_SERVICES === '1') {
-    // Password display only once
-    const password = getPassword();
-    console.log(`[init] Login password: ${password} (valid today)`);
-    console.log('[init] Forgot? Run: forge password');
+    // Password display
+    const admin = getAdminPassword();
+    if (admin) {
+      console.log(`[init] Admin password: configured`);
+    } else {
+      console.log('[init] No admin password set — configure in Settings');
+    };
     return;
   }
 
   // Standalone mode (pnpm dev without forge-server) — start everything here
-  const password = getPassword();
-  console.log(`[init] Login password: ${password} (valid today)`);
-  console.log('[init] Forgot? Run: forge password');
+  const admin2 = getAdminPassword();
+  if (admin2) {
+    console.log(`[init] Admin password: configured`);
+  } else {
+    console.log('[init] No admin password set — configure in Settings');
+  }
 
   startTelegramBot(); // registers task event listener only
   startTerminalProcess();

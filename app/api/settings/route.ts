@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { loadSettings, loadSettingsMasked, saveSettings, type Settings } from '@/lib/settings';
 import { restartTelegramBot } from '@/lib/init';
 import { SECRET_FIELDS } from '@/lib/crypto';
+import { verifyAdmin } from '@/lib/password';
 
 export async function GET() {
   return NextResponse.json(loadSettingsMasked());
@@ -12,9 +13,9 @@ export async function PUT(req: Request) {
 
   // Handle secret field updates separately
   if (body._secretUpdate) {
-    const { field, oldValue, newValue } = body._secretUpdate as {
+    const { field, adminPassword, newValue } = body._secretUpdate as {
       field: string;
-      oldValue: string;
+      adminPassword: string;
       newValue: string;
     };
 
@@ -23,16 +24,13 @@ export async function PUT(req: Request) {
       return NextResponse.json({ ok: false, error: 'Invalid field' }, { status: 400 });
     }
 
-    // Load current settings
-    const current = loadSettings();
-    const currentValue = (current as any)[field] || '';
-
-    // If field has a value, verify old password
-    if (currentValue && currentValue !== oldValue) {
-      return NextResponse.json({ ok: false, error: 'Old value does not match' }, { status: 403 });
+    // Verify admin password
+    if (!verifyAdmin(adminPassword)) {
+      return NextResponse.json({ ok: false, error: 'Wrong password' }, { status: 403 });
     }
 
     // Update the specific field
+    const current = loadSettings();
     (current as any)[field] = newValue;
     saveSettings(current);
 

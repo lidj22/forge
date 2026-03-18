@@ -322,22 +322,22 @@ async function main() {
 
     case 'password':
     case 'pw': {
-      const { readFileSync } = await import('node:fs');
+      const { readFileSync, existsSync } = await import('node:fs');
       const { homedir } = await import('node:os');
       const { join } = await import('node:path');
-      const pwFile = join(homedir(), '.forge', 'password.json');
+      const dataDir = process.env.FORGE_DATA_DIR || join(homedir(), '.forge');
+      const codeFile = join(dataDir, 'session-code.json');
       try {
-        const data = JSON.parse(readFileSync(pwFile, 'utf-8'));
-        const today = new Date().toISOString().slice(0, 10);
-        if (data.date === today) {
-          console.log(`Login password: ${data.password}`);
-          console.log(`Valid for: ${data.date}`);
-        } else {
-          console.log(`Password expired (was for ${data.date}). Restart server to generate new one.`);
+        if (existsSync(codeFile)) {
+          const data = JSON.parse(readFileSync(codeFile, 'utf-8'));
+          if (data.code) {
+            console.log(`Session code: ${data.code} (for remote login 2FA)`);
+          }
         }
-      } catch {
-        console.log('No password file found. Password is set via MW_PASSWORD env var.');
-      }
+      } catch {}
+      console.log('Admin password: configured in Settings → Admin Password');
+      console.log('Local login: admin password only');
+      console.log('Remote login: admin password + session code');
       break;
     }
 

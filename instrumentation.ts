@@ -1,6 +1,6 @@
 /**
  * Next.js instrumentation — runs once when the server starts.
- * Sets MW_PASSWORD before any request is handled.
+ * Loads .env.local and prints login password.
  */
 export async function register() {
   // Only run on server, not Edge
@@ -23,8 +23,13 @@ export async function register() {
       }
     }
 
-    const { getPassword } = await import('./lib/password');
-    const password = getPassword();
-    process.env.MW_PASSWORD = password;
+    // Print password info
+    const { getAdminPassword } = await import('./lib/password');
+    const admin = getAdminPassword();
+    if (admin) {
+      console.log(`[init] Admin password: configured`);
+    } else {
+      console.log('[init] No admin password set — configure in Settings');
+    }
   }
 }

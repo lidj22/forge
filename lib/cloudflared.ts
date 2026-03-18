@@ -154,6 +154,12 @@ export async function startTunnel(localPort: number = 3000): Promise<{ url?: str
   state.error = null;
   state.log = [];
 
+  // Generate new session code for remote login 2FA
+  try {
+    const { rotateSessionCode } = require('./password');
+    rotateSessionCode();
+  } catch {}
+
   let binPath: string;
   try {
     binPath = await downloadCloudflared();

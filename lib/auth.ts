@@ -10,23 +10,31 @@ if (!process.env.AUTH_SECRET) {
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
+  logger: {
+    error: () => {},  // Suppress noisy CredentialsSignin stack traces
+  },
   providers: [
     // Google OAuth — for production use
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     }),
-    // Local password — auto-generated, rotates daily
+    // Local: admin password only
+    // Remote (tunnel): admin password + session code (2FA)
     Credentials({
       name: 'Local',
       credentials: {
         password: { label: 'Password', type: 'password' },
+        sessionCode: { label: 'Session Code', type: 'text' },
+        isRemote: { label: 'Remote', type: 'text' },
       },
       async authorize(credentials) {
-        // Dynamic import to avoid Edge Runtime pulling in node:path/node:fs
-        const { getPassword } = await import('./password');
-        const localPassword = getPassword();
-        if (credentials?.password === localPassword) {
+        const { verifyLogin } = await import('./password');
+        const password = (credentials?.password ?? '') as string;
+        const sessionCode = (credentials?.sessionCode ?? '') as string;
+        const isRemote = String(credentials?.isRemote) === 'true';
+
+        if (verifyLogin(password, sessionCode, isRemote)) {
           return { id: 'local', name: 'zliu', email: 'local@forge' };
         }
         return null;
@@ -40,13 +48,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     authorized({ auth }) {
       return !!auth;
     },
-    // Allow redirects to tunnel URLs (*.trycloudflare.com) after login
     redirect({ url, baseUrl }) {
-      // Same origin — always allow
       if (url.startsWith(baseUrl)) return url;
-      // Relative path — prepend base
       if (url.startsWith('/')) return `${baseUrl}${url}`;
-      // Cloudflare tunnel URLs — allow
       if (url.includes('.trycloudflare.com')) return url;
       return baseUrl;
     },

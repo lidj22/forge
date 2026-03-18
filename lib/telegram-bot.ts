@@ -13,7 +13,7 @@ import { scanProjects } from './projects';
 import { listClaudeSessions, getSessionFilePath, readSessionEntries } from './claude-sessions';
 import { listWatchers, createWatcher, deleteWatcher, toggleWatcher } from './session-watcher';
 import { startTunnel, stopTunnel, getTunnelStatus } from './cloudflared';
-import { getPassword } from './password';
+// Password verification is done via require() in handler functions
 import type { Task, TaskLogEntry } from '@/src/types';
 
 // Persist state across hot-reloads
@@ -260,13 +260,13 @@ async function handleMessage(msg: any) {
         await handleTunnelStatus(chatId);
         break;
       case '/tunnel_start':
-        await handleTunnelStart(chatId);
+        await handleTunnelStart(chatId, args[0]);
         break;
       case '/tunnel_stop':
         await handleTunnelStop(chatId);
         break;
-      case '/tunnel_password':
-        await handleTunnelPassword(chatId, args[0], msg.message_id);
+      case '/tunnel_code':
+        await handleTunnelCode(chatId, args[0], msg.message_id);
         break;
       default:
         await send(chatId, `Unknown command: ${cmd}\nUse /help to see available commands.`);
@@ -308,7 +308,7 @@ async function sendHelp(chatId: number) {
     `/projects — list projects\n\n` +
     `🌐 /tunnel — status\n` +
     `/tunnel_start / /tunnel_stop\n` +
-    `/tunnel_password <pw> — get login password\n\n` +
+    `/tunnel_code <admin_pw> — get session code\n\n` +
     `Reply number to select`
   );
 }
@@ -892,9 +892,20 @@ async function handleTunnelStatus(chatId: number) {
   }
 }
 
-async function handleTunnelStart(chatId: number) {
+async function handleTunnelStart(chatId: number, password?: string) {
   const settings = loadSettings();
   if (String(chatId) !== settings.telegramChatId) { await send(chatId, '⛔ Unauthorized'); return; }
+
+  // Require admin password
+  if (!password) {
+    await send(chatId, '🔑 Usage: /tunnel_start <password>');
+    return;
+  }
+  const { verifyAdmin } = require('./password');
+  if (!verifyAdmin(password)) {
+    await send(chatId, '⛔ Wrong password');
+    return;
+  }
 
   // Check if tunnel is already running and still reachable
   const status = getTunnelStatus();
@@ -936,36 +947,36 @@ async function handleTunnelStop(chatId: number) {
   await send(chatId, '🛑 Tunnel stopped');
 }
 
-async function handleTunnelPassword(chatId: number, password?: string, userMsgId?: number) {
+async function handleTunnelCode(chatId: number, password?: string, userMsgId?: number) {
   const settings = loadSettings();
   if (String(chatId) !== settings.telegramChatId) {
     await send(chatId, '⛔ Unauthorized');
     return;
   }
 
-  if (!settings.telegramTunnelPassword) {
-    await send(chatId, '⚠️ Telegram tunnel password not configured.\nSet it in Settings → Remote Access → Telegram tunnel password');
-    return;
-  }
-
   if (!password) {
-    await send(chatId, 'Usage: /tunnel_password <your-password>');
+    await send(chatId, 'Usage: /tunnel_code <admin-password>');
     return;
   }
 
   // Immediately delete user's message containing password
   if (userMsgId) deleteMessageLater(chatId, userMsgId, 0);
 
-  if (password !== settings.telegramTunnelPassword) {
+  const { verifyAdmin, getSessionCode } = require('./password');
+  if (!verifyAdmin(password)) {
     await send(chatId, '⛔ Wrong password');
     return;
   }
 
-  const loginPassword = getPassword();
+  // Show the session code (for remote login 2FA)
+  const code = getSessionCode();
   const status = getTunnelStatus();
-  // Send password as code block, auto-delete after 30s
-  const labelId = await send(chatId, '🔑 Login password (auto-deletes in 30s):');
-  const pwId = await sendHtml(chatId, `<code>${loginPassword}</code>`);
+  if (!code) {
+    await send(chatId, '⚠️ No session code. Start tunnel first to generate one.');
+    return;
+  }
+  const labelId = await send(chatId, '🔑 Session code for remote login (auto-deletes in 30s):');
+  const pwId = await sendHtml(chatId, `<code>${code}</code>`);
   if (labelId) deleteMessageLater(chatId, labelId);
   if (pwId) deleteMessageLater(chatId, pwId);
   if (status.status === 'running' && status.url) {
@@ -1379,7 +1390,7 @@ async function setBotCommands(token: string) {
           { command: 'tunnel', description: 'Tunnel status' },
           { command: 'tunnel_start', description: 'Start tunnel' },
           { command: 'tunnel_stop', description: 'Stop tunnel' },
-          { command: 'tunnel_password', description: 'Get login password' },
+          { command: 'tunnel_code', description: 'Get session code for remote login' },
           { command: 'help', description: 'Show help' },
         ],
       }),

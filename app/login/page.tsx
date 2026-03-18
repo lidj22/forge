@@ -1,20 +1,30 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { signIn } from 'next-auth/react';
 
 export default function LoginPage() {
   const [password, setPassword] = useState('');
+  const [sessionCode, setSessionCode] = useState('');
   const [error, setError] = useState('');
+  const [isRemote, setIsRemote] = useState(false);
+
+  useEffect(() => {
+    const host = window.location.hostname;
+    setIsRemote(!['localhost', '127.0.0.1'].includes(host));
+  }, []);
 
   const handleLocal = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     const result = await signIn('credentials', {
       password,
+      sessionCode: isRemote ? sessionCode : '',
+      isRemote: String(isRemote),
       redirect: false,
     }) as { error?: string; ok?: boolean } | undefined;
     if (result?.error) {
-      setError('Wrong password');
+      setError(isRemote ? 'Wrong password or session code' : 'Wrong password');
     } else if (result?.ok) {
       window.location.href = window.location.origin + '/';
     }
@@ -25,18 +35,32 @@ export default function LoginPage() {
       <div className="w-80 space-y-6">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">Forge</h1>
-          <p className="text-sm text-[var(--text-secondary)] mt-1">Unified AI Platform</p>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">
+            {isRemote ? 'Remote Access' : 'Local Access'}
+          </p>
         </div>
 
-        {/* Local password login */}
         <form onSubmit={handleLocal} className="space-y-3">
           <input
             type="password"
             value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="Password"
+            onChange={e => { setPassword(e.target.value); setError(''); }}
+            placeholder="Admin Password"
+            autoFocus
             className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]"
           />
+          {isRemote && (
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={8}
+              value={sessionCode}
+              onChange={e => { setSessionCode(e.target.value.replace(/\D/g, '')); setError(''); }}
+              placeholder="Session Code (8 digits)"
+              className="w-full px-3 py-2 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-sm text-[var(--text-primary)] font-mono tracking-widest text-center focus:outline-none focus:border-[var(--accent)]"
+            />
+          )}
           {error && <p className="text-xs text-[var(--red)]">{error}</p>}
           <button
             type="submit"
@@ -44,6 +68,11 @@ export default function LoginPage() {
           >
             Sign In
           </button>
+          {isRemote && (
+            <p className="text-[10px] text-[var(--text-secondary)] text-center">
+              Session code is generated when tunnel starts. Use /tunnel_code in Telegram to get it.
+            </p>
+          )}
         </form>
 
       </div>

@@ -16,7 +16,7 @@ export interface Settings {
   notifyOnComplete: boolean;    // Notify when task completes
   notifyOnFailure: boolean;     // Notify when task fails
   tunnelAutoStart: boolean;     // Auto-start Cloudflare Tunnel on startup
-  telegramTunnelPassword: string; // Password for getting login password via Telegram
+  telegramTunnelPassword: string; // Admin password (encrypted) — for login, tunnel, secrets, Telegram
   taskModel: string;              // Model for tasks (default: sonnet)
   pipelineModel: string;          // Model for pipelines (default: sonnet)
   telegramModel: string;          // Model for Telegram AI features (default: sonnet)

@@ -5,7 +5,6 @@
  */
 
 import { loadSettings } from './settings';
-import { getPassword } from './password';
 
 const settings = loadSettings();
 if (!settings.telegramBotToken || !settings.telegramChatId) {

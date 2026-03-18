@@ -76,7 +76,7 @@ pnpm install
 
 1. **Start Forge** — `forge server start` or `./start.sh`
 2. **Open browser** — `http://localhost:3000`
-3. **Log in** — password is in the console output, rotates daily. Run `forge password` if you forget.
+3. **Log in** — set an admin password in Settings. Run `forge password` for info.
 4. **Configure** — Settings → add project directories and (optionally) Telegram bot token
 5. **Start coding** — Open a terminal tab, run `claude`, and vibe
 
@@ -86,7 +86,7 @@ Access Forge from anywhere — iPad, phone, coffee shop:
 
 1. Click the **tunnel button** in the header
 2. A temporary Cloudflare URL is generated (no account needed)
-3. Open it on any device — protected by your daily rotating password
+3. Open it on any device — requires admin password + session code (2FA)
 
 Health checks run every 60 seconds. If the tunnel drops, it auto-restarts and notifies you via Telegram.
 
@@ -101,9 +101,9 @@ Mobile-first control for Forge. Create a bot via [@BotFather](https://t.me/botfa
 | `/sessions` | AI summary of Claude Code sessions |
 | `/docs` | Docs session summary or file search |
 | `/note` | Quick note — sent to Docs Claude for filing |
-| `/tunnel_start` | Start Cloudflare Tunnel |
+| `/tunnel_start <admin_pw>` | Start Cloudflare Tunnel |
 | `/tunnel_stop` | Stop tunnel |
-| `/tunnel_password <pw>` | Get login password + tunnel URL |
+| `/tunnel_code <admin_pw>` | Get session code for remote login |
 | `/watch` | Monitor session / list watchers |
 
 Whitelist-protected — only configured Chat IDs can interact. Supports multiple users (comma-separated IDs).
@@ -210,7 +210,7 @@ All data lives in `~/.forge/`:
 ~/.forge/
 ├── .env.local            # Environment variables (AUTH_SECRET, API keys)
 ├── settings.yaml         # Main configuration
-├── password.json         # Daily auto-generated login password
+├── session-code.json     # Session code for remote login 2FA
 ├── data.db               # SQLite database (tasks, sessions)
 ├── terminal-state.json   # Terminal tab layout
 ├── tunnel-state.json     # Tunnel process state
@@ -232,7 +232,7 @@ claudePath: claude
 tunnelAutoStart: false
 telegramBotToken: ""
 telegramChatId: ""              # Comma-separated for multiple users
-telegramTunnelPassword: ""
+telegramTunnelPassword: ""      # Admin password (encrypted)
 notifyOnComplete: true
 notifyOnFailure: true
 taskModel: default              # default / sonnet / opus / haiku
@@ -281,7 +281,7 @@ forge-server.mjs (single process)
 | Frontend | Next.js 16, React 19, Tailwind CSS 4, xterm.js, ReactFlow |
 | Backend | Next.js Route Handlers, SQLite (better-sqlite3) |
 | Terminal | node-pty, tmux, WebSocket |
-| Auth | NextAuth v5 (daily rotating password + OAuth) |
+| Auth | NextAuth v5 (admin password + session code 2FA + OAuth) |
 | Tunnel | Cloudflare cloudflared (zero-config) |
 | Bot | Telegram Bot API |
 | Pipeline | YAML-based DAG engine with visual editor |

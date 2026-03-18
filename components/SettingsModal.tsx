@@ -35,19 +35,19 @@ function SecretChangeDialog({ field, label, isSet, onSave, onClose }: {
   field: string;
   label: string;
   isSet: boolean;
-  onSave: (field: string, oldValue: string, newValue: string) => Promise<string | null>;
+  onSave: (field: string, adminPassword: string, newValue: string) => Promise<string | null>;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'change' | 'clear'>('change');
-  const [oldValue, setOldValue] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   const [newValue, setNewValue] = useState('');
   const [confirmValue, setConfirmValue] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
   const canSave = mode === 'clear'
-    ? (isSet && oldValue.length > 0)
-    : ((!isSet || oldValue.length > 0) && newValue.length > 0 && newValue === confirmValue);
+    ? adminPassword.length > 0
+    : (adminPassword.length > 0 && newValue.length > 0 && newValue === confirmValue);
 
   const handleSave = async () => {
     if (mode === 'change' && newValue !== confirmValue) {
@@ -56,7 +56,7 @@ function SecretChangeDialog({ field, label, isSet, onSave, onClose }: {
     }
     setSaving(true);
     setError('');
-    const err = await onSave(field, oldValue, mode === 'clear' ? '' : newValue);
+    const err = await onSave(field, adminPassword, mode === 'clear' ? '' : newValue);
     setSaving(false);
     if (err) {
       setError(err);
@@ -93,17 +93,15 @@ function SecretChangeDialog({ field, label, isSet, onSave, onClose }: {
           )}
         </div>
 
-        {isSet && (
-          <div className="space-y-1">
-            <label className="text-[10px] text-[var(--text-secondary)]">Current value</label>
-            <SecretInput
-              value={oldValue}
-              onChange={v => { setOldValue(v); setError(''); }}
-              placeholder="Enter current value to verify"
-              className={inputClass}
-            />
-          </div>
-        )}
+        <div className="space-y-1">
+          <label className="text-[10px] text-[var(--text-secondary)]">Admin password (login password)</label>
+          <SecretInput
+            value={adminPassword}
+            onChange={v => { setAdminPassword(v); setError(''); }}
+            placeholder="Enter login password to verify"
+            className={inputClass}
+          />
+        </div>
 
         {mode === 'change' && (
           <>
@@ -134,7 +132,7 @@ function SecretChangeDialog({ field, label, isSet, onSave, onClose }: {
 
         {mode === 'clear' && (
           <p className="text-[10px] text-[var(--text-secondary)]">
-            Enter the current value to verify, then click Clear to remove it.
+            Enter admin password to verify, then click Clear to remove this value.
           </p>
         )}
 
@@ -240,6 +238,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   });
   const [tunnelLoading, setTunnelLoading] = useState(false);
   const [confirmStopTunnel, setConfirmStopTunnel] = useState(false);
+  const [tunnelPasswordPrompt, setTunnelPasswordPrompt] = useState(false);
+  const [tunnelPassword, setTunnelPassword] = useState('');
+  const [tunnelPasswordError, setTunnelPasswordError] = useState('');
   const [editingSecret, setEditingSecret] = useState<{ field: string; label: string } | null>(null);
 
   const refreshTunnel = useCallback(() => {
@@ -277,11 +278,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const saveSecret = async (field: string, oldValue: string, newValue: string): Promise<string | null> => {
+  const saveSecret = async (field: string, adminPassword: string, newValue: string): Promise<string | null> => {
     const res = await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ _secretUpdate: { field, oldValue, newValue } }),
+      body: JSON.stringify({ _secretUpdate: { field, adminPassword, newValue } }),
     });
     const data = await res.json();
     if (!data.ok) return data.error || 'Failed to save';
@@ -566,25 +567,82 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
           <div className="flex items-center gap-2">
             {tunnel.status === 'stopped' || tunnel.status === 'error' ? (
+              tunnelPasswordPrompt ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={tunnelPassword}
+                    onChange={e => { setTunnelPassword(e.target.value); setTunnelPasswordError(''); }}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && tunnelPassword) {
+                        setTunnelLoading(true);
+                        setTunnelPasswordError('');
+                        try {
+                          const res = await fetch('/api/tunnel', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'start', password: tunnelPassword }),
+                          });
+                          const data = await res.json();
+                          if (res.status === 403) {
+                            setTunnelPasswordError('Wrong password');
+                          } else {
+                            setTunnel(data);
+                            setTunnelPasswordPrompt(false);
+                            setTunnelPassword('');
+                          }
+                        } catch {}
+                        setTunnelLoading(false);
+                      }
+                    }}
+                    placeholder="Login password"
+                    autoFocus
+                    className={`w-[140px] text-[10px] px-2 py-1 bg-[var(--bg-tertiary)] border rounded font-mono focus:outline-none ${
+                      tunnelPasswordError ? 'border-[var(--red)]' : 'border-[var(--border)] focus:border-[var(--accent)]'
+                    } text-[var(--text-primary)]`}
+                  />
+                  <button
+                    disabled={!tunnelPassword || tunnelLoading}
+                    onClick={async () => {
+                      setTunnelLoading(true);
+                      setTunnelPasswordError('');
+                      try {
+                        const res = await fetch('/api/tunnel', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'start', password: tunnelPassword }),
+                        });
+                        const data = await res.json();
+                        if (res.status === 403) {
+                          setTunnelPasswordError('Wrong password');
+                        } else {
+                          setTunnel(data);
+                          setTunnelPasswordPrompt(false);
+                          setTunnelPassword('');
+                        }
+                      } catch {}
+                      setTunnelLoading(false);
+                    }}
+                    className="text-[10px] px-2 py-1 bg-[var(--green)] text-black rounded hover:opacity-90 disabled:opacity-50"
+                  >
+                    {tunnelLoading ? 'Starting...' : 'Start'}
+                  </button>
+                  <button
+                    onClick={() => { setTunnelPasswordPrompt(false); setTunnelPassword(''); setTunnelPasswordError(''); }}
+                    className="text-[10px] px-2 py-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    Cancel
+                  </button>
+                  {tunnelPasswordError && <span className="text-[9px] text-[var(--red)]">{tunnelPasswordError}</span>}
+                </div>
+              ) : (
               <button
-                disabled={tunnelLoading}
-                onClick={async () => {
-                  setTunnelLoading(true);
-                  try {
-                    const res = await fetch('/api/tunnel', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'start' }),
-                    });
-                    const data = await res.json();
-                    setTunnel(data);
-                  } catch {}
-                  setTunnelLoading(false);
-                }}
-                className="text-[10px] px-3 py-1.5 bg-[var(--green)] text-black rounded hover:opacity-90 disabled:opacity-50"
+                onClick={() => setTunnelPasswordPrompt(true)}
+                className="text-[10px] px-3 py-1.5 bg-[var(--green)] text-black rounded hover:opacity-90"
               >
-                {tunnelLoading ? (tunnel.installed ? 'Starting...' : 'Downloading...') : 'Start Tunnel'}
+                Start Tunnel
               </button>
+              )
             ) : confirmStopTunnel ? (
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-[var(--text-secondary)]">Stop tunnel?</span>
@@ -676,12 +734,20 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             Auto-start tunnel on server startup
           </label>
 
-          <SecretField
-            label="Tunnel Password"
-            description="Telegram tunnel password (for /tunnel_password command)"
-            isSet={!!secretStatus.telegramTunnelPassword}
-            onEdit={() => setEditingSecret({ field: 'telegramTunnelPassword', label: 'Tunnel Password' })}
+        </div>
 
+        {/* Admin Password */}
+        <div className="space-y-2">
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
+            Admin Password
+          </label>
+          <p className="text-[10px] text-[var(--text-secondary)]">
+            Used for local login, tunnel start, secret changes, and Telegram commands. Remote login requires admin password + session code (generated on tunnel start).
+          </p>
+          <SecretField
+            label="Admin Password"
+            isSet={!!secretStatus.telegramTunnelPassword}
+            onEdit={() => setEditingSecret({ field: 'telegramTunnelPassword', label: 'Admin Password' })}
           />
         </div>
 
