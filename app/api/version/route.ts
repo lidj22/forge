@@ -12,9 +12,12 @@ const CURRENT_VERSION = (() => {
   }
 })();
 
-// Cache npm version check for 1 hour
+// Cache npm version check for 10 minutes
 let cachedLatest: { version: string; checkedAt: number } | null = null;
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const CACHE_TTL = 10 * 60 * 1000;
+
+// Track which versions we already notified about (avoid duplicates)
+let notifiedVersion = '';
 
 async function getLatestVersion(force = false): Promise<string> {
   if (!force && cachedLatest && Date.now() - cachedLatest.checkedAt < CACHE_TTL) {
@@ -52,7 +55,20 @@ export async function GET(req: Request) {
   const force = searchParams.has('force');
   const current = CURRENT_VERSION;
   const latest = await getLatestVersion(force);
-  const hasUpdate = latest && compareVersions(current, latest) < 0;
+  const hasUpdate = !!(latest && compareVersions(current, latest) < 0);
+
+  // Create a notification when new version is detected (once per version)
+  if (hasUpdate && latest !== notifiedVersion) {
+    notifiedVersion = latest;
+    try {
+      const { addNotification } = require('@/lib/notifications');
+      addNotification(
+        'system',
+        `Update available: v${latest}`,
+        `Current: v${current}. Run: forge upgrade`,
+      );
+    } catch {}
+  }
 
   return NextResponse.json({
     current,

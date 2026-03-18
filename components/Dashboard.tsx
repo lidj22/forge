@@ -51,8 +51,6 @@ export default function Dashboard({ user }: { user: any }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [onlineCount, setOnlineCount] = useState<{ total: number; remote: number }>({ total: 0, remote: 0 });
   const [versionInfo, setVersionInfo] = useState<{ current: string; latest: string; hasUpdate: boolean } | null>(null);
-  const [upgrading, setUpgrading] = useState(false);
-  const [upgradeResult, setUpgradeResult] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -127,43 +125,26 @@ export default function Dashboard({ user }: { user: any }) {
           {versionInfo && (
             <span className="flex items-center gap-1.5">
               <span className="text-[10px] text-[var(--text-secondary)]">v{versionInfo.current}</span>
-              {versionInfo.hasUpdate && !upgradeResult && (
-                <button
-                  disabled={upgrading}
-                  onClick={async () => {
-                    setUpgrading(true);
-                    try {
-                      const res = await fetch('/api/upgrade', { method: 'POST' });
-                      const data = await res.json();
-                      setUpgradeResult(data.ok ? data.message : data.error);
-                      if (data.ok) setVersionInfo(v => v ? { ...v, hasUpdate: false } : v);
-                    } catch { setUpgradeResult('Upgrade failed'); }
-                    setUpgrading(false);
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
-                  title={`Update to v${versionInfo.latest}\nOr run: forge upgrade`}
+              {versionInfo.hasUpdate && (
+                <span
+                  className="text-[9px] px-1.5 py-0.5 bg-[var(--accent)]/15 text-[var(--accent)] rounded cursor-default"
+                  title="Run: forge upgrade"
                 >
-                  {upgrading ? 'Upgrading...' : `Update v${versionInfo.latest}`}
-                </button>
-              )}
-              {!versionInfo.hasUpdate && !upgradeResult && (
-                <button
-                  onClick={async () => {
-                    const res = await fetch('/api/version?force=1');
-                    const data = await res.json();
-                    setVersionInfo(data);
-                  }}
-                  className="text-[9px] px-1 py-0.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  title="Check for updates"
-                >
-                  ↻
-                </button>
-              )}
-              {upgradeResult && (
-                <span className="text-[9px] text-[var(--green)] max-w-[200px] truncate" title={upgradeResult}>
-                  {upgradeResult}
+                  v{versionInfo.latest} available
                 </span>
               )}
+              <button
+                onClick={async () => {
+                  const res = await fetch('/api/version?force=1');
+                  const data = await res.json();
+                  setVersionInfo(data);
+                  if (data.hasUpdate) fetchNotifications();
+                }}
+                className="text-[9px] px-1 py-0.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                title="Check for updates"
+              >
+                ↻
+              </button>
             </span>
           )}
 
