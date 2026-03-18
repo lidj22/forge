@@ -50,7 +50,15 @@ export default function Dashboard({ user }: { user: any }) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [onlineCount, setOnlineCount] = useState<{ total: number; remote: number }>({ total: 0, remote: 0 });
+  const [versionInfo, setVersionInfo] = useState<{ current: string; latest: string; hasUpdate: boolean } | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeResult, setUpgradeResult] = useState<string | null>(null);
   const terminalRef = useRef<WebTerminalHandle>(null);
+
+  // Version check (once on mount)
+  useEffect(() => {
+    fetch('/api/version').then(r => r.json()).then(setVersionInfo).catch(() => {});
+  }, []);
 
   // Heartbeat for online user tracking
   useEffect(() => {
@@ -96,6 +104,35 @@ export default function Dashboard({ user }: { user: any }) {
       <header className="h-12 border-b-2 border-[var(--border)] flex items-center justify-between px-4 shrink-0 bg-[var(--bg-secondary)]">
         <div className="flex items-center gap-4">
           <span className="text-sm font-bold text-[var(--accent)]">Forge</span>
+          {versionInfo && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-[10px] text-[var(--text-secondary)]">v{versionInfo.current}</span>
+              {versionInfo.hasUpdate && !upgradeResult && (
+                <button
+                  disabled={upgrading}
+                  onClick={async () => {
+                    setUpgrading(true);
+                    try {
+                      const res = await fetch('/api/upgrade', { method: 'POST' });
+                      const data = await res.json();
+                      setUpgradeResult(data.ok ? data.message : data.error);
+                      if (data.ok) setVersionInfo(v => v ? { ...v, hasUpdate: false } : v);
+                    } catch { setUpgradeResult('Upgrade failed'); }
+                    setUpgrading(false);
+                  }}
+                  className="text-[9px] px-1.5 py-0.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
+                  title={`Update to v${versionInfo.latest}`}
+                >
+                  {upgrading ? 'Upgrading...' : `Update v${versionInfo.latest}`}
+                </button>
+              )}
+              {upgradeResult && (
+                <span className="text-[9px] text-[var(--green)] max-w-[200px] truncate" title={upgradeResult}>
+                  {upgradeResult}
+                </span>
+              )}
+            </span>
+          )}
 
           {/* View mode toggle */}
           <div className="flex bg-[var(--bg-tertiary)] rounded p-0.5">

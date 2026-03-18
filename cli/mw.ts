@@ -20,6 +20,35 @@ const BASE = process.env.MW_URL || 'http://localhost:3000';
 
 const [, , cmd, ...args] = process.argv;
 
+/** Check npm for newer version, print reminder if available */
+async function checkForUpdate() {
+  try {
+    const { readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf-8'));
+    const current = pkg.version;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch('https://registry.npmjs.org/@aion0/forge/latest', {
+      signal: controller.signal,
+      headers: { 'Accept': 'application/json' },
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return;
+    const data = await res.json();
+    const latest = data.version;
+
+    const [ca, cb, cc] = current.split('.').map(Number);
+    const [la, lb, lc] = latest.split('.').map(Number);
+    if (la > ca || (la === ca && lb > cb) || (la === ca && lb === cb && lc > cc)) {
+      console.log(`\n  Update available: v${current} → v${latest}`);
+      console.log(`  Run: forge upgrade\n`);
+    }
+  } catch {}
+}
+
 async function api(path: string, opts?: RequestInit) {
   const res = await fetch(`${BASE}${path}`, opts);
   if (!res.ok) {
@@ -512,7 +541,7 @@ Shortcuts: t=task, ls=tasks, w=watch, s=status, l=log, f=flows, p=projects, pw=p
   }
 }
 
-main().catch(err => {
+main().then(() => checkForUpdate()).catch(err => {
   console.error(err.message);
   process.exit(1);
 });
