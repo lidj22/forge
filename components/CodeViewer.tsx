@@ -185,6 +185,9 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
   const [viewMode, setViewMode] = useState<'file' | 'diff'>('file');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [codeOpen, setCodeOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const handleCodeOpenChange = useCallback((open: boolean) => {
     setCodeOpen(open);
@@ -626,7 +629,43 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
               <>
                 <span className="text-xs font-semibold text-[var(--text-primary)] truncate">{selectedFile}</span>
                 {language && (
-                  <span className="text-[9px] text-[var(--text-secondary)] ml-auto">{LANG_MAP[language] || language}</span>
+                  <span className="text-[9px] text-[var(--text-secondary)] ml-auto mr-2">{LANG_MAP[language] || language}</span>
+                )}
+                {content !== null && !editing && (
+                  <button
+                    onClick={() => { setEditing(true); setEditContent(content); }}
+                    className="text-[9px] px-2 py-0.5 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)] shrink-0 ml-auto"
+                  >
+                    Edit
+                  </button>
+                )}
+                {editing && (
+                  <>
+                    <button
+                      disabled={saving}
+                      onClick={async () => {
+                        if (!currentDir || !selectedFile) return;
+                        setSaving(true);
+                        await fetch('/api/code', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ dir: currentDir, file: selectedFile, content: editContent }),
+                        });
+                        setContent(editContent);
+                        setEditing(false);
+                        setSaving(false);
+                      }}
+                      className="text-[9px] px-2 py-0.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50 shrink-0 ml-auto"
+                    >
+                      {saving ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => setEditing(false)}
+                      className="text-[9px] px-2 py-0.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] shrink-0"
+                    >
+                      Cancel
+                    </button>
+                  </>
                 )}
               </>
             ) : (
@@ -688,6 +727,28 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
               </pre>
             </div>
           ) : selectedFile && content !== null ? (
+            editing ? (
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <textarea
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  onKeyDown={e => {
+                    // Tab key inserts 2 spaces
+                    if (e.key === 'Tab') {
+                      e.preventDefault();
+                      const ta = e.target as HTMLTextAreaElement;
+                      const start = ta.selectionStart;
+                      const end = ta.selectionEnd;
+                      setEditContent(editContent.slice(0, start) + '  ' + editContent.slice(end));
+                      setTimeout(() => { ta.selectionStart = ta.selectionEnd = start + 2; }, 0);
+                    }
+                  }}
+                  className="flex-1 w-full p-4 bg-[var(--bg-primary)] text-[var(--text-primary)] text-[12px] leading-[1.5] font-mono resize-none focus:outline-none"
+                  style={{ fontFamily: 'Menlo, Monaco, "Courier New", monospace', tabSize: 2 }}
+                  spellCheck={false}
+                />
+              </div>
+            ) : (
             <div className="flex-1 overflow-auto bg-[var(--bg-primary)]">
               <pre className="p-4 text-[12px] leading-[1.5] font-mono text-[var(--text-primary)] whitespace-pre" style={{ fontFamily: 'Menlo, Monaco, "Courier New", monospace', tabSize: 2, overflow: 'auto', maxWidth: 0, minWidth: '100%' }}>
                 {content.split('\n').map((line, i) => (
@@ -698,6 +759,7 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
                 ))}
               </pre>
             </div>
+            )
           ) : (
             <div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">
               <p className="text-xs">{currentDir ? 'Select a file to view' : 'Terminal will show files for its working directory'}</p>

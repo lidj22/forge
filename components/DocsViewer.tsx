@@ -84,6 +84,9 @@ export default function DocsViewer() {
   const [search, setSearch] = useState('');
   const [terminalHeight, setTerminalHeight] = useState(250);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
 
   // Fetch tree
@@ -254,7 +257,42 @@ export default function DocsViewer() {
             {selectedFile ? (
               <>
                 <span className="text-xs font-semibold text-[var(--text-primary)] truncate">{selectedFile.replace(/\.md$/, '')}</span>
-                <span className="text-[9px] text-[var(--text-secondary)] ml-auto">{selectedFile}</span>
+                <span className="text-[9px] text-[var(--text-secondary)] ml-auto mr-2">{selectedFile}</span>
+                {content && !isImageFile(selectedFile) && !editing && (
+                  <button
+                    onClick={() => { setEditing(true); setEditContent(content); }}
+                    className="text-[9px] px-2 py-0.5 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)] shrink-0"
+                  >
+                    Edit
+                  </button>
+                )}
+                {editing && (
+                  <>
+                    <button
+                      disabled={saving}
+                      onClick={async () => {
+                        setSaving(true);
+                        await fetch('/api/docs', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ root: activeRoot, file: selectedFile, content: editContent }),
+                        });
+                        setContent(editContent);
+                        setEditing(false);
+                        setSaving(false);
+                      }}
+                      className="text-[9px] px-2 py-0.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50 shrink-0"
+                    >
+                      {saving ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => setEditing(false)}
+                      className="text-[9px] px-2 py-0.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] shrink-0"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                )}
               </>
             ) : (
               <span className="text-xs text-[var(--text-secondary)]">{roots[activeRoot] || 'Docs'}</span>
@@ -278,6 +316,17 @@ export default function DocsViewer() {
               />
             </div>
           ) : selectedFile && content ? (
+            editing ? (
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <textarea
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  className="flex-1 w-full p-4 bg-[var(--bg-primary)] text-[var(--text-primary)] text-[13px] font-mono leading-relaxed resize-none focus:outline-none"
+                  style={{ tabSize: 2 }}
+                  spellCheck={false}
+                />
+              </div>
+            ) : (
             <div className="flex-1 overflow-y-auto px-8 py-6">
               {loading ? (
                 <div className="text-xs text-[var(--text-secondary)]">Loading...</div>
@@ -287,6 +336,7 @@ export default function DocsViewer() {
                 </div>
               )}
             </div>
+            )
           ) : (
             <div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">
               <p className="text-xs">Select a document to view</p>

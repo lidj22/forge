@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { execSync } from 'node:child_process';
@@ -220,4 +220,40 @@ export async function GET(req: Request) {
   const gitBranch = gitRepos.length === 1 ? gitRepos[0].branch : '';
 
   return NextResponse.json({ tree, dirName, dirPath: resolvedDir, gitBranch, gitChanges, gitRepos });
+}
+
+// PUT /api/code — save file content
+export async function PUT(req: Request) {
+  const { dir, file, content } = await req.json() as {
+    dir: string;
+    file: string;
+    content: string;
+  };
+
+  if (!dir || !file) {
+    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+  }
+
+  const resolvedDir = dir.replace(/^~/, homedir());
+  const fullPath = join(resolvedDir, file);
+
+  // Security: ensure path is within the directory
+  if (!fullPath.startsWith(resolvedDir)) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  }
+
+  // Verify dir is under a configured project root
+  const settings = loadSettings();
+  const roots = (settings.projectRoots || []).map(r => r.replace(/^~/, homedir()));
+  const allowed = roots.some(r => resolvedDir.startsWith(r));
+  if (!allowed) {
+    return NextResponse.json({ error: 'Directory not in project roots' }, { status: 403 });
+  }
+
+  try {
+    writeFileSync(fullPath, content, 'utf-8');
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: 'Failed to save' }, { status: 500 });
+  }
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { loadSettings } from '@/lib/settings';
@@ -127,4 +127,35 @@ export async function GET(req: Request) {
   const tree = scanDir(root, root);
 
   return NextResponse.json({ roots: rootNames, rootPaths: docRoots, tree });
+}
+
+// PUT /api/docs — save file content
+export async function PUT(req: Request) {
+  const { root: rootIdx, file: filePath, content } = await req.json() as {
+    root: number;
+    file: string;
+    content: string;
+  };
+
+  const settings = loadSettings();
+  const docRoots = (settings.docRoots || []).map(r => r.replace(/^~/, homedir()));
+
+  if (rootIdx >= docRoots.length || !filePath) {
+    return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+  }
+
+  const root = docRoots[rootIdx];
+  const fullPath = join(root, filePath);
+
+  // Security: ensure path is within root
+  if (!fullPath.startsWith(root)) {
+    return NextResponse.json({ error: 'Invalid path' }, { status: 400 });
+  }
+
+  try {
+    writeFileSync(fullPath, content, 'utf-8');
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: 'Failed to save' }, { status: 500 });
+  }
 }
