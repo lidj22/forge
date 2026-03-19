@@ -1210,7 +1210,7 @@ async function sendNoteToDocsClaude(chatId: number, content: string) {
       await new Promise(r => setTimeout(r, 500));
       // cd to doc root and start claude
       const sf = settings.skipPermissions ? ' --dangerously-skip-permissions' : '';
-      spawnSync('tmux', ['send-keys', '-t', SESSION_NAME, `cd "${docRoot}" && claude --resume${sf}`, 'Enter'], { timeout: 5000 });
+      spawnSync('tmux', ['send-keys', '-t', SESSION_NAME, `cd "${docRoot}" && claude -c${sf}`, 'Enter'], { timeout: 5000 });
       // Wait for Claude to start up
       await new Promise(r => setTimeout(r, 3000));
       await send(chatId, '🚀 Auto-started Docs Claude session.');
@@ -1230,7 +1230,7 @@ async function sendNoteToDocsClaude(chatId: number, content: string) {
   if (paneCmd === 'zsh' || paneCmd === 'bash' || paneCmd === 'fish' || !paneCmd) {
     try {
       const sf = settings.skipPermissions ? ' --dangerously-skip-permissions' : '';
-      spawnSync('tmux', ['send-keys', '-t', SESSION_NAME, `cd "${docRoot}" && claude --resume${sf}`, 'Enter'], { timeout: 5000 });
+      spawnSync('tmux', ['send-keys', '-t', SESSION_NAME, `cd "${docRoot}" && claude -c${sf}`, 'Enter'], { timeout: 5000 });
       await new Promise(r => setTimeout(r, 3000));
       await send(chatId, '🚀 Auto-started Claude in Docs session.');
     } catch {

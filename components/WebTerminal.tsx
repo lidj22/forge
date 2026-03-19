@@ -710,7 +710,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                                     hasSession = Array.isArray(sData) ? sData.length > 0 : (Array.isArray(sData.sessions) && sData.sessions.length > 0);
                                   } catch {}
                                   const skipFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
-                                  const resumeFlag = hasSession ? ' --resume' : '';
+                                  const resumeFlag = hasSession ? ' -c' : '';
                                   const tree = makeTerminal(undefined, p.path);
                                   const paneId = firstTerminalId(tree);
                                   pendingCommands.set(paneId, `cd "${p.path}" && claude${resumeFlag}${skipFlag}\n`);

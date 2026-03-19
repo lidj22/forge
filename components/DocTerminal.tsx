@@ -88,7 +88,7 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
               setTimeout(() => {
                 if (socket.readyState === WebSocket.OPEN) {
                   const sf = skipPermRef.current ? ' --dangerously-skip-permissions' : '';
-                  socket.send(JSON.stringify({ type: 'input', data: `cd "${docRootRef.current}" && claude --resume${sf}\n` }));
+                  socket.send(JSON.stringify({ type: 'input', data: `cd "${docRootRef.current}" && claude -c${sf}\n` }));
                 }
               }, 300);
             }
@@ -163,7 +163,7 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
             New
           </button>
           <button
-            onClick={() => { const sf = skipPermRef.current ? ' --dangerously-skip-permissions' : ''; runCommand(`cd "${docRoot}" && claude --resume${sf}`); }}
+            onClick={() => { const sf = skipPermRef.current ? ' --dangerously-skip-permissions' : ''; runCommand(`cd "${docRoot}" && claude -c${sf}`); }}
             className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-white hover:bg-[#2a2a4a] rounded"
           >
             Resume
