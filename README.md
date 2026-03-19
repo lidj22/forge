@@ -21,6 +21,10 @@
 
 ---
 
+## Demo & Install Guide
+
+[![Forge Install Guide](https://img.youtube.com/vi/F3fiSiP3pZY/maxresdefault.jpg)](https://www.youtube.com/watch?v=F3fiSiP3pZY)
+
 ## Install
 
 ```bash
@@ -101,10 +105,6 @@ Create a bot via [@BotFather](https://t.me/botfather), add the token in Settings
 ## Data
 
 All data in `~/.forge/` — settings, database, terminal state, workflows, logs. Configurable via `--dir` flag.
-
-## Demo
-
-[![Forge Demo](https://img.youtube.com/vi/F3fiSiP3pZY/maxresdefault.jpg)](https://www.youtube.com/watch?v=F3fiSiP3pZY)
 
 ## License
 
