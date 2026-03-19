@@ -8,6 +8,7 @@ export default function LoginPage() {
   const [sessionCode, setSessionCode] = useState('');
   const [error, setError] = useState('');
   const [isRemote, setIsRemote] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     const host = window.location.hostname;
@@ -76,6 +77,21 @@ export default function LoginPage() {
               Session code is generated when tunnel starts. Use /tunnel_code in Telegram to get it.
             </p>
           )}
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => setShowHelp(v => !v)}
+              className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              Forgot password?
+            </button>
+            {showHelp && (
+              <p className="text-[10px] text-[var(--text-secondary)] mt-1 bg-[var(--bg-tertiary)] rounded p-2">
+                Run in terminal:<br />
+                <code className="text-[var(--accent)]">forge server start --reset-password</code>
+              </p>
+            )}
+          </div>
         </form>
 
       </div>

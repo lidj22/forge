@@ -59,6 +59,7 @@ const isStop = process.argv.includes('--stop');
 const isRestart = process.argv.includes('--restart');
 const isRebuild = process.argv.includes('--rebuild');
 const resetTerminal = process.argv.includes('--reset-terminal');
+const resetPassword = process.argv.includes('--reset-password');
 
 const webPort = parseInt(getArg('--port')) || 3000;
 const terminalPort = parseInt(getArg('--terminal-port')) || 3001;
@@ -88,6 +89,67 @@ if (existsSync(envFile)) {
 process.env.PORT = String(webPort);
 process.env.TERMINAL_PORT = String(terminalPort);
 process.env.FORGE_DATA_DIR = DATA_DIR;
+
+// ── Password setup (first run or --reset-password) ──
+if (!isStop) {
+  const YAML = await import('yaml');
+  const settingsFile = join(DATA_DIR, 'settings.yaml');
+  let settings = {};
+  try { settings = YAML.parse(readFileSync(settingsFile, 'utf-8')) || {}; } catch {}
+
+  const hasPassword = !!settings.telegramTunnelPassword;
+
+  if (resetPassword || !hasPassword) {
+    if (resetPassword) {
+      console.log('[forge] Password reset requested');
+    } else {
+      console.log('[forge] First run — please set an admin password');
+    }
+
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ask = (q) => new Promise(resolve => rl.question(q, resolve));
+
+    let pw = '';
+    while (true) {
+      pw = await ask('  Enter admin password: ');
+      if (!pw || pw.length < 4) {
+        console.log('  Password must be at least 4 characters');
+        continue;
+      }
+      const confirm = await ask('  Confirm password: ');
+      if (pw !== confirm) {
+        console.log('  Passwords do not match, try again');
+        continue;
+      }
+      break;
+    }
+    rl.close();
+
+    // Encrypt and save
+    const crypto = await import('node:crypto');
+    const KEY_FILE = join(DATA_DIR, '.encrypt-key');
+    let encKey;
+    if (existsSync(KEY_FILE)) {
+      encKey = Buffer.from(readFileSync(KEY_FILE, 'utf-8').trim(), 'hex');
+    } else {
+      encKey = crypto.randomBytes(32);
+      writeFileSync(KEY_FILE, encKey.toString('hex'), { mode: 0o600 });
+    }
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', encKey, iv);
+    const encrypted = Buffer.concat([cipher.update(pw, 'utf-8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    settings.telegramTunnelPassword = `enc:${iv.toString('base64')}.${tag.toString('base64')}.${encrypted.toString('base64')}`;
+    if (!existsSync(dirname(settingsFile))) mkdirSync(dirname(settingsFile), { recursive: true });
+    writeFileSync(settingsFile, YAML.stringify(settings), 'utf-8');
+    console.log('[forge] Admin password saved');
+
+    if (resetPassword && !isDev && !isBackground && !isRestart) {
+      process.exit(0);
+    }
+  }
+}
 
 // ── Reset terminal server (kill port + tmux sessions) ──
 if (resetTerminal) {
