@@ -3,9 +3,10 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from '
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { getClaudeDir } from '@/lib/dirs';
 
-const SKILLS_DIR = join(homedir(), '.claude', 'skills');
-const COMMANDS_DIR = join(homedir(), '.claude', 'commands');
+const SKILLS_DIR = join(getClaudeDir(), 'skills');
+const COMMANDS_DIR = join(getClaudeDir(), 'commands');
 
 function md5(content: string): string {
   return createHash('md5').update(content).digest('hex');

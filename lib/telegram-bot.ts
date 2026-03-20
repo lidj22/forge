@@ -1246,7 +1246,8 @@ async function sendNoteToDocsClaude(chatId: number, content: string) {
   }
 
   // Write content to a temp file, then use tmux to send a prompt referencing it
-  const tmpFile = join(homedir(), '.forge', '.note-tmp.txt');
+  const { getDataDir: _getDataDir } = require('./dirs');
+  const tmpFile = join(_getDataDir(), '.note-tmp.txt');
   try {
     writeFileSync(tmpFile, content, 'utf-8');
 

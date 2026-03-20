@@ -14,8 +14,8 @@ import { getDbPath } from '@/src/config';
 import { loadSettings } from './settings';
 import { existsSync, mkdirSync, writeFileSync, unlinkSync, readdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { getClaudeDir } from './dirs';
 
 export type ItemType = 'skill' | 'command';
 
@@ -39,8 +39,8 @@ function db() {
   return getDb(getDbPath());
 }
 
-const GLOBAL_SKILLS_DIR = join(homedir(), '.claude', 'skills');
-const GLOBAL_COMMANDS_DIR = join(homedir(), '.claude', 'commands');
+const GLOBAL_SKILLS_DIR = join(getClaudeDir(), 'skills');
+const GLOBAL_COMMANDS_DIR = join(getClaudeDir(), 'commands');
 
 function getBaseUrl(): string {
   const settings = loadSettings();

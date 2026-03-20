@@ -66,11 +66,11 @@ No API keys required. Uses your existing Claude Code subscription. Code never le
 ## Quick Start
 
 ```bash
-forge server start          # start
-forge server start --dev    # dev mode with hot-reload
-forge server start --background  # run in background
-forge server stop           # stop
-forge server restart        # restart
+forge server start              # start (background by default)
+forge server start --foreground # run in foreground
+forge server start --dev        # dev mode with hot-reload
+forge server stop               # stop
+forge server restart            # restart
 ```
 
 ### From source
@@ -89,7 +89,7 @@ forge task <project> <prompt>   # submit a task
 forge tasks                     # list tasks
 forge watch <id>                # live stream output
 forge status                    # process status
-forge password                  # show login password
+forge tcode                     # show tunnel URL + session code
 forge projects                  # list projects
 forge flows                     # list workflows
 forge run <flow>                # run a workflow

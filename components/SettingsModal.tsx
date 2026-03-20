@@ -446,6 +446,23 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           </p>
         </div>
 
+        {/* Claude Home Directory */}
+        <div className="space-y-2">
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
+            Claude Home Directory
+          </label>
+          <input
+            type="text"
+            value={(settings as any).claudeHome || ''}
+            onChange={e => setSettings({ ...settings, claudeHome: e.target.value } as any)}
+            placeholder="~/.claude (default)"
+            className="w-full px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono"
+          />
+          <p className="text-[9px] text-[var(--text-secondary)]">
+            Where Claude Code stores skills, commands, and sessions. Leave empty for default (~/.claude).
+          </p>
+        </div>
+
         {/* Telegram Notifications */}
         <div className="space-y-2">
           <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">

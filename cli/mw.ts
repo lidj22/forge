@@ -361,24 +361,30 @@ async function main() {
       break;
     }
 
-    case 'password':
-    case 'pw': {
+    case 'tunnel_code':
+    case 'tcode': {
       const { readFileSync, existsSync } = await import('node:fs');
-      const { homedir } = await import('node:os');
       const { join } = await import('node:path');
-      const dataDir = process.env.FORGE_DATA_DIR || join(homedir(), '.forge');
+      const { getDataDir: _gdd } = await import('../lib/dirs');
+      const dataDir = _gdd();
       const codeFile = join(dataDir, 'session-code.json');
       try {
         if (existsSync(codeFile)) {
           const data = JSON.parse(readFileSync(codeFile, 'utf-8'));
           if (data.code) {
-            console.log(`Session code: ${data.code} (for remote login 2FA)`);
+            console.log(`Session code: ${data.code}`);
+          } else {
+            console.log('No session code. Start tunnel first.');
           }
+        } else {
+          console.log('No session code. Start tunnel first.');
         }
       } catch {}
-      console.log('Admin password: configured in Settings → Admin Password');
-      console.log('Local login: admin password only');
-      console.log('Remote login: admin password + session code');
+      // Also show tunnel URL if running
+      try {
+        const tunnelState = JSON.parse(readFileSync(join(dataDir, 'tunnel-state.json'), 'utf-8'));
+        if (tunnelState.url) console.log(`Tunnel URL: ${tunnelState.url}`);
+      } catch {}
       break;
     }
 
