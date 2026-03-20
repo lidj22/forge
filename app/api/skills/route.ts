@@ -127,7 +127,8 @@ export async function POST(req: Request) {
   }
 
   if (body.action === 'install') {
-    const { name, target, force } = body; // target: 'global' | projectPath, force: skip modification check
+    const { name, target } = body; // target: 'global' | projectPath
+    if (!name || !target) return NextResponse.json({ ok: false, error: 'name and target required' }, { status: 400 });
     try {
       if (target === 'global') {
         await installGlobal(name);
@@ -142,12 +143,17 @@ export async function POST(req: Request) {
 
   if (body.action === 'uninstall') {
     const { name, target } = body;
-    if (target === 'global') {
-      uninstallGlobal(name);
-    } else {
-      uninstallProject(name, target);
+    if (!name || !target) return NextResponse.json({ ok: false, error: 'name and target required' }, { status: 400 });
+    try {
+      if (target === 'global') {
+        uninstallGlobal(name);
+      } else {
+        uninstallProject(name, target);
+      }
+      return NextResponse.json({ ok: true });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
     }
-    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

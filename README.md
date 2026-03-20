@@ -58,8 +58,8 @@ No API keys required. Uses your existing Claude Code subscription. Code never le
 | **Pipelines** | YAML DAG workflows with parallel execution & visual editor |
 | **Remote Access** | Cloudflare Tunnel with 2FA (password + session code) |
 | **Docs Viewer** | Obsidian / markdown rendering with AI assistant |
-| **Projects** | File browser, git operations, code viewer |
-| **Skills** | Browse & install Claude Code skills from registry |
+| **Projects** | File browser, git operations, code viewer with syntax highlighting, diff view |
+| **Skills** | Marketplace for skills & commands — browse, install, update, version tracking |
 | **Telegram** | Tasks, sessions, notes, tunnel control from mobile |
 | **CLI** | `forge task`, `forge watch`, `forge status`, and more |
 
