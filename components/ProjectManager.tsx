@@ -37,7 +37,16 @@ export default function ProjectManager() {
   const [fileLanguage, setFileLanguage] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
   const [showLog, setShowLog] = useState(false);
-  const [projectSkills, setProjectSkills] = useState<{ name: string; displayName: string; scope: string }[]>([]);
+  const [projectSkills, setProjectSkills] = useState<{ name: string; displayName: string; type: string; scope: string; version: string; installedVersion: string; hasUpdate: boolean }[]>([]);
+  const [showSkillsDetail, setShowSkillsDetail] = useState(false);
+  const [expandedSkillItem, setExpandedSkillItem] = useState<string | null>(null);
+  const [skillItemFiles, setSkillItemFiles] = useState<{ path: string; size: number }[]>([]);
+  const [skillFileContent, setSkillFileContent] = useState('');
+  const [skillFileHash, setSkillFileHash] = useState('');
+  const [skillActivePath, setSkillActivePath] = useState('');
+  const [skillEditing, setSkillEditing] = useState(false);
+  const [skillEditContent, setSkillEditContent] = useState('');
+  const [skillSaving, setSkillSaving] = useState(false);
 
   // Fetch projects
   useEffect(() => {
@@ -68,6 +77,80 @@ export default function ProjectManager() {
     } catch { setFileTree([]); }
   }, []);
 
+  const toggleSkillItem = useCallback(async (name: string, type: string) => {
+    if (expandedSkillItem === name) {
+      setExpandedSkillItem(null);
+      setSkillEditing(false);
+      return;
+    }
+    setExpandedSkillItem(name);
+    setSkillItemFiles([]);
+    setSkillFileContent('');
+    setSkillActivePath('');
+    setSkillEditing(false);
+    const project = selectedProject?.path || '';
+    try {
+      const res = await fetch(`/api/skills/local?action=files&name=${encodeURIComponent(name)}&type=${type}&project=${encodeURIComponent(project)}`);
+      const data = await res.json();
+      setSkillItemFiles(data.files || []);
+      // Auto-select first .md file
+      const firstMd = (data.files || []).find((f: any) => f.path.endsWith('.md'));
+      if (firstMd) loadSkillFile(name, type, firstMd.path, project);
+    } catch {}
+  }, [expandedSkillItem, selectedProject]);
+
+  const loadSkillFile = async (name: string, type: string, path: string, project: string) => {
+    setSkillActivePath(path);
+    setSkillEditing(false);
+    setSkillFileContent('Loading...');
+    try {
+      const res = await fetch(`/api/skills/local?action=read&name=${encodeURIComponent(name)}&type=${type}&path=${encodeURIComponent(path)}&project=${encodeURIComponent(project)}`);
+      const data = await res.json();
+      setSkillFileContent(data.content || '');
+      setSkillFileHash(data.hash || '');
+    } catch { setSkillFileContent('(Failed to load)'); }
+  };
+
+  const saveSkillFile = async (name: string, type: string, path: string) => {
+    setSkillSaving(true);
+    const project = selectedProject?.path || '';
+    const res = await fetch('/api/skills/local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type, project, path, content: skillEditContent, expectedHash: skillFileHash }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setSkillFileContent(skillEditContent);
+      setSkillFileHash(data.hash);
+      setSkillEditing(false);
+    } else {
+      alert(data.error || 'Save failed');
+    }
+    setSkillSaving(false);
+  };
+
+  const handleUpdate = async (name: string) => {
+    // Check for local modifications first
+    const checkRes = await fetch('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'check-modified', name }),
+    });
+    const checkData = await checkRes.json();
+    if (checkData.modified) {
+      if (!confirm('Local files have been modified. Overwrite with remote version?')) return;
+    }
+    // Re-install (update)
+    const target = selectedProject?.path || 'global';
+    await fetch('/api/skills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'install', name, target, force: true }),
+    });
+    if (selectedProject) fetchProjectSkills(selectedProject.path);
+  };
+
   const fetchProjectSkills = useCallback(async (projectPath: string) => {
     try {
       const res = await fetch('/api/skills');
@@ -77,6 +160,10 @@ export default function ProjectManager() {
       ).map((s: any) => ({
         name: s.name,
         displayName: s.displayName,
+        type: s.type || 'command',
+        version: s.version || '',
+        installedVersion: s.installedVersion || '',
+        hasUpdate: s.hasUpdate || false,
         scope: s.installedGlobal && (s.installedProjects || []).includes(projectPath) ? 'global + project'
           : s.installedGlobal ? 'global'
           : 'project',
@@ -198,7 +285,7 @@ export default function ProjectManager() {
         <div className="flex-1 overflow-y-auto">
           {roots.map(root => {
             const rootName = root.split('/').pop() || root;
-            const rootProjects = projects.filter(p => p.root === root);
+            const rootProjects = projects.filter(p => p.root === root).sort((a, b) => a.name.localeCompare(b.name));
             return (
               <div key={root}>
                 <div className="px-3 py-1 text-[9px] text-[var(--text-secondary)] uppercase bg-[var(--bg-tertiary)]">
@@ -236,13 +323,29 @@ export default function ProjectManager() {
                 )}
                 {gitInfo?.ahead ? <span className="text-[9px] text-green-400">↑{gitInfo.ahead}</span> : null}
                 {gitInfo?.behind ? <span className="text-[9px] text-yellow-400">↓{gitInfo.behind}</span> : null}
-                <button
-                  onClick={() => { fetchGitInfo(selectedProject); fetchTree(selectedProject); if (selectedFile) openFile(selectedFile); }}
-                  className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ml-auto"
-                  title="Refresh"
-                >
-                  ↻
-                </button>
+                {/* Action buttons */}
+                <div className="flex items-center gap-1.5 ml-auto">
+                  {/* Open Terminal */}
+                  <button
+                    onClick={() => {
+                      if (!selectedProject) return;
+                      // Navigate to terminal tab with this project
+                      const event = new CustomEvent('forge:open-terminal', { detail: { projectPath: selectedProject.path, projectName: selectedProject.name } });
+                      window.dispatchEvent(event);
+                    }}
+                    className="text-[9px] px-2 py-0.5 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white transition-colors"
+                    title="Open terminal with claude -c"
+                  >
+                    Terminal
+                  </button>
+                  <button
+                    onClick={() => { fetchGitInfo(selectedProject); fetchTree(selectedProject); if (selectedFile) openFile(selectedFile); }}
+                    className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    title="Refresh"
+                  >
+                    ↻
+                  </button>
+                </div>
               </div>
               <div className="text-[9px] text-[var(--text-secondary)] mt-0.5">
                 {selectedProject.path}
@@ -251,18 +354,116 @@ export default function ProjectManager() {
                 )}
               </div>
               {projectSkills.length > 0 && (
-                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                  <span className="text-[9px] text-[var(--text-secondary)]">Skills:</span>
-                  {projectSkills.map(s => (
-                    <span
-                      key={s.name}
-                      className="text-[8px] px-1.5 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)]"
-                      title={`/${s.name} (${s.scope})`}
-                    >
-                      /{s.displayName}
-                      <span className="text-[var(--text-secondary)] ml-0.5">({s.scope})</span>
-                    </span>
-                  ))}
+                <div className="mt-1">
+                  {/* Summary line — click to expand */}
+                  <button
+                    onClick={() => setShowSkillsDetail(v => !v)}
+                    className="flex items-center gap-2 text-[9px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    <span>{showSkillsDetail ? '▾' : '▸'}</span>
+                    {(() => {
+                      const skills = projectSkills.filter(s => s.type === 'skill');
+                      const commands = projectSkills.filter(s => s.type === 'command');
+                      const hasUpdates = projectSkills.some(s => s.hasUpdate);
+                      return (
+                        <span className="flex items-center gap-1.5">
+                          {skills.length > 0 && <span className="text-purple-400">{skills.length} skill{skills.length > 1 ? 's' : ''}</span>}
+                          {commands.length > 0 && <span className="text-blue-400">{commands.length} cmd{commands.length > 1 ? 's' : ''}</span>}
+                          {hasUpdates && <span className="text-[var(--yellow)]">updates available</span>}
+                        </span>
+                      );
+                    })()}
+                  </button>
+                  {/* Expanded detail */}
+                  {showSkillsDetail && (
+                    <div className="mt-1 border border-[var(--border)] rounded bg-[var(--bg-tertiary)]">
+                      {projectSkills.map(s => (
+                        <div key={s.name} className="border-b border-[var(--border)]/30 last:border-b-0">
+                          {/* Item header */}
+                          <div
+                            className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-[var(--bg-secondary)]"
+                            onClick={() => toggleSkillItem(s.name, s.type)}
+                          >
+                            <span className="text-[8px] text-[var(--text-secondary)]">{expandedSkillItem === s.name ? '▾' : '▸'}</span>
+                            <span className={`text-[7px] px-1 rounded font-medium ${
+                              s.type === 'skill' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                            }`}>{s.type === 'skill' ? 'S' : 'C'}</span>
+                            <span className="text-[9px] text-[var(--text-primary)] flex-1 truncate">/{s.name}</span>
+                            <span className="text-[8px] text-[var(--text-secondary)] font-mono">v{s.installedVersion || s.version}</span>
+                            {s.hasUpdate && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleUpdate(s.name); }}
+                                className="text-[7px] px-1.5 py-0.5 rounded bg-[var(--yellow)]/20 text-[var(--yellow)] hover:bg-[var(--yellow)]/30"
+                              >
+                                → v{s.version}
+                              </button>
+                            )}
+                            <span className="text-[7px] text-[var(--text-secondary)]">{s.scope}</span>
+                          </div>
+                          {/* Expanded: file browser + editor */}
+                          {expandedSkillItem === s.name && (
+                            <div className="flex border-t border-[var(--border)] h-[200px]">
+                              {/* File list */}
+                              <div className="w-28 border-r border-[var(--border)] overflow-y-auto shrink-0">
+                                {skillItemFiles.map(f => (
+                                  <button
+                                    key={f.path}
+                                    onClick={() => loadSkillFile(s.name, s.type, f.path, selectedProject?.path || '')}
+                                    className={`w-full text-left px-2 py-1 text-[9px] truncate ${
+                                      skillActivePath === f.path ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                    }`}
+                                    title={f.path}
+                                  >
+                                    {f.path}
+                                  </button>
+                                ))}
+                              </div>
+                              {/* Content / editor */}
+                              <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                                {skillActivePath && (
+                                  <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--border)] shrink-0">
+                                    <span className="text-[8px] text-[var(--text-secondary)] font-mono truncate flex-1">{skillActivePath}</span>
+                                    {!skillEditing ? (
+                                      <button
+                                        onClick={() => { setSkillEditing(true); setSkillEditContent(skillFileContent); }}
+                                        className="text-[8px] text-[var(--accent)] hover:underline"
+                                      >Edit</button>
+                                    ) : (
+                                      <div className="flex gap-1">
+                                        <button
+                                          onClick={() => saveSkillFile(s.name, s.type, skillActivePath)}
+                                          disabled={skillSaving}
+                                          className="text-[8px] px-1.5 py-0.5 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
+                                        >{skillSaving ? '...' : 'Save'}</button>
+                                        <button
+                                          onClick={() => setSkillEditing(false)}
+                                          className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                        >Cancel</button>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                <div className="flex-1 overflow-auto">
+                                  {skillEditing ? (
+                                    <textarea
+                                      value={skillEditContent}
+                                      onChange={e => setSkillEditContent(e.target.value)}
+                                      className="w-full h-full p-2 text-[10px] font-mono bg-[var(--bg-primary)] text-[var(--text-primary)] border-none outline-none resize-none"
+                                      spellCheck={false}
+                                    />
+                                  ) : (
+                                    <pre className="p-2 text-[10px] font-mono text-[var(--text-primary)] whitespace-pre-wrap break-words">
+                                      {skillFileContent}
+                                    </pre>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {gitInfo?.lastCommit && (

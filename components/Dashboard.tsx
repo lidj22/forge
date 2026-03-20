@@ -84,6 +84,20 @@ export default function Dashboard({ user }: { user: any }) {
   }, []);
   useEffect(() => { refreshDisplayName(); }, [refreshDisplayName]);
 
+  // Listen for open-terminal events from ProjectManager
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { projectPath, projectName } = (e as CustomEvent).detail;
+      setViewMode('terminal');
+      // Give terminal time to render, then trigger open
+      setTimeout(() => {
+        terminalRef.current?.openProjectTerminal?.(projectPath, projectName);
+      }, 300);
+    };
+    window.addEventListener('forge:open-terminal', handler);
+    return () => window.removeEventListener('forge:open-terminal', handler);
+  }, []);
+
   // Version check (on mount + every 10 min)
   useEffect(() => {
     const check = () => fetch('/api/version').then(r => r.json()).then(setVersionInfo).catch(() => {});

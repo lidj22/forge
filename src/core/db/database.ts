@@ -24,6 +24,9 @@ function initSchema(db: Database.Database) {
   try { db.exec('ALTER TABLE tasks ADD COLUMN scheduled_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE tasks ADD COLUMN mode TEXT NOT NULL DEFAULT \'prompt\''); } catch {}
   try { db.exec('ALTER TABLE tasks ADD COLUMN watch_config TEXT'); } catch {}
+  try { db.exec("ALTER TABLE skills ADD COLUMN type TEXT NOT NULL DEFAULT 'skill'"); } catch {}
+  try { db.exec('ALTER TABLE skills ADD COLUMN archive TEXT'); } catch {}
+  try { db.exec("ALTER TABLE skills ADD COLUMN installed_version TEXT NOT NULL DEFAULT ''"); } catch {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (

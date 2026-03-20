@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
+type ItemType = 'skill' | 'command';
+
 interface Skill {
   name: string;
+  type: ItemType;
   displayName: string;
   description: string;
   author: string;
@@ -12,6 +15,8 @@ interface Skill {
   score: number;
   sourceUrl: string;
   installedGlobal: boolean;
+  installedVersion: string;
+  hasUpdate: boolean;
   installedProjects: string[];
 }
 
@@ -26,6 +31,7 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [installTarget, setInstallTarget] = useState<{ skill: string; show: boolean }>({ skill: '', show: false });
+  const [typeFilter, setTypeFilter] = useState<'all' | 'skill' | 'command'>('all');
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [skillFiles, setSkillFiles] = useState<{ name: string; path: string; type: string }[]>([]);
   const [activeFile, setActiveFile] = useState<string | null>(null);
@@ -104,10 +110,13 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
     fetchSkills();
   };
 
-  // Filter skills if viewing a specific project
-  const filtered = projectFilter
-    ? skills.filter(s => s.installedGlobal || s.installedProjects.includes(projectFilter))
-    : skills;
+  // Filter by project and/or type
+  const filtered = skills
+    .filter(s => projectFilter ? (s.installedGlobal || s.installedProjects.includes(projectFilter)) : true)
+    .filter(s => typeFilter === 'all' ? true : s.type === typeFilter);
+
+  const skillCount = skills.filter(s => s.type === 'skill').length;
+  const commandCount = skills.filter(s => s.type === 'command').length;
 
   if (loading) {
     return <div className="p-4 text-xs text-[var(--text-secondary)]">Loading skills...</div>;
@@ -118,8 +127,22 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border)] shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-[var(--text-primary)]">Skills</span>
-          <span className="text-[9px] text-[var(--text-secondary)]">{filtered.length} available</span>
+          <span className="text-xs font-semibold text-[var(--text-primary)]">Marketplace</span>
+          <div className="flex items-center bg-[var(--bg-tertiary)] rounded p-0.5">
+            {([['all', `All (${skills.length})`], ['skill', `Skills (${skillCount})`], ['command', `Commands (${commandCount})`]] as const).map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setTypeFilter(value)}
+                className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
+                  typeFilter === value
+                    ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         <button
           onClick={sync}
@@ -161,11 +184,15 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                   </div>
                   <p className="text-[9px] text-[var(--text-secondary)] mt-0.5 line-clamp-1">{skill.description}</p>
                   <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`text-[7px] px-1 rounded font-medium ${
+                      skill.type === 'skill' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                    }`}>{skill.type === 'skill' ? 'SKILL' : 'CMD'}</span>
                     <span className="text-[8px] text-[var(--text-secondary)]">{skill.author}</span>
                     {skill.tags.slice(0, 2).map(t => (
                       <span key={t} className="text-[7px] px-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">{t}</span>
                     ))}
-                    {isInstalled && <span className="text-[8px] text-[var(--green)] ml-auto">installed</span>}
+                    {skill.hasUpdate && <span className="text-[8px] text-[var(--yellow)] ml-auto">update</span>}
+                    {isInstalled && !skill.hasUpdate && <span className="text-[8px] text-[var(--green)] ml-auto">installed</span>}
                   </div>
                 </div>
               );
@@ -184,8 +211,28 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                   <div className="px-4 py-2 border-b border-[var(--border)] shrink-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-semibold text-[var(--text-primary)]">{skill.displayName}</span>
+                      <span className={`text-[8px] px-1.5 py-0.5 rounded font-medium ${
+                        skill.type === 'skill' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                      }`}>{skill.type === 'skill' ? 'Skill' : 'Command'}</span>
                       <span className="text-[9px] text-[var(--text-secondary)] font-mono">v{skill.version}</span>
+                      {skill.installedVersion && skill.installedVersion !== skill.version && (
+                        <span className="text-[9px] text-[var(--yellow)] font-mono">installed: v{skill.installedVersion}</span>
+                      )}
                       {skill.score > 0 && <span className="text-[9px] text-[var(--yellow)]">{skill.score}pt</span>}
+
+                      {/* Update button */}
+                      {skill.hasUpdate && (
+                        <button
+                          onClick={async () => {
+                            // Re-install to update (global if globally installed, plus all project installs)
+                            if (skill.installedGlobal) await install(skill.name, 'global');
+                            for (const pp of skill.installedProjects) await install(skill.name, pp);
+                          }}
+                          className="text-[9px] px-2 py-1 bg-[var(--yellow)]/20 text-[var(--yellow)] border border-[var(--yellow)]/50 rounded hover:bg-[var(--yellow)]/30 transition-colors"
+                        >
+                          Update
+                        </button>
+                      )}
 
                       {/* Install dropdown */}
                       <div className="relative ml-auto">
