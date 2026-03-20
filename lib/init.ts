@@ -64,6 +64,9 @@ export function ensureInitialized() {
   if (gInit[initKey]) return;
   gInit[initKey] = true;
 
+  // Migrate old data layout (~/.forge/* → ~/.forge/data/*) on first run
+  try { const { migrateDataDir } = require('./dirs'); migrateDataDir(); } catch {}
+
   // Migrate plaintext secrets on startup
   migrateSecrets();
 

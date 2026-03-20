@@ -70,6 +70,40 @@ const PID_FILE = join(DATA_DIR, 'forge.pid');
 const LOG_FILE = join(DATA_DIR, 'forge.log');
 
 process.chdir(ROOT);
+
+// ── Migrate old layout (~/.forge/*) to new (~/.forge/data/*) ──
+if (!getArg('--dir')) {
+  const oldSettings = join(homedir(), '.forge', 'settings.yaml');
+  const newSettings = join(DATA_DIR, 'settings.yaml');
+  if (existsSync(oldSettings) && !existsSync(newSettings)) {
+    console.log('[forge] Migrating data from ~/.forge/ to ~/.forge/data/...');
+    mkdirSync(DATA_DIR, { recursive: true });
+    const migrateFiles = ['settings.yaml', '.encrypt-key', '.env.local', 'session-code.json', 'terminal-state.json', 'tunnel-state.json', 'preview.json', 'forge.pid', 'forge.log'];
+    for (const f of migrateFiles) {
+      const src = join(homedir(), '.forge', f);
+      const dest = join(DATA_DIR, f);
+      if (existsSync(src) && !existsSync(dest)) {
+        try { const { copyFileSync } = await import('node:fs'); copyFileSync(src, dest); console.log(`  ${f}`); } catch {}
+      }
+    }
+    // data.db → workflow.db
+    const oldDb = join(homedir(), '.forge', 'data.db');
+    const newDb = join(DATA_DIR, 'workflow.db');
+    if (existsSync(oldDb) && !existsSync(newDb)) {
+      try { const { copyFileSync } = await import('node:fs'); copyFileSync(oldDb, newDb); console.log('  data.db → workflow.db'); } catch {}
+    }
+    // Migrate directories
+    for (const d of ['flows', 'pipelines']) {
+      const src = join(homedir(), '.forge', d);
+      const dest = join(DATA_DIR, d);
+      if (existsSync(src) && !existsSync(dest)) {
+        try { const { renameSync } = await import('node:fs'); renameSync(src, dest); console.log(`  ${d}/`); } catch {}
+      }
+    }
+    console.log('[forge] Migration complete.');
+  }
+}
+
 mkdirSync(DATA_DIR, { recursive: true });
 
 // ── Load <data-dir>/.env.local ──
