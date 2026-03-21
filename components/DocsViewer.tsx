@@ -15,7 +15,7 @@ interface DocTab {
   isImage: boolean;
 }
 
-let nextDocTabId = 1;
+let nextDocTabId = Date.now();
 
 interface FileNode {
   name: string;
@@ -156,14 +156,19 @@ export default function DocsViewer() {
     const isImg = isImageFile(path);
     const fileName = path.split('/').pop() || path;
 
-    // Check if tab already exists
-    const existing = docTabs.find(t => t.filePath === path);
-    if (existing) {
-      setActiveDocTabId(existing.id);
-      setContent(existing.content);
-      persistDocTabs(docTabs, existing.id);
-      return;
-    }
+    // Check if tab already exists (use functional update to get latest state)
+    let found = false;
+    setDocTabs(prev => {
+      const existing = prev.find(t => t.filePath === path);
+      if (existing) {
+        found = true;
+        setActiveDocTabId(existing.id);
+        setContent(existing.content);
+        persistDocTabs(prev, existing.id);
+      }
+      return prev;
+    });
+    if (found) return;
 
     // Fetch content
     let fileContent: string | null = null;
@@ -181,11 +186,15 @@ export default function DocsViewer() {
     setContent(fileContent);
 
     const newTab: DocTab = { id: nextDocTabId++, filePath: path, fileName, rootIdx: activeRoot, isImage: isImg, content: fileContent };
-    const updated = [...docTabs, newTab];
-    setDocTabs(updated);
-    setActiveDocTabId(newTab.id);
-    persistDocTabs(updated, newTab.id);
-  }, [docTabs, activeRoot, persistDocTabs]);
+    setDocTabs(prev => {
+      // Double-check no duplicate
+      if (prev.find(t => t.filePath === path)) return prev;
+      const updated = [...prev, newTab];
+      setActiveDocTabId(newTab.id);
+      persistDocTabs(updated, newTab.id);
+      return updated;
+    });
+  }, [activeRoot, persistDocTabs]);
 
   const closeDocTab = useCallback((tabId: number) => {
     setDocTabs(prev => {
