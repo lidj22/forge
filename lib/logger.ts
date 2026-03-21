@@ -15,13 +15,18 @@ export function initLogger() {
   (globalThis as any)[loggerKey] = true;
 
   // Determine log file path
+  // In production mode (FORGE_EXTERNAL_SERVICES=1), stdout is already redirected to forge.log
+  // by forge-server.mjs, so we only need to write to file in dev mode
+  const isProduction = process.env.FORGE_EXTERNAL_SERVICES === '1';
   let logFile: string | null = null;
-  try {
-    const { getDataDir } = require('./dirs');
-    const dataDir = getDataDir();
-    if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
-    logFile = join(dataDir, 'forge.log');
-  } catch {}
+  if (!isProduction) {
+    try {
+      const { getDataDir } = require('./dirs');
+      const dataDir = getDataDir();
+      if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
+      logFile = join(dataDir, 'forge.log');
+    } catch {}
+  }
 
   const origLog = console.log;
   const origError = console.error;
