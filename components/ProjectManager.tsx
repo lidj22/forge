@@ -86,10 +86,13 @@ export default function ProjectManager() {
   // Save favorites to settings
   const saveFavorites = useCallback((newFavorites: string[]) => {
     setFavorites(newFavorites);
-    fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ favoriteProjects: newFavorites }),
+    // Load current settings, merge favorites, save back
+    fetch('/api/settings').then(r => r.json()).then(current => {
+      fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...current, favoriteProjects: newFavorites }),
+      });
     }).catch(() => {});
   }, []);
 
@@ -252,7 +255,7 @@ export default function ProjectManager() {
                 >
                   <span
                     onClick={(e) => { e.stopPropagation(); toggleFavorite(p.path); }}
-                    className="text-[9px] text-[var(--yellow)] shrink-0 cursor-pointer"
+                    className="text-[13px] text-[var(--yellow)] shrink-0 cursor-pointer leading-none"
                     title="Remove from favorites"
                   >★</span>
                   <span className="truncate">{p.name}</span>
@@ -282,7 +285,7 @@ export default function ProjectManager() {
                   >
                     <span
                       onClick={(e) => { e.stopPropagation(); toggleFavorite(p.path); }}
-                      className={`text-[9px] shrink-0 cursor-pointer ${favorites.includes(p.path) ? 'text-[var(--yellow)]' : 'text-[var(--text-secondary)]/30 hover:text-[var(--yellow)]'}`}
+                      className={`text-[13px] shrink-0 cursor-pointer leading-none ${favorites.includes(p.path) ? 'text-[var(--yellow)]' : 'text-[var(--text-secondary)]/30 hover:text-[var(--yellow)]'}`}
                       title={favorites.includes(p.path) ? 'Remove from favorites' : 'Add to favorites'}
                     >{favorites.includes(p.path) ? '★' : '☆'}</span>
                     <span className="truncate">{p.name}</span>
