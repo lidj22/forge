@@ -116,8 +116,18 @@ export default function DocsViewer() {
           setDocTabs(data.tabs);
           setActiveDocTabId(data.activeTabId || data.tabs[0].id);
           // Set selectedFile to active tab's file
-          const active = data.tabs.find((t: any) => t.id === (data.activeTabId || data.tabs[0].id));
-          if (active) { setSelectedFile(active.filePath); setContent(active.content); }
+          const activeId = data.activeTabId || data.tabs[0].id;
+          const active = data.tabs.find((t: any) => t.id === activeId);
+          if (active) {
+            setSelectedFile(active.filePath);
+            // Content not stored in DB, fetch it
+            if (!active.isImage) {
+              fetch(`/api/docs?root=${active.rootIdx}&file=${encodeURIComponent(active.filePath)}`)
+                .then(r => r.json())
+                .then(d => { setContent(d.content || null); })
+                .catch(() => {});
+            }
+          }
         }
       }).catch(() => {});
   }, []);
@@ -194,15 +204,28 @@ export default function DocsViewer() {
     });
   }, [activeDocTabId, persistDocTabs]);
 
-  const activateDocTab = useCallback((tabId: number) => {
+  const activateDocTab = useCallback(async (tabId: number) => {
     const tab = docTabs.find(t => t.id === tabId);
     if (tab) {
       setActiveDocTabId(tabId);
       setSelectedFile(tab.filePath);
-      setContent(tab.content);
       setEditing(false);
       if (tab.rootIdx !== activeRoot) setActiveRoot(tab.rootIdx);
       persistDocTabs(docTabs, tabId);
+
+      // Use cached content or re-fetch
+      if (tab.content) {
+        setContent(tab.content);
+      } else if (!tab.isImage) {
+        setLoading(true);
+        const res = await fetch(`/api/docs?root=${tab.rootIdx}&file=${encodeURIComponent(tab.filePath)}`);
+        const data = await res.json();
+        const fetched = data.content || null;
+        setContent(fetched);
+        // Cache in tab
+        setDocTabs(prev => prev.map(t => t.id === tabId ? { ...t, content: fetched } : t));
+        setLoading(false);
+      }
     }
   }, [docTabs, activeRoot, persistDocTabs]);
 
