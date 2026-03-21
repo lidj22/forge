@@ -256,17 +256,19 @@ export async function startTunnel(localPort: number = parseInt(process.env.PORT 
     });
 
     state.process.on('exit', (code) => {
-      console.log(`[tunnel] Process exited with code ${code}`);
+      const recentLog = state.log.slice(-5).join(' ').slice(0, 200);
+      const reason = code !== 0 ? `cloudflared failed (exit ${code}): ${recentLog || 'no output'}` : 'cloudflared stopped';
+      console.log(`[tunnel] ${reason}`);
       state.process = null;
       if (state.status !== 'error') {
         state.status = 'stopped';
       }
       state.url = null;
       saveTunnelState();
-      pushLog(`[exit] cloudflared exited with code ${code}`);
+      pushLog(`[exit] ${reason}`);
       if (!resolved) {
         resolved = true;
-        resolve({ error: `cloudflared exited with code ${code}` });
+        resolve({ error: reason });
       }
     });
 

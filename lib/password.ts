@@ -59,7 +59,7 @@ export function getSessionCode(): string {
 export function rotateSessionCode(): string {
   const code = generateSessionCode();
   saveSessionCode(code);
-  console.log(`[password] New session code: ${code}`);
+  console.log(`[password] New session code: ****${code.slice(-2)}`);
   return code;
 }
 

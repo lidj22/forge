@@ -33,6 +33,22 @@ export function initLogger() {
     try { appendFileSync(logFile, line + '\n'); } catch {}
   };
 
+  const SENSITIVE_PATTERNS = [
+    /(\d{8,})/g,                                    // session codes (8+ digits)
+    /(bot\d+:[A-Za-z0-9_-]{30,})/gi,               // telegram bot tokens
+    /(enc:[A-Za-z0-9+/=.]+)/g,                      // encrypted values
+    /(sk-ant-[A-Za-z0-9_-]+)/g,                     // anthropic API keys
+    /(sk-[A-Za-z0-9]{20,})/g,                       // openai API keys
+  ];
+
+  const sanitize = (str: string): string => {
+    let result = str;
+    for (const pattern of SENSITIVE_PATTERNS) {
+      result = result.replace(pattern, (match) => match.slice(0, 4) + '****');
+    }
+    return result;
+  };
+
   const format = (...args: any[]): string => {
     return args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
   };
@@ -40,18 +56,18 @@ export function initLogger() {
   console.log = (...args: any[]) => {
     const line = `[${ts()}] ${format(...args)}`;
     origLog(line);
-    writeToFile(line);
+    writeToFile(sanitize(line));
   };
 
   console.error = (...args: any[]) => {
     const line = `[${ts()}] [ERROR] ${format(...args)}`;
     origError(line);
-    writeToFile(line);
+    writeToFile(sanitize(line));
   };
 
   console.warn = (...args: any[]) => {
     const line = `[${ts()}] [WARN] ${format(...args)}`;
     origWarn(line);
-    writeToFile(line);
+    writeToFile(sanitize(line));
   };
 }
