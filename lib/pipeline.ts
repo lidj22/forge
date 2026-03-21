@@ -90,6 +90,7 @@ nodes:
     prompt: |
       cd "$(git rev-parse --show-toplevel)" && \
       if [ -n "$(git status --porcelain)" ]; then echo "ERROR: Working directory has uncommitted changes. Please commit or stash first." && exit 1; fi && \
+      ORIG_BRANCH=$(git branch --show-current || git rev-parse --short HEAD) && \
       REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || git remote get-url origin | sed 's/.*github.com[:/]//;s/.git$//') && \
       BASE={{input.base_branch}} && \
       if [ -z "$BASE" ] || [ "$BASE" = "auto-detect" ]; then BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo main); fi && \
@@ -97,7 +98,7 @@ nodes:
       git pull origin "$BASE" 2>/dev/null || true && \
       OLD_BRANCH=$(git branch --list "fix/{{input.issue_id}}-*" | head -1 | tr -d ' *') && \
       if [ -n "$OLD_BRANCH" ]; then git branch -D "$OLD_BRANCH" 2>/dev/null || true; fi && \
-      echo "REPO=$REPO" && echo "BASE=$BASE"
+      echo "REPO=$REPO" && echo "BASE=$BASE" && echo "ORIG_BRANCH=$ORIG_BRANCH"
     outputs:
       - name: info
         extract: stdout
@@ -151,7 +152,14 @@ nodes:
     mode: shell
     project: "{{input.project}}"
     depends_on: [push-and-pr]
-    prompt: "echo 'PR created for issue #{{input.issue_id}}: {{nodes.push-and-pr.outputs.pr_url}}'"
+    prompt: |
+      ORIG=$(echo '{{nodes.setup.outputs.info}}' | grep ORIG_BRANCH= | cut -d= -f2) && \
+      if [ -n "$(git status --porcelain)" ]; then
+        echo "PR created for issue #{{input.issue_id}}: {{nodes.push-and-pr.outputs.pr_url}} (staying on $(git branch --show-current) - uncommitted changes)"
+      else
+        git checkout "$ORIG" 2>/dev/null || true
+        echo "PR created for issue #{{input.issue_id}}: {{nodes.push-and-pr.outputs.pr_url}} (switched back to $ORIG)"
+      fi
 `,
   'pr-review': `
 name: pr-review

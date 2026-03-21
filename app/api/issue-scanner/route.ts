@@ -7,6 +7,7 @@ import {
   restartScanner,
   getProcessedIssues,
   resetProcessedIssue,
+  getNextScanTime,
   type IssueAutofixConfig,
 } from '@/lib/issue-scanner';
 
@@ -18,7 +19,8 @@ export async function GET(req: Request) {
   if (projectPath) {
     const config = getConfig(projectPath);
     const processed = getProcessedIssues(projectPath);
-    return NextResponse.json({ config, processed });
+    const scanTime = getNextScanTime(projectPath);
+    return NextResponse.json({ config, processed, ...scanTime });
   }
 
   // List all enabled configs

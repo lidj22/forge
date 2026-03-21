@@ -29,6 +29,10 @@ export interface IssueAutofixConfig {
 
 // ─── DB setup ────────────────────────────────────────────
 
+function migrateTable() {
+  try { db().exec('ALTER TABLE issue_autofix_config ADD COLUMN last_scan_at TEXT'); } catch {}
+}
+
 export function ensureTable() {
   db().exec(`
     CREATE TABLE IF NOT EXISTS issue_autofix_config (
@@ -37,7 +41,8 @@ export function ensureTable() {
       enabled INTEGER NOT NULL DEFAULT 0,
       interval_min INTEGER NOT NULL DEFAULT 30,
       labels TEXT NOT NULL DEFAULT '[]',
-      base_branch TEXT NOT NULL DEFAULT ''
+      base_branch TEXT NOT NULL DEFAULT '',
+      last_scan_at TEXT
     );
     CREATE TABLE IF NOT EXISTS issue_autofix_processed (
       project_path TEXT NOT NULL,
@@ -49,6 +54,7 @@ export function ensureTable() {
       PRIMARY KEY (project_path, issue_number)
     );
   `);
+  migrateTable();
 }
 
 // ─── Config CRUD ─────────────────────────────────────────
@@ -161,7 +167,21 @@ export function getProcessedIssues(projectPath: string): { issueNumber: number; 
 
 // ─── Scan & trigger ──────────────────────────────────────
 
+function saveLastScan(projectPath: string) {
+  const now = Date.now();
+  scannerState.lastScan.set(projectPath, now);
+  try { db().prepare('UPDATE issue_autofix_config SET last_scan_at = ? WHERE project_path = ?').run(new Date(now).toISOString(), projectPath); } catch {}
+}
+
+function loadLastScan(projectPath: string): number | null {
+  try {
+    const row = db().prepare('SELECT last_scan_at FROM issue_autofix_config WHERE project_path = ?').get(projectPath) as any;
+    return row?.last_scan_at ? new Date(row.last_scan_at).getTime() : null;
+  } catch { return null; }
+}
+
 export function scanAndTrigger(config: IssueAutofixConfig): { triggered: number; issues: number[]; total: number; error?: string } {
+  saveLastScan(config.projectPath);
   const issues = fetchOpenIssues(config.projectPath, config.labels);
 
   // Check for errors
@@ -197,8 +217,8 @@ export function scanAndTrigger(config: IssueAutofixConfig): { triggered: number;
 // Use global symbol to prevent multiple workers from starting duplicate scanners
 const scannerKey = Symbol.for('forge-issue-scanner');
 const gAny = globalThis as any;
-if (!gAny[scannerKey]) gAny[scannerKey] = { timers: new Map<string, NodeJS.Timeout>(), started: false };
-const scannerState = gAny[scannerKey] as { timers: Map<string, NodeJS.Timeout>; started: boolean };
+if (!gAny[scannerKey]) gAny[scannerKey] = { timers: new Map<string, NodeJS.Timeout>(), started: false, lastScan: new Map<string, number>() };
+const scannerState = gAny[scannerKey] as { timers: Map<string, NodeJS.Timeout>; started: boolean; lastScan: Map<string, number> };
 
 export function startScanner() {
   if (scannerState.started) return;
@@ -207,13 +227,59 @@ export function startScanner() {
   const configs = listConfigs();
   for (const config of configs) {
     if (config.interval > 0 && !scannerState.timers.has(config.projectPath)) {
-      const timer = setInterval(() => {
-        try { scanAndTrigger(config); } catch {}
-      }, config.interval * 60 * 1000);
-      scannerState.timers.set(config.projectPath, timer);
-      console.log(`[issue-scanner] Started scanner for ${config.projectName} (every ${config.interval}min)`);
+      const projectPath = config.projectPath;
+      const intervalMs = config.interval * 60 * 1000;
+
+      // Restore lastScan from DB
+      const dbLastScan = loadLastScan(projectPath);
+      if (dbLastScan) {
+        scannerState.lastScan.set(projectPath, dbLastScan);
+      } else {
+        scannerState.lastScan.set(projectPath, Date.now());
+      }
+
+      // Calculate delay: if time since lastScan > interval, run soon; otherwise wait remaining
+      const elapsed = Date.now() - (scannerState.lastScan.get(projectPath) || 0);
+      const firstDelay = Math.max(0, intervalMs - elapsed);
+
+      const startInterval = () => {
+        const timer = setInterval(() => {
+          const latestConfig = getConfig(projectPath);
+          if (!latestConfig || !latestConfig.enabled) return;
+          try { scanAndTrigger(latestConfig); } catch {}
+        }, intervalMs);
+        scannerState.timers.set(projectPath, timer);
+      };
+
+      // First run after remaining delay, then regular interval
+      if (firstDelay > 0) {
+        setTimeout(() => {
+          const latestConfig = getConfig(projectPath);
+          if (latestConfig?.enabled) { try { scanAndTrigger(latestConfig); } catch {} }
+          startInterval();
+        }, firstDelay);
+      } else {
+        // Overdue — run immediately then start interval
+        const latestConfig = getConfig(projectPath);
+        if (latestConfig?.enabled) { try { scanAndTrigger(latestConfig); } catch {} }
+        startInterval();
+      }
+
+      const nextTime = new Date((scannerState.lastScan.get(projectPath) || Date.now()) + intervalMs);
+      console.log(`[issue-scanner] Started scanner for ${config.projectName} (every ${config.interval}min, next: ${nextTime.toLocaleTimeString()})`);
     }
   }
+}
+
+export function getNextScanTime(projectPath: string): { lastScan: string | null; nextScan: string | null } {
+  const last = scannerState.lastScan.get(projectPath);
+  const config = getConfig(projectPath);
+  if (!last || !config || !config.enabled || config.interval <= 0) return { lastScan: null, nextScan: null };
+  const next = last + config.interval * 60 * 1000;
+  return {
+    lastScan: new Date(last).toISOString(),
+    nextScan: new Date(next).toISOString(),
+  };
 }
 
 export function restartScanner() {

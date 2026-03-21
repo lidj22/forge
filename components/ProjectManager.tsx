@@ -83,6 +83,8 @@ export default function ProjectManager() {
   const [issueProcessed, setIssueProcessed] = useState<{ issueNumber: number; pipelineId: string; prNumber: number | null; status: string; createdAt: string }[]>([]);
   const [issueScanning, setIssueScanning] = useState(false);
   const [issueManualId, setIssueManualId] = useState('');
+  const [issueNextScan, setIssueNextScan] = useState<string | null>(null);
+  const [issueLastScan, setIssueLastScan] = useState<string | null>(null);
   const [retryModal, setRetryModal] = useState<{ issueNumber: number; context: string } | null>(null);
   const [claudeMdContent, setClaudeMdContent] = useState('');
   const [claudeMdExists, setClaudeMdExists] = useState(false);
@@ -235,6 +237,8 @@ export default function ProjectManager() {
       const data = await res.json();
       setIssueConfig(data.config || { enabled: false, interval: 30, labels: [], baseBranch: '' });
       setIssueProcessed(data.processed || []);
+      setIssueLastScan(data.lastScan || null);
+      setIssueNextScan(data.nextScan || null);
     } catch {}
   }, []);
 
@@ -936,7 +940,7 @@ export default function ProjectManager() {
                       />
                       <span className="text-[11px] text-[var(--text-primary)] font-semibold">Enable Issue Auto-fix</span>
                     </label>
-                    {issueConfig.enabled && (
+                    {issueConfig.enabled && (<>
                       <button
                         onClick={() => scanNow(selectedProject.path)}
                         disabled={issueScanning}
@@ -944,7 +948,17 @@ export default function ProjectManager() {
                       >
                         {issueScanning ? 'Scanning...' : 'Scan Now'}
                       </button>
-                    )}
+                      {issueLastScan && (
+                        <span className="text-[8px] text-[var(--text-secondary)]">
+                          Last: {new Date(issueLastScan).toLocaleTimeString()}
+                        </span>
+                      )}
+                      {issueNextScan && (
+                        <span className="text-[8px] text-[var(--text-secondary)]">
+                          Next: {new Date(issueNextScan).toLocaleTimeString()}
+                        </span>
+                      )}
+                    </> )}
                   </div>
 
                   {issueConfig.enabled && (
