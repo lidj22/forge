@@ -44,12 +44,10 @@ export default function ProjectManager() {
       .catch(() => {});
   }, []);
 
-  // Load favorites from settings
+  // Load favorites from DB
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json())
-      .then(s => {
-        if (Array.isArray(s.favoriteProjects)) setFavorites(s.favoriteProjects);
-      })
+    fetch('/api/favorites').then(r => r.json())
+      .then(favs => { if (Array.isArray(favs)) setFavorites(favs); })
       .catch(() => {});
   }, []);
 
@@ -84,27 +82,22 @@ export default function ProjectManager() {
   }, []);
 
   // Save favorites to settings
-  const saveFavorites = useCallback((newFavorites: string[]) => {
-    setFavorites(newFavorites);
-    // Load current settings, merge favorites, save back
-    fetch('/api/settings').then(r => r.json()).then(current => {
-      fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...current, favoriteProjects: newFavorites }),
-      });
-    }).catch(() => {});
+  const saveFavorite = useCallback((projectPath: string, add: boolean) => {
+    fetch('/api/favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: add ? 'add' : 'remove', projectPath }),
+    }).then(r => r.json())
+      .then(favs => { if (Array.isArray(favs)) setFavorites(favs); })
+      .catch(() => {});
   }, []);
 
   const toggleFavorite = useCallback((projectPath: string) => {
-    setFavorites(prev => {
-      const next = prev.includes(projectPath)
-        ? prev.filter(p => p !== projectPath)
-        : [...prev, projectPath];
-      saveFavorites(next);
-      return next;
-    });
-  }, [saveFavorites]);
+    const isFav = favorites.includes(projectPath);
+    // Optimistic update
+    setFavorites(prev => isFav ? prev.filter(p => p !== projectPath) : [...prev, projectPath]);
+    saveFavorite(projectPath, !isFav);
+  }, [favorites, saveFavorite]);
 
   // Open a project in a tab
   const openProjectTab = useCallback((p: Project) => {
