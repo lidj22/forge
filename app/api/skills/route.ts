@@ -8,6 +8,7 @@ import {
   uninstallProject,
   refreshInstallState,
   checkLocalModified,
+  purgeDeletedSkill,
 } from '@/lib/skills';
 import { loadSettings } from '@/lib/settings';
 import { homedir } from 'node:os';
@@ -150,6 +151,17 @@ export async function POST(req: Request) {
       } else {
         uninstallProject(name, target);
       }
+      return NextResponse.json({ ok: true });
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+    }
+  }
+
+  if (body.action === 'purge-deleted') {
+    const { name } = body;
+    if (!name) return NextResponse.json({ ok: false, error: 'name required' }, { status: 400 });
+    try {
+      purgeDeletedSkill(name);
       return NextResponse.json({ ok: true });
     } catch (e) {
       return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });

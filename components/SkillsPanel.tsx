@@ -19,6 +19,7 @@ interface Skill {
   installedVersion: string;
   hasUpdate: boolean;
   installedProjects: string[];
+  deletedRemotely: boolean;
 }
 
 interface ProjectInfo {
@@ -315,8 +316,9 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                     {skill.tags.slice(0, 2).map(t => (
                       <span key={t} className="text-[7px] px-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">{t}</span>
                     ))}
-                    {skill.hasUpdate && <span className="text-[8px] text-[var(--yellow)] ml-auto">update</span>}
-                    {isInstalled && !skill.hasUpdate && <span className="text-[8px] text-[var(--green)] ml-auto">installed</span>}
+                    {skill.deletedRemotely && <span className="text-[8px] text-[var(--red)] ml-auto">deleted remotely</span>}
+                    {!skill.deletedRemotely && skill.hasUpdate && <span className="text-[8px] text-[var(--yellow)] ml-auto">update</span>}
+                    {!skill.deletedRemotely && isInstalled && !skill.hasUpdate && <span className="text-[8px] text-[var(--green)] ml-auto">installed</span>}
                   </div>
                 </div>
               );
@@ -421,7 +423,8 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                         (skill?.type || localItem?.type) === 'skill' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
                       }`}>{(skill?.type || localItem?.type) === 'skill' ? 'Skill' : 'Command'}</span>
                       {isLocal && <span className="text-[7px] px-1 rounded bg-green-500/10 text-green-400">local</span>}
-                      {skill && <span className="text-[9px] text-[var(--text-secondary)] font-mono">v{skill.version}</span>}
+                      {skill?.deletedRemotely && <span className="text-[7px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">Deleted remotely</span>}
+                      {skill && !skill.deletedRemotely && <span className="text-[9px] text-[var(--text-secondary)] font-mono">v{skill.version}</span>}
                       {skill?.installedVersion && skill.installedVersion !== skill.version && (
                         <span className="text-[9px] text-[var(--yellow)] font-mono">installed: v{skill.installedVersion}</span>
                       )}
@@ -433,7 +436,7 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                       {skill && skill.score > 0 && <span className="text-[9px] text-[var(--text-secondary)]">{skill.score}pt</span>}
 
                       {/* Update button */}
-                      {skill?.hasUpdate && (
+                      {skill?.hasUpdate && !skill.deletedRemotely && (
                         <button
                           onClick={async () => {
                             if (skill.installedGlobal) await install(skill.name, 'global');
@@ -442,6 +445,25 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                           className="text-[9px] px-2 py-1 bg-[var(--yellow)]/20 text-[var(--yellow)] border border-[var(--yellow)]/50 rounded hover:bg-[var(--yellow)]/30 transition-colors"
                         >
                           Update
+                        </button>
+                      )}
+
+                      {/* Delete button for skills removed from remote registry */}
+                      {skill?.deletedRemotely && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`"${skill.name}" was deleted from the remote repository.\n\nDelete the local installation as well?`)) return;
+                            await fetch('/api/skills', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'purge-deleted', name: skill.name }),
+                            });
+                            setExpandedSkill(null);
+                            fetchSkills();
+                          }}
+                          className="text-[9px] px-2 py-1 bg-red-500/20 text-red-400 border border-red-500/40 rounded hover:bg-red-500/30 transition-colors ml-auto"
+                        >
+                          Delete local
                         </button>
                       )}
 
@@ -505,8 +527,8 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                         </>
                       )}
 
-                      {/* Install dropdown — registry items only */}
-                      {skill && <div className="relative ml-auto">
+                      {/* Install dropdown — registry items only (not deleted remotely) */}
+                      {skill && !skill.deletedRemotely && <div className="relative ml-auto">
                         <button
                           onClick={() => setInstallTarget(prev =>
                             prev.skill === skill.name && prev.show ? { skill: '', show: false } : { skill: skill.name, show: true }
