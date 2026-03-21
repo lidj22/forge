@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 
 // ─── Syntax highlighting ─────────────────────────────────
 const KEYWORDS = new Set([
@@ -48,7 +48,7 @@ interface GitInfo {
   log: { hash: string; message: string; author: string; date: string }[];
 }
 
-export default function ProjectDetail({ projectPath, projectName, hasGit }: { projectPath: string; projectName: string; hasGit: boolean }) {
+export default memo(function ProjectDetail({ projectPath, projectName, hasGit }: { projectPath: string; projectName: string; hasGit: boolean }) {
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [commitMsg, setCommitMsg] = useState('');
@@ -1072,10 +1072,10 @@ export default function ProjectDetail({ projectPath, projectName, hasGit }: { pr
       )}
     </>
   );
-}
+});
 
 // Simple file tree node
-function FileTreeNode({ node, depth, selected, onSelect }: {
+const FileTreeNode = memo(function FileTreeNode({ node, depth, selected, onSelect }: {
   node: { name: string; path: string; type: string; children?: any[] };
   depth: number;
   selected: string | null;
@@ -1112,4 +1112,4 @@ function FileTreeNode({ node, depth, selected, onSelect }: {
       {node.name}
     </button>
   );
-}
+});
