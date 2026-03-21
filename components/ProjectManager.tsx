@@ -1015,6 +1015,16 @@ export default function ProjectManager() {
                               'bg-yellow-500/10 text-yellow-400'
                             }`}>{p.status}</span>
                             {p.prNumber && <span className="text-[var(--accent)]">PR #{p.prNumber}</span>}
+                            {p.pipelineId && (
+                              <button
+                                onClick={() => {
+                                  const event = new CustomEvent('forge:view-pipeline', { detail: { pipelineId: p.pipelineId } });
+                                  window.dispatchEvent(event);
+                                }}
+                                className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--accent)] font-mono"
+                                title="View pipeline"
+                              >{p.pipelineId.slice(0, 8)}</button>
+                            )}
                             <span className="text-[var(--text-secondary)] text-[8px]">{p.createdAt}</span>
                             <div className="ml-auto flex gap-1">
                               {(p.status === 'failed' || p.status === 'done' || p.status === 'processing') && (
@@ -1025,7 +1035,7 @@ export default function ProjectManager() {
                               )}
                               <button
                                 onClick={async () => {
-                                  if (!confirm(`Reset issue #${p.issueNumber}? It will be picked up again on next scan.`)) return;
+                                  if (!confirm(`Delete record for issue #${p.issueNumber}?`)) return;
                                   await fetch('/api/issue-scanner', {
                                     method: 'POST',
                                     headers: { 'Content-Type': 'application/json' },
@@ -1034,7 +1044,7 @@ export default function ProjectManager() {
                                   fetchIssueConfig(selectedProject!.path);
                                 }}
                                 className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--red)]"
-                              >Reset</button>
+                              >Delete</button>
                             </div>
                           </div>
                         </div>
