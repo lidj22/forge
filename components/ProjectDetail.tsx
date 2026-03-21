@@ -395,24 +395,23 @@ export default function ProjectDetail({ projectPath, projectName, hasGit }: { pr
     setGitLoading(false);
   };
 
-  // Load data on mount
+  // Load essential data on mount (git + file tree only)
   useEffect(() => {
     setSelectedFile(null);
     setFileContent(null);
     setGitResult(null);
     setCommitMsg('');
-    setIssueConfig(null);
-    setIssueProcessed([]);
+    // Fetch git info and file tree in parallel
     fetchGitInfo();
     fetchTree();
-    fetchProjectSkills();
-  }, [projectPath, fetchGitInfo, fetchTree, fetchProjectSkills]);
+  }, [projectPath, fetchGitInfo, fetchTree]);
 
-  // Load tab-specific data when switching tabs
+  // Lazy load tab-specific data only when switching to that tab
   useEffect(() => {
+    if (projectTab === 'skills') fetchProjectSkills();
     if (projectTab === 'issues') fetchIssueConfig();
     if (projectTab === 'claudemd') fetchClaudeMd();
-  }, [projectTab, fetchIssueConfig, fetchClaudeMd]);
+  }, [projectTab, fetchProjectSkills, fetchIssueConfig, fetchClaudeMd]);
 
   return (
     <>
