@@ -23,11 +23,13 @@ function getDownloadUrl(): string {
   const base = 'https://github.com/cloudflare/cloudflared/releases/latest/download';
 
   if (os === 'darwin') {
-    // macOS universal binary
-    return `${base}/cloudflared-darwin-amd64.tgz`;
+    return cpu === 'arm64'
+      ? `${base}/cloudflared-darwin-arm64.tgz`
+      : `${base}/cloudflared-darwin-amd64.tgz`;
   }
   if (os === 'linux') {
     if (cpu === 'arm64') return `${base}/cloudflared-linux-arm64`;
+    if (cpu === 'arm') return `${base}/cloudflared-linux-arm`;
     return `${base}/cloudflared-linux-amd64`;
   }
   if (os === 'win32') {
@@ -38,49 +40,87 @@ function getDownloadUrl(): string {
 
 // ─── Download helper ────────────────────────────────────────────
 
-function followRedirects(url: string, dest: string): Promise<void> {
+const DOWNLOAD_TIMEOUT_MS = 120_000; // 2 minutes total per redirect hop
+
+function followRedirects(url: string, dest: string, redirectsLeft = 10): Promise<void> {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https') ? https : http;
-    client.get(url, { headers: { 'User-Agent': 'forge' } }, (res) => {
+    const req = client.get(url, { headers: { 'User-Agent': 'forge/1.0' } }, (res) => {
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        followRedirects(res.headers.location, dest).then(resolve, reject);
+        res.resume(); // drain redirect response
+        if (redirectsLeft <= 0) {
+          reject(new Error('Too many redirects'));
+          return;
+        }
+        followRedirects(res.headers.location, dest, redirectsLeft - 1).then(resolve, reject);
         return;
       }
       if (res.statusCode !== 200) {
+        res.resume();
         reject(new Error(`Download failed: HTTP ${res.statusCode}`));
         return;
       }
       const file = createWriteStream(dest);
       res.pipe(file);
       file.on('finish', () => file.close(() => resolve()));
-      file.on('error', reject);
-    }).on('error', reject);
+      file.on('error', (err) => { try { unlinkSync(dest); } catch {} reject(err); });
+      res.on('error', (err) => { try { unlinkSync(dest); } catch {} reject(err); });
+    });
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS / 1000}s`));
+    });
+    req.on('error', reject);
   });
 }
 
+// Guard against concurrent downloads
+let downloadPromise: Promise<string> | null = null;
+
 export async function downloadCloudflared(): Promise<string> {
   if (existsSync(BIN_PATH)) return BIN_PATH;
+  if (downloadPromise) return downloadPromise;
 
-  mkdirSync(BIN_DIR, { recursive: true });
-  const url = getDownloadUrl();
-  const isTgz = url.endsWith('.tgz');
-  const tmpPath = isTgz ? `${BIN_PATH}.tgz` : BIN_PATH;
+  downloadPromise = (async () => {
+    mkdirSync(BIN_DIR, { recursive: true });
+    const url = getDownloadUrl();
+    const isTgz = url.endsWith('.tgz');
+    const tmpPath = isTgz ? `${BIN_PATH}.tgz` : `${BIN_PATH}.tmp`;
 
-  console.log(`[cloudflared] Downloading from ${url}...`);
-  await followRedirects(url, tmpPath);
-
-  if (isTgz) {
-    // Extract tgz (macOS)
-    execSync(`tar -xzf "${tmpPath}" -C "${BIN_DIR}"`, { encoding: 'utf-8' });
+    // Clean up any leftover partial files from a previous failed attempt
     try { unlinkSync(tmpPath); } catch {}
-  }
 
-  if (platform() !== 'win32') {
-    chmodSync(BIN_PATH, 0o755);
-  }
+    console.log(`[cloudflared] Downloading from ${url}...`);
+    try {
+      await followRedirects(url, tmpPath);
+    } catch (e) {
+      try { unlinkSync(tmpPath); } catch {}
+      throw e;
+    }
 
-  console.log(`[cloudflared] Installed to ${BIN_PATH}`);
-  return BIN_PATH;
+    if (isTgz) {
+      // Extract tgz (macOS)
+      try {
+        execSync(`tar -xzf "${tmpPath}" -C "${BIN_DIR}"`, { encoding: 'utf-8' });
+      } finally {
+        try { unlinkSync(tmpPath); } catch {}
+      }
+    } else {
+      // Rename .tmp to final name atomically
+      const { renameSync } = require('node:fs');
+      renameSync(tmpPath, BIN_PATH);
+    }
+
+    if (platform() !== 'win32') {
+      chmodSync(BIN_PATH, 0o755);
+    }
+
+    console.log(`[cloudflared] Installed to ${BIN_PATH}`);
+    return BIN_PATH;
+  })().finally(() => {
+    downloadPromise = null;
+  });
+
+  return downloadPromise;
 }
 
 export function isInstalled(): boolean {
