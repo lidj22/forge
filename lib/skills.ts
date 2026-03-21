@@ -34,6 +34,7 @@ export interface SkillItem {
   installedProjects: string[];
   installedVersion: string;  // version currently installed (empty if not installed)
   hasUpdate: boolean;         // true if registry version > installed version
+  deletedRemotely: boolean;   // true if removed from remote registry but still installed locally
 }
 
 function db() {
@@ -182,13 +183,16 @@ export async function syncSkills(): Promise<{ synced: number; error?: string }> 
     });
     tx();
 
-    // Remove items no longer in registry (not installed locally)
+    // Handle items no longer in registry
     const registryNames = new Set(items.map(s => s.name));
     const dbItems = db().prepare('SELECT name, installed_global, installed_projects FROM skills').all() as any[];
     for (const row of dbItems) {
       if (!registryNames.has(row.name)) {
         const hasLocal = !!row.installed_global || JSON.parse(row.installed_projects || '[]').length > 0;
-        if (!hasLocal) {
+        if (hasLocal) {
+          // Still installed locally — mark as deleted remotely so the user can decide
+          db().prepare('UPDATE skills SET deleted_remotely = 1 WHERE name = ?').run(row.name);
+        } else {
           db().prepare('DELETE FROM skills WHERE name = ?').run(row.name);
         }
       }
@@ -223,6 +227,7 @@ export function listSkills(): SkillItem[] {
       installedProjects: JSON.parse(r.installed_projects || '[]'),
       installedVersion,
       hasUpdate: isInstalled && !!registryVersion && !!installedVersion && compareVersions(registryVersion, installedVersion) > 0,
+      deletedRemotely: !!r.deleted_remotely,
     };
   });
 }
@@ -527,6 +532,29 @@ export function installLocal(name: string, type: string, sourceProject: string |
   }
 
   return { ok: true };
+}
+
+/** Remove all local files for a skill deleted from the remote registry, then drop its DB record. */
+export function purgeDeletedSkill(name: string): void {
+  const row = db().prepare('SELECT type, installed_projects FROM skills WHERE name = ?').get(name) as any;
+  if (!row) return;
+  const type: string = row.type || 'skill';
+  const projects: string[] = JSON.parse(row.installed_projects || '[]');
+
+  // Remove global files
+  try { rmSync(join(GLOBAL_SKILLS_DIR, name), { recursive: true }); } catch {}
+  try { unlinkSync(join(GLOBAL_COMMANDS_DIR, `${name}.md`)); } catch {}
+  try { rmSync(join(GLOBAL_COMMANDS_DIR, name), { recursive: true }); } catch {}
+
+  // Remove project-local files
+  for (const pp of projects) {
+    try { rmSync(join(pp, '.claude', 'skills', name), { recursive: true }); } catch {}
+    try { unlinkSync(join(pp, '.claude', 'commands', `${name}.md`)); } catch {}
+    try { rmSync(join(pp, '.claude', 'commands', name), { recursive: true }); } catch {}
+  }
+
+  // Remove DB record entirely
+  db().prepare('DELETE FROM skills WHERE name = ?').run(name);
 }
 
 /** Delete a local skill/command from a specific project or global */
