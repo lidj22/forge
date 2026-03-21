@@ -170,6 +170,7 @@ function pushLog(line: string) {
 }
 
 export async function startTunnel(localPort: number = parseInt(process.env.PORT || '3000')): Promise<{ url?: string; error?: string }> {
+  console.log(`[tunnel] Starting tunnel on port ${localPort}...`);
   // Check if this worker already has a process
   if (state.process) {
     return state.url ? { url: state.url } : { error: 'Tunnel is starting...' };
@@ -247,6 +248,7 @@ export async function startTunnel(localPort: number = parseInt(process.env.PORT 
       state.status = 'error';
       state.error = err.message;
       pushLog(`[error] ${err.message}`);
+      console.error(`[tunnel] Error: ${err.message}`);
       if (!resolved) {
         resolved = true;
         resolve({ error: err.message });
@@ -254,6 +256,7 @@ export async function startTunnel(localPort: number = parseInt(process.env.PORT 
     });
 
     state.process.on('exit', (code) => {
+      console.log(`[tunnel] Process exited with code ${code}`);
       state.process = null;
       if (state.status !== 'error') {
         state.status = 'stopped';
@@ -281,6 +284,7 @@ export async function startTunnel(localPort: number = parseInt(process.env.PORT 
 }
 
 export function stopTunnel() {
+  console.log('[tunnel] Stopping tunnel');
   stopHealthCheck();
   if (state.process) {
     state.process.kill('SIGTERM');

@@ -87,6 +87,7 @@ function getInstalledVersion(name: string, type: string, basePath?: string): str
 // ─── Sync from registry ──────────────────────────────────────
 
 export async function syncSkills(): Promise<{ synced: number; error?: string }> {
+  console.log('[skills] Syncing from registry...');
   const baseUrl = getBaseUrl();
 
   try {
@@ -198,6 +199,7 @@ export async function syncSkills(): Promise<{ synced: number; error?: string }> 
       }
     }
 
+    console.log(`[skills] Synced ${items.length} items`);
     return { synced: items.length };
   } catch (e) {
     return { synced: 0, error: e instanceof Error ? e.message : String(e) };
@@ -284,6 +286,7 @@ async function downloadToDir(files: { path: string; download_url: string }[], de
 // ─── Install ─────────────────────────────────────────────────
 
 export async function installGlobal(name: string): Promise<void> {
+  console.log(`[skills] Installing "${name}" globally`);
   const row = db().prepare('SELECT type, version FROM skills WHERE name = ?').get(name) as any;
   if (!row) throw new Error(`Not found: ${name}`);
   const type: ItemType = row.type || 'skill';
@@ -318,6 +321,7 @@ export async function installGlobal(name: string): Promise<void> {
 }
 
 export async function installProject(name: string, projectPath: string): Promise<void> {
+  console.log(`[skills] Installing "${name}" to ${projectPath.split('/').pop()}`);
   const row = db().prepare('SELECT type, version FROM skills WHERE name = ?').get(name) as any;
   if (!row) throw new Error(`Not found: ${name}`);
   const type: ItemType = row.type || 'skill';
@@ -357,6 +361,7 @@ export async function installProject(name: string, projectPath: string): Promise
 // ─── Uninstall ───────────────────────────────────────────────
 
 export function uninstallGlobal(name: string): void {
+  console.log(`[skills] Uninstalling "${name}" from global`);
   // Remove from all possible locations
   try { rmSync(join(GLOBAL_SKILLS_DIR, name), { recursive: true }); } catch {}
   try { unlinkSync(join(GLOBAL_COMMANDS_DIR, `${name}.md`)); } catch {}
@@ -367,6 +372,7 @@ export function uninstallGlobal(name: string): void {
 }
 
 export function uninstallProject(name: string, projectPath: string): void {
+  console.log(`[skills] Uninstalling "${name}" from ${projectPath.split('/').pop()}`);
   // Remove from all possible locations
   try { rmSync(join(projectPath, '.claude', 'skills', name), { recursive: true }); } catch {}
   try { unlinkSync(join(projectPath, '.claude', 'commands', `${name}.md`)); } catch {}

@@ -56,6 +56,8 @@ export async function PUT(req: Request) {
   // Remove internal fields
   delete (updated as any)._secretStatus;
 
+  const changed = Object.keys(updated).filter(k => JSON.stringify((updated as any)[k]) !== JSON.stringify((settings as any)[k]) && !['telegramTunnelPassword', 'telegramBotToken'].includes(k));
+  if (changed.length > 0) console.log(`[settings] Updated: ${changed.join(', ')}`);
   saveSettings(updated);
   restartTelegramBot();
   return NextResponse.json({ ok: true });

@@ -37,8 +37,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (verifyLogin(password, sessionCode, isRemote)) {
           const { loadSettings } = await import('./settings');
           const settings = loadSettings();
+          console.log(`[auth] Login success (${isRemote ? 'remote' : 'local'})`);
           return { id: 'local', name: settings.displayName || 'Forge', email: settings.displayEmail || 'local@forge' };
         }
+        console.warn(`[auth] Login failed (${isRemote ? 'remote' : 'local'})`);
         return null;
       },
     }),

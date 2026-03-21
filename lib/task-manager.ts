@@ -405,12 +405,14 @@ function executeTask(task: Task): Promise<void> {
           WHERE id = ?
         `).run(resultText, totalCost, task.id);
         emit(task.id, 'status', 'done');
+        console.log(`[task] Done: ${task.id} ${task.projectName} (cost: $${totalCost?.toFixed(4) || '0'})`);
         const doneTask = getTask(task.id);
         if (doneTask) notifyTaskComplete(doneTask).catch(() => {});
         notifyTerminalSession(task, 'done', sessionId);
         resolve();
       } else {
         const errMsg = `Process exited with code ${code}`;
+        console.error(`[task] Failed: ${task.id} ${task.projectName} — ${errMsg}`);
         updateTaskStatus(task.id, 'failed', errMsg);
         const failedTask = getTask(task.id);
         if (failedTask) notifyTaskFailed(failedTask).catch(() => {});

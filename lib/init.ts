@@ -64,6 +64,9 @@ export function ensureInitialized() {
   if (gInit[initKey]) return;
   gInit[initKey] = true;
 
+  // Add timestamps to all console output
+  try { const { initLogger } = require('./logger'); initLogger(); } catch {}
+
   // Migrate old data layout (~/.forge/* → ~/.forge/data/*) on first run
   try { const { migrateDataDir } = require('./dirs'); migrateDataDir(); } catch {}
 
