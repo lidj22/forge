@@ -38,6 +38,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center">
       <div className="w-80 space-y-6">
         <div className="text-center">
+          <img src="/icon.png" alt="Forge" width={48} height={48} className="rounded mx-auto mb-2" />
           <h1 className="text-2xl font-bold text-[var(--text-primary)]">Forge</h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">
             {isRemote ? 'Remote Access' : 'Local Access'}
