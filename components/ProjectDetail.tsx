@@ -69,10 +69,12 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [projectTab, setProjectTab] = useState<'code' | 'skills' | 'claudemd' | 'pipelines'>('code');
   // Pipeline bindings state
   const [pipelineBindings, setPipelineBindings] = useState<{ id: number; workflowName: string; enabled: boolean; config: any; lastRunAt: string | null; nextRunAt: string | null }[]>([]);
-  const [pipelineRuns, setPipelineRuns] = useState<{ id: string; workflowName: string; pipelineId: string; status: string; summary: string; createdAt: string }[]>([]);
+  const [pipelineRuns, setPipelineRuns] = useState<{ id: string; workflowName: string; pipelineId: string; status: string; summary: string; dedupKey: string | null; createdAt: string }[]>([]);
   const [availableWorkflows, setAvailableWorkflows] = useState<{ name: string; description?: string; builtin?: boolean }[]>([]);
   const [showAddPipeline, setShowAddPipeline] = useState(false);
   const [triggerInput, setTriggerInput] = useState<Record<string, string>>({});
+  const [runMenu, setRunMenu] = useState<string | null>(null); // workflowName of open run menu
+  const [issueInput, setIssueInput] = useState('');
   const [claudeMdContent, setClaudeMdContent] = useState('');
   const [claudeMdExists, setClaudeMdExists] = useState(false);
   const [claudeTemplates, setClaudeTemplates] = useState<{ id: string; name: string; description: string; tags: string[]; builtin: boolean; content: string }[]>([]);
@@ -846,10 +848,74 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                       }} className="accent-[var(--accent)]" />
                       Enabled
                     </label>
-                    <button
-                      onClick={() => triggerProjectPipeline(b.workflowName, triggerInput)}
-                      className="text-[9px] px-2 py-0.5 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white"
-                    >Run</button>
+                    <div className="relative">
+                      <button
+                        onClick={() => {
+                          const isIssueWf = b.workflowName === 'issue-auto-fix' || b.workflowName === 'issue-fix-and-review';
+                          if (!isIssueWf) {
+                            triggerProjectPipeline(b.workflowName, triggerInput);
+                          } else {
+                            setRunMenu(runMenu === b.workflowName ? null : b.workflowName);
+                            setIssueInput('');
+                          }
+                        }}
+                        className="text-[9px] px-2 py-0.5 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white"
+                      >Run</button>
+                      {runMenu === b.workflowName && (
+                        <div className="absolute top-full right-0 mt-1 z-20 bg-[var(--bg-secondary)] border border-[var(--border)] rounded shadow-lg p-2 space-y-2 w-[200px]">
+                          <button
+                            onClick={async () => {
+                              setRunMenu(null);
+                              try {
+                                const res = await fetch('/api/project-pipelines', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ action: 'scan-now', projectPath, projectName, workflowName: b.workflowName }),
+                                });
+                                const data = await res.json();
+                                if (data.error) alert(`Scan error: ${data.error}`);
+                                else alert(`Scanned ${data.total} issues, triggered ${data.triggered} new fixes`);
+                                fetchPipelineBindings();
+                              } catch { alert('Scan failed'); }
+                            }}
+                            className="w-full text-[9px] px-2 py-1.5 rounded border border-green-500/50 text-green-400 hover:bg-green-500/10 font-medium"
+                          >Auto Scan — fix all new issues</button>
+                          <div className="border-t border-[var(--border)]/50 my-1" />
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={issueInput}
+                              onChange={e => setIssueInput(e.target.value)}
+                              placeholder="Issue #"
+                              className="flex-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[9px] text-[var(--text-primary)]"
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && issueInput.trim()) {
+                                  setRunMenu(null);
+                                  triggerProjectPipeline(b.workflowName, {
+                                    ...triggerInput,
+                                    issue_id: issueInput.trim(),
+                                    base_branch: b.config.baseBranch || 'auto-detect',
+                                  });
+                                }
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => {
+                                if (!issueInput.trim()) return;
+                                setRunMenu(null);
+                                triggerProjectPipeline(b.workflowName, {
+                                  ...triggerInput,
+                                  issue_id: issueInput.trim(),
+                                  base_branch: b.config.baseBranch || 'auto-detect',
+                                });
+                              }}
+                              className="text-[9px] px-2 py-1 bg-[var(--accent)] text-white rounded hover:opacity-80"
+                            >Fix</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <button
                       onClick={async () => {
                         if (!confirm(`Remove "${b.workflowName}" from this project?`)) return;
@@ -900,6 +966,51 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                       </span>
                     )}
                   </div>
+                  {/* Issue scan config (for issue-fix-and-review workflow) */}
+                  {(b.workflowName === 'issue-auto-fix' || b.workflowName === 'issue-fix-and-review') && (
+                    <div className="space-y-1.5 pt-1 border-t border-[var(--border)]/30">
+                      {b.config.interval > 0 && (
+                        <div className="text-[8px] text-[var(--text-secondary)]">
+                          Scheduled mode: auto-scans GitHub issues and fixes new ones
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2 text-[9px]">
+                          <label className="text-[var(--text-secondary)]">Labels:</label>
+                          <input
+                            type="text"
+                            defaultValue={(b.config.labels || []).join(', ')}
+                            placeholder="bug, autofix (empty = all)"
+                            onBlur={async (e) => {
+                              const labels = e.target.value.split(',').map((s: string) => s.trim()).filter(Boolean);
+                              const newConfig = { ...b.config, labels };
+                              await fetch('/api/project-pipelines', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'update', projectPath, workflowName: b.workflowName, config: newConfig }),
+                              });
+                              fetchPipelineBindings();
+                            }}
+                            className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[9px] text-[var(--text-primary)]"
+                          />
+                          <label className="text-[var(--text-secondary)]">Base:</label>
+                          <input
+                            type="text"
+                            defaultValue={b.config.baseBranch || ''}
+                            placeholder="auto-detect"
+                            onBlur={async (e) => {
+                              const newConfig = { ...b.config, baseBranch: e.target.value.trim() || undefined };
+                              await fetch('/api/project-pipelines', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'update', projectPath, workflowName: b.workflowName, config: newConfig }),
+                              });
+                              fetchPipelineBindings();
+                            }}
+                            className="w-20 bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[9px] text-[var(--text-primary)]"
+                          />
+                        </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}
@@ -913,11 +1024,14 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                 {pipelineRuns.map(run => (
                   <div key={run.id} className="flex items-start gap-2 px-3 py-2 border-b border-[var(--border)]/30 last:border-b-0 text-[10px]">
                     <span className={`shrink-0 ${
-                      run.status === 'done' ? 'text-green-400' : run.status === 'failed' ? 'text-red-400' : 'text-yellow-400'
+                      run.status === 'done' ? 'text-green-400' : run.status === 'failed' ? 'text-red-400' : run.status === 'skipped' ? 'text-gray-400' : 'text-yellow-400'
                     }`}>●</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-[var(--text-primary)] font-medium">{run.workflowName}</span>
+                        {run.dedupKey && (
+                          <span className="text-[8px] text-[var(--accent)] font-mono">{run.dedupKey.replace('issue:', '#')}</span>
+                        )}
                         <span className="text-[8px] text-[var(--text-secondary)] font-mono">{run.pipelineId.slice(0, 8)}</span>
                         <span className="text-[8px] text-[var(--text-secondary)] ml-auto">{new Date(run.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
@@ -925,18 +1039,39 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                         <pre className="text-[9px] text-[var(--text-secondary)] mt-1 whitespace-pre-wrap break-words line-clamp-3">{run.summary}</pre>
                       )}
                     </div>
-                    <button
-                      onClick={async () => {
-                        if (!confirm('Delete this run?')) return;
-                        await fetch('/api/project-pipelines', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ action: 'delete-run', id: run.id }),
-                        });
-                        fetchPipelineBindings();
-                      }}
-                      className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--red)] shrink-0"
-                    >×</button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {run.status === 'failed' && run.dedupKey && (
+                        <button
+                          onClick={async () => {
+                            await fetch('/api/project-pipelines', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'reset-dedup', projectPath, workflowName: run.workflowName, dedupKey: run.dedupKey }),
+                            });
+                            // Delete the failed run then re-scan
+                            await fetch('/api/project-pipelines', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'delete-run', id: run.id }),
+                            });
+                            fetchPipelineBindings();
+                          }}
+                          className="text-[8px] text-[var(--accent)] hover:underline"
+                        >Retry</button>
+                      )}
+                      <button
+                        onClick={async () => {
+                          if (!confirm('Delete this run?')) return;
+                          await fetch('/api/project-pipelines', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'delete-run', id: run.id }),
+                          });
+                          fetchPipelineBindings();
+                        }}
+                        className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--red)]"
+                      >×</button>
+                    </div>
                   </div>
                 ))}
               </div>

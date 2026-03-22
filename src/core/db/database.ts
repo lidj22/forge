@@ -35,6 +35,25 @@ function initSchema(db: Database.Database) {
   migrate('ALTER TABLE skills ADD COLUMN rating REAL DEFAULT 0');
   migrate('ALTER TABLE skills ADD COLUMN deleted_remotely INTEGER NOT NULL DEFAULT 0');
   migrate('ALTER TABLE project_pipelines ADD COLUMN last_run_at TEXT');
+  migrate('ALTER TABLE pipeline_runs ADD COLUMN dedup_key TEXT');
+  // Unique index for dedup (only applies when dedup_key is NOT NULL)
+  try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_runs_dedup ON pipeline_runs(project_path, workflow_name, dedup_key)'); } catch {}
+  // Migrate old issue_autofix_processed → pipeline_runs
+  try {
+    const old = db.prepare('SELECT * FROM issue_autofix_processed').all() as any[];
+    if (old.length > 0) {
+      const ins = db.prepare('INSERT OR IGNORE INTO pipeline_runs (id, project_path, workflow_name, pipeline_id, status, dedup_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const r of old) {
+        ins.run(
+          r.pipeline_id?.slice(0, 8) || ('mig-' + r.issue_number),
+          r.project_path, 'issue-fix-and-review', r.pipeline_id || '',
+          r.status === 'processing' ? 'running' : (r.status || 'done'),
+          `issue:${r.issue_number}`, r.created_at || new Date().toISOString()
+        );
+      }
+      console.log(`[db] Migrated ${old.length} issue_autofix_processed records to pipeline_runs`);
+    }
+  } catch {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (

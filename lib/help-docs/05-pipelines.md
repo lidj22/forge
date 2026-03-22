@@ -217,7 +217,7 @@ nodes:
 
 ## Built-in Workflows
 
-### issue-auto-fix
+### issue-fix-and-review
 Complete issue resolution: fetch GitHub issue → fix code on new branch → create PR.
 
 **Input**: `issue_id`, `project`, `base_branch` (optional), `extra_context` (optional)
@@ -265,22 +265,22 @@ curl "http://localhost:3000/api/project-pipelines?project=/path/to/project"
 # Add binding
 curl -X POST http://localhost:3000/api/project-pipelines \
   -H 'Content-Type: application/json' \
-  -d '{"action":"add","projectPath":"/path","projectName":"my-app","workflowName":"issue-auto-fix"}'
+  -d '{"action":"add","projectPath":"/path","projectName":"my-app","workflowName":"issue-fix-and-review"}'
 
 # Update binding (enable/disable, change config/schedule)
 curl -X POST http://localhost:3000/api/project-pipelines \
   -H 'Content-Type: application/json' \
-  -d '{"action":"update","projectPath":"/path","workflowName":"issue-auto-fix","config":{"interval":30}}'
+  -d '{"action":"update","projectPath":"/path","workflowName":"issue-fix-and-review","config":{"interval":30}}'
 
 # Trigger pipeline manually
 curl -X POST http://localhost:3000/api/project-pipelines \
   -H 'Content-Type: application/json' \
-  -d '{"action":"trigger","projectPath":"/path","projectName":"my-app","workflowName":"issue-auto-fix","input":{"issue_id":"42"}}'
+  -d '{"action":"trigger","projectPath":"/path","projectName":"my-app","workflowName":"issue-fix-and-review","input":{"issue_id":"42"}}'
 
 # Remove binding
 curl -X POST http://localhost:3000/api/project-pipelines \
   -H 'Content-Type: application/json' \
-  -d '{"action":"remove","projectPath":"/path","workflowName":"issue-auto-fix"}'
+  -d '{"action":"remove","projectPath":"/path","workflowName":"issue-fix-and-review"}'
 ```
 
 ## CLI

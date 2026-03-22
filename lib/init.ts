@@ -95,16 +95,10 @@ export function ensureInitialized() {
   // Session watcher is safe (file-based, idempotent)
   startWatcherLoop();
 
-  // Pipeline scheduler — periodic execution for project-bound workflows
+  // Pipeline scheduler — periodic execution + issue scanning for project-bound workflows
   try {
     const { startScheduler } = require('./pipeline-scheduler');
     startScheduler();
-  } catch {}
-
-  // Legacy issue scanner (still used if issue_autofix_config has entries)
-  try {
-    const { startScanner } = require('./issue-scanner');
-    startScanner();
   } catch {}
 
   // If services are managed externally (forge-server), skip

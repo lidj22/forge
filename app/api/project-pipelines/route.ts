@@ -8,6 +8,8 @@ import {
   deleteRun,
   triggerPipeline,
   getNextRunTime,
+  scanAndTriggerIssues,
+  resetDedup,
 } from '@/lib/pipeline-scheduler';
 import { listWorkflows } from '@/lib/pipeline';
 
@@ -61,6 +63,27 @@ export async function POST(req: Request) {
 
   if (body.action === 'delete-run') {
     deleteRun(body.id);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === 'scan-now') {
+    const { projectPath, projectName, workflowName } = body;
+    if (!projectPath || !workflowName) return NextResponse.json({ error: 'projectPath and workflowName required' }, { status: 400 });
+    const bindings = getBindings(projectPath);
+    const binding = bindings.find(b => b.workflowName === workflowName);
+    if (!binding) return NextResponse.json({ error: 'Binding not found' }, { status: 404 });
+    try {
+      const result = scanAndTriggerIssues(binding);
+      return NextResponse.json({ ok: true, ...result });
+    } catch (e: any) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 500 });
+    }
+  }
+
+  if (body.action === 'reset-dedup') {
+    const { projectPath, workflowName, dedupKey } = body;
+    if (!projectPath || !workflowName || !dedupKey) return NextResponse.json({ error: 'projectPath, workflowName, dedupKey required' }, { status: 400 });
+    resetDedup(projectPath, workflowName, dedupKey);
     return NextResponse.json({ ok: true });
   }
 

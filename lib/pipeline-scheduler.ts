@@ -1,24 +1,25 @@
 /**
- * Pipeline Scheduler — manages project-pipeline bindings and scheduled execution.
- * Replaces issue-scanner with a generic approach.
+ * Pipeline Scheduler — manages project-pipeline bindings, scheduled execution,
+ * and issue scanning (replaces issue-scanner.ts).
  *
  * Each project can bind multiple workflows. Each binding has:
- * - config: JSON with workflow-specific settings (e.g. interval, labels for issue pipelines)
+ * - config: JSON with workflow-specific settings (interval, scanType, labels, baseBranch)
  * - enabled: on/off toggle
  * - scheduled execution via config.interval (minutes, 0 = manual only)
+ * - config.scanType: 'github-issues' enables automatic issue scanning + dedup
  */
 
 import { getDb } from '@/src/core/db/database';
 import { getDbPath } from '@/src/config';
 import { startPipeline, getPipeline } from './pipeline';
 import { randomUUID } from 'node:crypto';
+import { execSync } from 'node:child_process';
 
 function db() { return getDb(getDbPath()); }
 
 /** Normalize SQLite datetime('now') → ISO 8601 UTC string. */
 function toIsoUTC(s: string | null): string | null {
   if (!s) return null;
-  // SQLite datetime('now') → 'YYYY-MM-DD HH:MM:SS' (UTC, no indicator)
   if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s.replace(' ', 'T') + 'Z';
   return s;
 }
@@ -29,7 +30,7 @@ export interface ProjectPipelineBinding {
   projectName: string;
   workflowName: string;
   enabled: boolean;
-  config: Record<string, any>; // interval (minutes), labels, baseBranch, etc.
+  config: Record<string, any>; // interval, scanType, labels, baseBranch, etc.
   lastRunAt: string | null;
   createdAt: string;
 }
@@ -41,6 +42,7 @@ export interface PipelineRun {
   pipelineId: string;
   status: string;
   summary: string;
+  dedupKey: string | null;
   createdAt: string;
 }
 
@@ -104,12 +106,12 @@ function updateLastRunAt(projectPath: string, workflowName: string): void {
 
 // ─── Runs ────────────────────────────────────────────────
 
-export function recordRun(projectPath: string, workflowName: string, pipelineId: string): string {
+export function recordRun(projectPath: string, workflowName: string, pipelineId: string, dedupKey?: string): string {
   const id = randomUUID().slice(0, 8);
   db().prepare(`
-    INSERT INTO pipeline_runs (id, project_path, workflow_name, pipeline_id, status)
-    VALUES (?, ?, ?, ?, 'running')
-  `).run(id, projectPath, workflowName, pipelineId);
+    INSERT INTO pipeline_runs (id, project_path, workflow_name, pipeline_id, status, dedup_key)
+    VALUES (?, ?, ?, ?, 'running', ?)
+  `).run(id, projectPath, workflowName, pipelineId, dedupKey || null);
   return id;
 }
 
@@ -135,6 +137,7 @@ export function getRuns(projectPath: string, workflowName?: string, limit = 20):
     pipelineId: r.pipeline_id,
     status: r.status,
     summary: r.summary || '',
+    dedupKey: r.dedup_key || null,
     createdAt: toIsoUTC(r.created_at) ?? r.created_at,
   }));
 }
@@ -143,18 +146,36 @@ export function deleteRun(id: string): void {
   db().prepare('DELETE FROM pipeline_runs WHERE id = ?').run(id);
 }
 
+// ─── Dedup ──────────────────────────────────────────────
+
+function isDuplicate(projectPath: string, workflowName: string, dedupKey: string): boolean {
+  const row = db().prepare(
+    'SELECT 1 FROM pipeline_runs WHERE project_path = ? AND workflow_name = ? AND dedup_key = ?'
+  ).get(projectPath, workflowName, dedupKey);
+  return !!row;
+}
+
+export function resetDedup(projectPath: string, workflowName: string, dedupKey: string): void {
+  db().prepare(
+    'DELETE FROM pipeline_runs WHERE project_path = ? AND workflow_name = ? AND dedup_key = ?'
+  ).run(projectPath, workflowName, dedupKey);
+}
+
 // ─── Trigger ─────────────────────────────────────────────
 
-export function triggerPipeline(projectPath: string, projectName: string, workflowName: string, extraInput?: Record<string, any>): { pipelineId: string; runId: string } {
+export function triggerPipeline(
+  projectPath: string, projectName: string, workflowName: string,
+  extraInput?: Record<string, any>, dedupKey?: string
+): { pipelineId: string; runId: string } {
   const input: Record<string, string> = {
     project: projectName,
     ...extraInput,
   };
 
   const pipeline = startPipeline(workflowName, input);
-  const runId = recordRun(projectPath, workflowName, pipeline.id);
+  const runId = recordRun(projectPath, workflowName, pipeline.id, dedupKey);
   updateLastRunAt(projectPath, workflowName);
-  console.log(`[pipeline-scheduler] Triggered ${workflowName} for ${projectName} (pipeline: ${pipeline.id})`);
+  console.log(`[pipeline-scheduler] Triggered ${workflowName} for ${projectName} (pipeline: ${pipeline.id}${dedupKey ? ', dedup: ' + dedupKey : ''})`);
   return { pipelineId: pipeline.id, runId };
 }
 
@@ -177,6 +198,75 @@ export function syncRunStatus(pipelineId: string): void {
   }
 
   updateRun(pipelineId, pipeline.status, summary.trim());
+}
+
+// ─── GitHub Issue Scanning ──────────────────────────────
+
+function getRepoFromProject(projectPath: string): string | null {
+  try {
+    return execSync('gh repo view --json nameWithOwner -q .nameWithOwner', {
+      cwd: projectPath, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim() || null;
+  } catch {
+    try {
+      const url = execSync('git remote get-url origin', {
+        cwd: projectPath, encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      return url.replace(/.*github\.com[:/]/, '').replace(/\.git$/, '') || null;
+    } catch { return null; }
+  }
+}
+
+function fetchOpenIssues(projectPath: string, labels: string[]): { number: number; title: string; error?: string }[] {
+  const repo = getRepoFromProject(projectPath);
+  if (!repo) return [{ number: -1, title: '', error: 'Could not detect GitHub repo. Run: gh auth login' }];
+  try {
+    const labelFilter = labels.length > 0 ? ` --label "${labels.join(',')}"` : '';
+    const out = execSync(`gh issue list --state open --json number,title${labelFilter} -R ${repo}`, {
+      cwd: projectPath, encoding: 'utf-8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return JSON.parse(out) || [];
+  } catch (e: any) {
+    const msg = e.stderr?.toString() || e.message || 'gh CLI failed';
+    return [{ number: -1, title: '', error: msg.includes('auth') ? 'GitHub CLI not authenticated. Run: gh auth login' : msg }];
+  }
+}
+
+export function scanAndTriggerIssues(binding: ProjectPipelineBinding): { triggered: number; issues: number[]; total: number; error?: string } {
+  const labels: string[] = binding.config.labels || [];
+  const issues = fetchOpenIssues(binding.projectPath, labels);
+
+  // Check for errors
+  if (issues.length === 1 && (issues[0] as any).error) {
+    return { triggered: 0, issues: [], total: 0, error: (issues[0] as any).error };
+  }
+
+  const triggered: number[] = [];
+
+  for (const issue of issues) {
+    if (issue.number < 0) continue;
+    const dedupKey = `issue:${issue.number}`;
+
+    if (isDuplicate(binding.projectPath, binding.workflowName, dedupKey)) continue;
+
+    try {
+      triggerPipeline(
+        binding.projectPath, binding.projectName, binding.workflowName,
+        {
+          issue_id: String(issue.number),
+          base_branch: binding.config.baseBranch || 'auto-detect',
+        },
+        dedupKey
+      );
+      triggered.push(issue.number);
+      console.log(`[pipeline-scheduler] Issue scan: triggered #${issue.number} "${issue.title}" for ${binding.projectName}`);
+    } catch (e: any) {
+      console.error(`[pipeline-scheduler] Issue scan: failed to trigger #${issue.number}:`, e.message);
+    }
+  }
+
+  updateLastRunAt(binding.projectPath, binding.workflowName);
+  return { triggered: triggered.length, issues: triggered, total: issues.length };
 }
 
 // ─── Periodic Scheduler ─────────────────────────────────
@@ -218,19 +308,24 @@ function tickScheduler(): void {
       const lastRun = binding.lastRunAt ? new Date(binding.lastRunAt).getTime() : 0;
       const elapsed = now - lastRun;
 
-      if (elapsed >= intervalMs) {
-        // Check if there's already a running pipeline for this binding
-        const recentRuns = getRuns(binding.projectPath, binding.workflowName, 1);
-        if (recentRuns.length > 0 && recentRuns[0].status === 'running') {
-          continue; // skip if still running
-        }
+      if (elapsed < intervalMs) continue;
 
-        try {
+      try {
+        const isIssueWorkflow = binding.workflowName === 'issue-fix-and-review' || binding.workflowName === 'issue-auto-fix' || binding.config.scanType === 'github-issues';
+        if (isIssueWorkflow) {
+          // Issue scan mode: fetch issues → dedup → trigger per issue
+          console.log(`[pipeline-scheduler] Scheduled issue scan: ${binding.workflowName} for ${binding.projectName}`);
+          scanAndTriggerIssues(binding);
+        } else {
+          // Normal mode: single trigger (skip if still running)
+          const recentRuns = getRuns(binding.projectPath, binding.workflowName, 1);
+          if (recentRuns.length > 0 && recentRuns[0].status === 'running') continue;
+
           console.log(`[pipeline-scheduler] Scheduled trigger: ${binding.workflowName} for ${binding.projectName}`);
           triggerPipeline(binding.projectPath, binding.projectName, binding.workflowName, binding.config.input);
-        } catch (e: any) {
-          console.error(`[pipeline-scheduler] Scheduled trigger failed for ${binding.workflowName}:`, e.message);
         }
+      } catch (e: any) {
+        console.error(`[pipeline-scheduler] Scheduled trigger failed for ${binding.workflowName}:`, e.message);
       }
     }
   } catch (e: any) {
