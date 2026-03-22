@@ -486,7 +486,7 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                 projectTab === 'issues' ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              Issues
+              Pipelines
               {issueConfig?.enabled && <span className="ml-1 text-[8px] text-[var(--green)]">•</span>}
             </button>
           </div>
