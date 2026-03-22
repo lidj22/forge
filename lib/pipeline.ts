@@ -108,7 +108,7 @@ nodes:
     depends_on: [setup]
     prompt: |
       ISSUE_ID="{{input.issue_id}}" && \
-      if [ -z "$ISSUE_ID" ]; then echo "No issue_id provided" && exit 1; fi && \
+      if [ -z "$ISSUE_ID" ]; then echo "__SKIP__ No issue_id provided" && exit 0; fi && \
       REPO=$(echo '{{nodes.setup.outputs.info}}' | grep REPO= | cut -d= -f2) && \
       gh issue view "$ISSUE_ID" --json title,body,labels,number -R "$REPO"
     outputs:
@@ -638,6 +638,17 @@ function setupTaskListener(pipelineId: string) {
         } else if (outputDef.extract === 'git_diff') {
           nodeState.outputs[outputDef.name] = task.gitDiff || '';
         }
+      }
+
+      // Convention: if stdout contains __SKIP__, mark node as skipped (downstream nodes will also skip)
+      const outputStr = task.resultSummary || '';
+      if (outputStr.includes('__SKIP__')) {
+        nodeState.status = 'skipped';
+        nodeState.completedAt = new Date().toISOString();
+        savePipeline(pipeline);
+        scheduleReadyNodes(pipeline, workflow);
+        checkPipelineCompletion(pipeline);
+        return;
       }
 
       // Check routes for conditional next step
