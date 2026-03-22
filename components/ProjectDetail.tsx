@@ -66,7 +66,7 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [showSkillsDetail, setShowSkillsDetail] = useState(false);
   const [projectTab, setProjectTab] = useState<'code' | 'skills' | 'claudemd' | 'pipelines'>('code');
   // Pipeline bindings state
-  const [pipelineBindings, setPipelineBindings] = useState<{ id: number; workflowName: string; enabled: boolean; config: any }[]>([]);
+  const [pipelineBindings, setPipelineBindings] = useState<{ id: number; workflowName: string; enabled: boolean; config: any; lastRunAt: string | null; nextRunAt: string | null }[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<{ id: string; workflowName: string; pipelineId: string; status: string; summary: string; createdAt: string }[]>([]);
   const [availableWorkflows, setAvailableWorkflows] = useState<{ name: string; description?: string; builtin?: boolean }[]>([]);
   const [showAddPipeline, setShowAddPipeline] = useState(false);
@@ -842,6 +842,43 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                       }}
                       className="text-[9px] text-[var(--red)] hover:underline"
                     >Remove</button>
+                  </div>
+                  {/* Schedule config */}
+                  <div className="flex items-center gap-2 text-[9px]">
+                    <span className="text-[var(--text-secondary)]">Schedule:</span>
+                    <select
+                      value={b.config.interval || 0}
+                      onChange={async (e) => {
+                        const interval = Number(e.target.value);
+                        const newConfig = { ...b.config, interval };
+                        await fetch('/api/project-pipelines', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ action: 'update', projectPath, workflowName: b.workflowName, config: newConfig }),
+                        });
+                        fetchPipelineBindings();
+                      }}
+                      className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-1.5 py-0.5 text-[9px] text-[var(--text-primary)]"
+                    >
+                      <option value={0}>Manual only</option>
+                      <option value={15}>Every 15 min</option>
+                      <option value={30}>Every 30 min</option>
+                      <option value={60}>Every 1 hour</option>
+                      <option value={120}>Every 2 hours</option>
+                      <option value={360}>Every 6 hours</option>
+                      <option value={720}>Every 12 hours</option>
+                      <option value={1440}>Every 24 hours</option>
+                    </select>
+                    {b.config.interval > 0 && b.nextRunAt && (
+                      <span className="text-[8px] text-[var(--text-secondary)]">
+                        Next: {new Date(b.nextRunAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                    {b.lastRunAt && (
+                      <span className="text-[8px] text-[var(--text-secondary)] ml-auto">
+                        Last: {new Date(b.lastRunAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))

@@ -34,6 +34,7 @@ function initSchema(db: Database.Database) {
   migrate("ALTER TABLE skills ADD COLUMN installed_version TEXT NOT NULL DEFAULT ''");
   migrate('ALTER TABLE skills ADD COLUMN rating REAL DEFAULT 0');
   migrate('ALTER TABLE skills ADD COLUMN deleted_remotely INTEGER NOT NULL DEFAULT 0');
+  migrate('ALTER TABLE project_pipelines ADD COLUMN last_run_at TEXT');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (

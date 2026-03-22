@@ -7,6 +7,7 @@ import {
   getRuns,
   deleteRun,
   triggerPipeline,
+  getNextRunTime,
 } from '@/lib/pipeline-scheduler';
 import { listWorkflows } from '@/lib/pipeline';
 
@@ -16,7 +17,10 @@ export async function GET(req: Request) {
   const projectPath = searchParams.get('project');
   if (!projectPath) return NextResponse.json({ error: 'project required' }, { status: 400 });
 
-  const bindings = getBindings(projectPath);
+  const bindings = getBindings(projectPath).map(b => ({
+    ...b,
+    nextRunAt: getNextRunTime(b),
+  }));
   const runs = getRuns(projectPath);
   const workflows = listWorkflows().map(w => ({ name: w.name, description: w.description, builtin: w.builtin }));
 
