@@ -107,8 +107,10 @@ nodes:
     project: "{{input.project}}"
     depends_on: [setup]
     prompt: |
+      ISSUE_ID="{{input.issue_id}}" && \
+      if [ -z "$ISSUE_ID" ]; then echo "No issue_id provided, skipping" && exit 0; fi && \
       REPO=$(echo '{{nodes.setup.outputs.info}}' | grep REPO= | cut -d= -f2) && \
-      gh issue view {{input.issue_id}} --json title,body,labels,number -R "$REPO"
+      gh issue view "$ISSUE_ID" --json title,body,labels,number -R "$REPO"
     outputs:
       - name: issue_json
         extract: stdout
