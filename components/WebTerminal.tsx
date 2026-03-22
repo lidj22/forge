@@ -15,6 +15,8 @@ export interface WebTerminalHandle {
 export interface WebTerminalProps {
   onActiveSession?: (sessionName: string | null) => void;
   onCodeOpenChange?: (open: boolean) => void;
+  browserOpen?: boolean;
+  onBrowserToggle?: () => void;
 }
 
 // ─── Types ───────────────────────────────────────────────────
@@ -164,7 +166,7 @@ let globalDragging = false;
 
 // ─── Main component ─────────────────────────────────────────
 
-const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession, onCodeOpenChange }, ref) {
+const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function WebTerminal({ onActiveSession, onCodeOpenChange, browserOpen, onBrowserToggle }, ref) {
   const [tabs, setTabs] = useState<TabState[]>(() => {
     const tree = makeTerminal();
     return [{ id: nextId++, label: 'Terminal 1', tree, ratios: {}, activeId: firstTerminalId(tree) }];
@@ -634,8 +636,17 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
               Code
             </button>
           )}
+          {onBrowserToggle && (
+            <button
+              onClick={onBrowserToggle}
+              className={`text-[11px] px-3 py-1 rounded font-bold ${browserOpen ? 'text-white bg-blue-500 hover:bg-blue-400' : 'text-blue-400 border border-blue-500 hover:bg-blue-500 hover:text-white'}`}
+              title={browserOpen ? 'Close browser' : 'Open browser'}
+            >
+              Browser
+            </button>
+          )}
           {activeTab && countTerminals(activeTab.tree) > 1 && (
-            <button onClick={onClosePane} className="text-[10px] px-2 py-0.5 text-gray-400 hover:text-red-400 hover:bg-[var(--term-border)] rounded">
+            <button onClick={onClosePane} className="text-[10px] px-2 py-0.5 text-[var(--accent)] hover:text-red-400 hover:bg-[var(--term-border)] rounded font-medium">
               Close Pane
             </button>
           )}
