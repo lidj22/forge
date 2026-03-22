@@ -360,7 +360,9 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
           Save
         </button>
         <button
-          onClick={onClose}
+          onClick={() => {
+            if (confirm('Discard unsaved changes?')) onClose();
+          }}
           className="text-xs px-3 py-1 text-gray-400 hover:text-white"
         >
           Cancel

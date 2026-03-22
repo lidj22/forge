@@ -61,6 +61,20 @@ export async function POST(req: Request) {
     }
   }
 
+  // Delete workflow
+  if (body.action === 'delete-workflow' && body.name) {
+    const { existsSync: ex, unlinkSync: ul } = await import('node:fs');
+    const filePath = join(FLOWS_DIR, `${body.name}.yaml`);
+    const altPath = join(FLOWS_DIR, `${body.name}.yml`);
+    const path = ex(filePath) ? filePath : ex(altPath) ? altPath : null;
+    if (!path) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    // Check if built-in
+    const w = listWorkflows().find(w => w.name === body.name);
+    if (w?.builtin) return NextResponse.json({ error: 'Cannot delete built-in workflow' }, { status: 400 });
+    ul(path);
+    return NextResponse.json({ ok: true });
+  }
+
   // Start pipeline
   const { workflow, input } = body;
   if (!workflow) {

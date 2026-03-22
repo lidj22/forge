@@ -67,6 +67,24 @@ forge flows              # list available workflows
 forge run my-workflow    # execute a workflow
 ```
 
+## Import a Workflow
+
+1. In Pipelines tab, click **Import**
+2. Paste YAML workflow content
+3. Click **Save Workflow**
+
+Or save YAML directly to `~/.forge/data/flows/<name>.yaml`.
+
+To create a workflow via Help AI: ask "Create a pipeline that does X" — the AI will generate the YAML for you to import.
+
+## Creating Workflows via API
+
+```bash
+curl -X POST http://localhost:3000/api/pipelines \
+  -H 'Content-Type: application/json' \
+  -d '{"action": "save-workflow", "yaml": "name: my-flow\nnodes:\n  step1:\n    project: my-project\n    prompt: do something"}'
+```
+
 ## Storage
 
 - Workflow YAML: `~/.forge/data/flows/`

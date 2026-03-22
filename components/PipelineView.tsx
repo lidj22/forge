@@ -71,6 +71,8 @@ export default function PipelineView({ onViewTask }: { onViewTask?: (taskId: str
   const [creating, setCreating] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [editorYaml, setEditorYaml] = useState<string | undefined>(undefined);
+  const [showImport, setShowImport] = useState(false);
+  const [importYaml, setImportYaml] = useState('');
 
   const fetchData = useCallback(async () => {
     const [pRes, wRes] = await Promise.all([
@@ -177,7 +179,55 @@ export default function PipelineView({ onViewTask }: { onViewTask?: (taskId: str
           >
             + Run
           </button>
+          <button
+            onClick={() => setShowImport(v => !v)}
+            className={`text-[10px] px-2 py-0.5 rounded ${showImport ? 'text-white bg-green-600' : 'text-green-400 hover:bg-green-400/10'}`}
+          >
+            Import
+          </button>
         </div>
+
+        {/* Import form */}
+        {showImport && (
+          <div className="p-3 border-b border-[var(--border)] space-y-2">
+            <textarea
+              value={importYaml}
+              onChange={e => setImportYaml(e.target.value)}
+              placeholder="Paste YAML workflow here..."
+              className="w-full h-40 text-xs font-mono bg-[var(--bg-tertiary)] border border-[var(--border)] rounded p-2 text-[var(--text-primary)] resize-none focus:outline-none focus:border-[var(--accent)]"
+              spellCheck={false}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  if (!importYaml.trim()) return;
+                  try {
+                    const res = await fetch('/api/pipelines', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'save-workflow', yaml: importYaml }),
+                    });
+                    const data = await res.json();
+                    if (data.ok) {
+                      setShowImport(false);
+                      setImportYaml('');
+                      fetchData();
+                      alert(`Workflow "${data.name}" imported successfully`);
+                    } else {
+                      alert(`Import failed: ${data.error}`);
+                    }
+                  } catch { alert('Import failed'); }
+                }}
+                disabled={!importYaml.trim()}
+                className="text-[10px] px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90 disabled:opacity-50"
+              >Save Workflow</button>
+              <button
+                onClick={() => { setShowImport(false); setImportYaml(''); }}
+                className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              >Cancel</button>
+            </div>
+          </div>
+        )}
 
         {/* Create form */}
         {showCreate && (
