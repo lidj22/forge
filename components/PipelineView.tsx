@@ -64,7 +64,7 @@ const STATUS_COLOR: Record<string, string> = {
   skipped: 'text-gray-500',
 };
 
-export default function PipelineView({ onViewTask }: { onViewTask?: (taskId: string) => void }) {
+export default function PipelineView({ onViewTask, focusPipelineId, onFocusHandled }: { onViewTask?: (taskId: string) => void; focusPipelineId?: string | null; onFocusHandled?: () => void }) {
   const { sidebarWidth, onSidebarDragStart } = useSidebarResize({ defaultWidth: 256, minWidth: 140, maxWidth: 480 });
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
@@ -99,6 +99,17 @@ export default function PipelineView({ onViewTask }: { onViewTask?: (taskId: str
     const timer = setInterval(fetchData, 5000);
     return () => clearInterval(timer);
   }, [fetchData]);
+
+  // Focus on a specific pipeline (from external navigation)
+  useEffect(() => {
+    if (!focusPipelineId || pipelines.length === 0) return;
+    const target = pipelines.find(p => p.id === focusPipelineId);
+    if (target) {
+      setSelectedPipeline(target);
+      setShowEditor(false);
+      onFocusHandled?.();
+    }
+  }, [focusPipelineId, pipelines, onFocusHandled]);
 
   // Refresh selected pipeline
   useEffect(() => {

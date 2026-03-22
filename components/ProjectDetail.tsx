@@ -874,7 +874,7 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                                 });
                                 const data = await res.json();
                                 if (data.error) alert(`Scan error: ${data.error}`);
-                                else alert(`Scanned ${data.total} issues, triggered ${data.triggered} new fixes`);
+                                else alert(`Scanned ${data.total} issues, triggered ${data.triggered} fix${data.pending > 0 ? ` (${data.pending} more pending)` : ''}`);
                                 fetchPipelineBindings();
                               } catch { alert('Scan failed'); }
                             }}
@@ -1032,7 +1032,11 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                         {run.dedupKey && (
                           <span className="text-[8px] text-[var(--accent)] font-mono">{run.dedupKey.replace('issue:', '#')}</span>
                         )}
-                        <span className="text-[8px] text-[var(--text-secondary)] font-mono">{run.pipelineId.slice(0, 8)}</span>
+                        <button
+                          onClick={() => window.dispatchEvent(new CustomEvent('forge:navigate', { detail: { view: 'pipelines', pipelineId: run.pipelineId } }))}
+                          className="text-[8px] text-[var(--accent)] font-mono hover:underline"
+                          title="View in Pipelines"
+                        >{run.pipelineId.slice(0, 8)}</button>
                         <span className="text-[8px] text-[var(--text-secondary)] ml-auto">{new Date(run.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       {run.summary && (

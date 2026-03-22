@@ -101,6 +101,18 @@ export default function Dashboard({ user }: { user: any }) {
     return () => window.removeEventListener('forge:open-terminal', handler);
   }, []);
 
+  // Listen for navigation events (e.g. from ProjectDetail → Pipelines)
+  const [pendingPipelineId, setPendingPipelineId] = useState<string | null>(null);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { view, pipelineId } = (e as CustomEvent).detail;
+      if (view) setViewMode(view);
+      if (pipelineId) setPendingPipelineId(pipelineId);
+    };
+    window.addEventListener('forge:navigate', handler);
+    return () => window.removeEventListener('forge:navigate', handler);
+  }, []);
+
   // Version check (on mount + every 10 min)
   useEffect(() => {
     const check = () => fetch('/api/version').then(r => r.json()).then(setVersionInfo).catch(() => {});
@@ -561,7 +573,11 @@ export default function Dashboard({ user }: { user: any }) {
         {/* Pipelines */}
         {viewMode === 'pipelines' && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
-            <PipelineView onViewTask={(taskId) => { setViewMode('tasks'); setActiveTaskId(taskId); }} />
+            <PipelineView
+              onViewTask={(taskId) => { setViewMode('tasks'); setActiveTaskId(taskId); }}
+              focusPipelineId={pendingPipelineId}
+              onFocusHandled={() => setPendingPipelineId(null)}
+            />
           </Suspense>
         )}
 

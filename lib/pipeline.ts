@@ -92,7 +92,7 @@ nodes:
       if [ -n "$(git status --porcelain)" ]; then echo "ERROR: Working directory has uncommitted changes. Please commit or stash first." && exit 1; fi && \
       ORIG_BRANCH=$(git branch --show-current || git rev-parse --short HEAD) && \
       REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || git remote get-url origin | sed 's/.*github.com[:/]//;s/.git$//') && \
-      BASE={{input.base_branch}} && \
+      BASE="{{input.base_branch}}" && \
       if [ -z "$BASE" ] || [ "$BASE" = "auto-detect" ]; then BASE=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo main); fi && \
       git checkout "$BASE" 2>/dev/null || true && \
       git pull origin "$BASE" 2>/dev/null || true && \
@@ -109,7 +109,8 @@ nodes:
     prompt: |
       ISSUE_ID="{{input.issue_id}}" && \
       if [ -z "$ISSUE_ID" ]; then echo "__SKIP__ No issue_id provided" && exit 0; fi && \
-      REPO=$(echo '{{nodes.setup.outputs.info}}' | grep REPO= | cut -d= -f2) && \
+      SETUP_INFO=$'{{nodes.setup.outputs.info}}' && \
+      REPO=$(echo "$SETUP_INFO" | grep REPO= | cut -d= -f2) && \
       gh issue view "$ISSUE_ID" --json title,body,labels,number -R "$REPO"
     outputs:
       - name: issue_json
@@ -140,11 +141,12 @@ nodes:
     project: "{{input.project}}"
     depends_on: [fix-code]
     prompt: |
-      REPO=$(echo '{{nodes.setup.outputs.info}}' | grep REPO= | cut -d= -f2) && \
+      SETUP_INFO=$'{{nodes.setup.outputs.info}}' && \
+      REPO=$(echo "$SETUP_INFO" | grep REPO= | cut -d= -f2) && \
       BRANCH=$(git branch --show-current) && \
       git push -u origin "$BRANCH" --force-with-lease 2>&1 && \
-      PR_URL=$(gh pr create --title 'Fix #{{input.issue_id}}' \
-        --body 'Auto-fix by Forge Pipeline for issue #{{input.issue_id}}.' -R "$REPO" 2>/dev/null || \
+      PR_URL=$(gh pr create --title "Fix #{{input.issue_id}}" \
+        --body "Auto-fix by Forge Pipeline for issue #{{input.issue_id}}." -R "$REPO" 2>/dev/null || \
         gh pr view "$BRANCH" --json url -q .url -R "$REPO" 2>/dev/null) && \
       echo "$PR_URL"
     outputs:
@@ -178,12 +180,14 @@ nodes:
     project: "{{input.project}}"
     depends_on: [review]
     prompt: |
-      ORIG=$(echo '{{nodes.setup.outputs.info}}' | grep ORIG_BRANCH= | cut -d= -f2) && \
+      SETUP_INFO=$'{{nodes.setup.outputs.info}}' && \
+      ORIG=$(echo "$SETUP_INFO" | grep ORIG_BRANCH= | cut -d= -f2) && \
+      PR_URL=$'{{nodes.push-and-pr.outputs.pr_url}}' && \
       if [ -n "$(git status --porcelain)" ]; then
-        echo "Issue #{{input.issue_id}} — PR: {{nodes.push-and-pr.outputs.pr_url}} | Review: {{nodes.review.outputs.review_result}} (staying on $(git branch --show-current))"
+        echo "Issue #{{input.issue_id}} — PR: $PR_URL (staying on $(git branch --show-current))"
       else
         git checkout "$ORIG" 2>/dev/null || true
-        echo "Issue #{{input.issue_id}} — PR: {{nodes.push-and-pr.outputs.pr_url}} | Review: {{nodes.review.outputs.review_result}} (switched back to $ORIG)"
+        echo "Issue #{{input.issue_id}} — PR: $PR_URL (switched back to $ORIG)"
       fi
     outputs:
       - name: result
@@ -306,10 +310,20 @@ export function listPipelines(): Pipeline[] {
 
 // ─── Template Resolution ──────────────────────────────────
 
-/** Escape a string for safe embedding in shell commands (single-quote wrapping) */
+/** Escape a string for safe embedding in single-quoted shell strings */
 function shellEscape(s: string): string {
   // Replace single quotes with '\'' (end quote, escaped quote, start quote)
   return s.replace(/'/g, "'\\''");
+}
+
+/** Escape a string for safe embedding in $'...' shell strings (ANSI-C quoting) */
+function shellEscapeAnsiC(s: string): string {
+  return s
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/\t/g, '\\t');
 }
 
 function resolveTemplate(template: string, ctx: {
@@ -336,7 +350,7 @@ function resolveTemplate(template: string, ctx: {
       }
     }
 
-    return shellMode ? shellEscape(value) : value;
+    return shellMode ? shellEscapeAnsiC(value) : value;
   });
 }
 

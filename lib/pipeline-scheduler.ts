@@ -232,41 +232,60 @@ function fetchOpenIssues(projectPath: string, labels: string[]): { number: numbe
   }
 }
 
-export function scanAndTriggerIssues(binding: ProjectPipelineBinding): { triggered: number; issues: number[]; total: number; error?: string } {
+export function scanAndTriggerIssues(binding: ProjectPipelineBinding): { triggered: number; issues: number[]; total: number; pending: number; error?: string } {
   const labels: string[] = binding.config.labels || [];
   const issues = fetchOpenIssues(binding.projectPath, labels);
 
   // Check for errors
   if (issues.length === 1 && (issues[0] as any).error) {
-    return { triggered: 0, issues: [], total: 0, error: (issues[0] as any).error };
+    return { triggered: 0, issues: [], total: 0, pending: 0, error: (issues[0] as any).error };
   }
 
-  const triggered: number[] = [];
+  // Check if there's already a running pipeline for this project+workflow — only one at a time
+  // to prevent concurrent git operations on the same repo
+  const recentRuns = getRuns(binding.projectPath, binding.workflowName, 5);
+  const hasRunning = recentRuns.some(r => r.status === 'running');
 
+  const newIssues: { number: number; title: string }[] = [];
   for (const issue of issues) {
     if (issue.number < 0) continue;
     const dedupKey = `issue:${issue.number}`;
-
-    if (isDuplicate(binding.projectPath, binding.workflowName, dedupKey)) continue;
-
-    try {
-      triggerPipeline(
-        binding.projectPath, binding.projectName, binding.workflowName,
-        {
-          issue_id: String(issue.number),
-          base_branch: binding.config.baseBranch || 'auto-detect',
-        },
-        dedupKey
-      );
-      triggered.push(issue.number);
-      console.log(`[pipeline-scheduler] Issue scan: triggered #${issue.number} "${issue.title}" for ${binding.projectName}`);
-    } catch (e: any) {
-      console.error(`[pipeline-scheduler] Issue scan: failed to trigger #${issue.number}:`, e.message);
+    if (!isDuplicate(binding.projectPath, binding.workflowName, dedupKey)) {
+      newIssues.push(issue);
     }
   }
 
+  if (newIssues.length === 0) {
+    updateLastRunAt(binding.projectPath, binding.workflowName);
+    return { triggered: 0, issues: [], total: issues.length, pending: 0 };
+  }
+
+  // Only trigger ONE issue at a time to avoid concurrent git conflicts
+  // Next issue will be triggered on the next scan cycle
+  if (hasRunning) {
+    console.log(`[pipeline-scheduler] Issue scan: ${newIssues.length} new issues for ${binding.projectName}, waiting for current pipeline to finish`);
+    return { triggered: 0, issues: [], total: issues.length, pending: newIssues.length };
+  }
+
+  const issue = newIssues[0];
+  const dedupKey = `issue:${issue.number}`;
+  try {
+    triggerPipeline(
+      binding.projectPath, binding.projectName, binding.workflowName,
+      {
+        issue_id: String(issue.number),
+        base_branch: binding.config.baseBranch || 'auto-detect',
+      },
+      dedupKey
+    );
+    console.log(`[pipeline-scheduler] Issue scan: triggered #${issue.number} "${issue.title}" for ${binding.projectName} (${newIssues.length - 1} more pending)`);
+  } catch (e: any) {
+    console.error(`[pipeline-scheduler] Issue scan: failed to trigger #${issue.number}:`, e.message);
+    return { triggered: 0, issues: [], total: issues.length, pending: newIssues.length, error: e.message };
+  }
+
   updateLastRunAt(binding.projectPath, binding.workflowName);
-  return { triggered: triggered.length, issues: triggered, total: issues.length };
+  return { triggered: 1, issues: [issue.number], total: issues.length, pending: newIssues.length - 1 };
 }
 
 // ─── Periodic Scheduler ─────────────────────────────────
