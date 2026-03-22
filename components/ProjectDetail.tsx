@@ -59,6 +59,8 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [fileTree, setFileTree] = useState<any[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  const [fileImageUrl, setFileImageUrl] = useState<string | null>(null);
+  const [fileBinaryInfo, setFileBinaryInfo] = useState<{ fileType: string; sizeLabel: string; message?: string } | null>(null);
   const [fileLanguage, setFileLanguage] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -117,12 +119,23 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
     setSelectedFile(path);
     setDiffContent(null);
     setDiffFile(null);
+    setFileContent(null);
+    setFileImageUrl(null);
+    setFileBinaryInfo(null);
     setFileLoading(true);
     try {
       const res = await fetch(`/api/code?dir=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(path)}`);
       const data = await res.json();
-      setFileContent(data.content || null);
-      setFileLanguage(data.language || '');
+      if (data.image) {
+        setFileImageUrl(data.dataUrl);
+      } else if (data.binary) {
+        setFileBinaryInfo({ fileType: data.fileType, sizeLabel: data.sizeLabel, message: data.message });
+      } else if (data.tooLarge) {
+        setFileBinaryInfo({ fileType: '', sizeLabel: data.sizeLabel, message: data.message });
+      } else {
+        setFileContent(data.content || null);
+        setFileLanguage(data.language || '');
+      }
     } catch { setFileContent(null); }
     setFileLoading(false);
   }, [projectPath]);
@@ -529,6 +542,23 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
             </>
           ) : fileLoading ? (
             <div className="h-full flex items-center justify-center text-xs text-[var(--text-secondary)]">Loading...</div>
+          ) : selectedFile && fileImageUrl ? (
+            <>
+              <div className="px-3 py-1 border-b border-[var(--border)] text-[10px] text-[var(--text-secondary)] sticky top-0 bg-[var(--bg-primary)] z-10">{selectedFile}</div>
+              <div className="flex-1 flex items-center justify-center p-4 overflow-auto">
+                <img src={fileImageUrl} alt={selectedFile} className="max-w-full max-h-full object-contain rounded" />
+              </div>
+            </>
+          ) : selectedFile && fileBinaryInfo ? (
+            <>
+              <div className="px-3 py-1 border-b border-[var(--border)] text-[10px] text-[var(--text-secondary)] sticky top-0 bg-[var(--bg-primary)] z-10">{selectedFile}</div>
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[var(--text-secondary)]">
+                <span className="text-2xl">📄</span>
+                <span className="text-xs">{fileBinaryInfo.fileType ? fileBinaryInfo.fileType.toUpperCase() + ' file' : 'File'} — {fileBinaryInfo.sizeLabel}</span>
+                {fileBinaryInfo.message && <span className="text-[10px]">{fileBinaryInfo.message}</span>}
+                <span className="text-[10px]">Binary file cannot be displayed</span>
+              </div>
+            </>
           ) : selectedFile && fileContent !== null ? (
             <>
               <div className="px-3 py-1 border-b border-[var(--border)] text-[10px] text-[var(--text-secondary)] sticky top-0 bg-[var(--bg-primary)] z-10">{selectedFile}</div>

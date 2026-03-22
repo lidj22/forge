@@ -26,11 +26,13 @@ const CODE_EXTS = new Set([
   '.xml', '.csv', '.lock',
 ]);
 
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico', '.avif']);
+
 function isCodeFile(name: string): boolean {
   if (name.startsWith('.') && !name.startsWith('.env') && !name.startsWith('.git')) return false;
   const ext = extname(name);
   if (!ext) return !name.includes('.'); // files like Makefile, Dockerfile
-  return CODE_EXTS.has(ext);
+  return CODE_EXTS.has(ext) || IMAGE_EXTS.has(ext);
 }
 
 function scanDir(dir: string, base: string, depth: number = 0): FileNode[] {
@@ -140,6 +142,17 @@ export async function GET(req: Request) {
         'class', 'jar', 'war',
         'pyc', 'pyo', 'wasm',
       ]);
+      // Image files — return base64 for preview
+      const IMAGE_PREVIEW = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico', 'avif']);
+      if (IMAGE_PREVIEW.has(ext)) {
+        if (size > 5_000_000) {
+          return NextResponse.json({ binary: true, fileType: ext, size, sizeLabel: `${sizeMB} MB`, message: 'Image too large to preview (> 5 MB)' });
+        }
+        const data = readFileSync(fullPath);
+        const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        const base64 = `data:${mime};base64,${data.toString('base64')}`;
+        return NextResponse.json({ image: true, dataUrl: base64, fileType: ext, size, sizeLabel: sizeKB > 1024 ? `${sizeMB} MB` : `${sizeKB} KB` });
+      }
       if (BINARY_EXTS.has(ext)) {
         return NextResponse.json({ binary: true, fileType: ext, size, sizeLabel: sizeKB > 1024 ? `${sizeMB} MB` : `${sizeKB} KB` });
       }

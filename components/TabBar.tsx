@@ -18,7 +18,7 @@ export default function TabBar({ tabs, activeId, onActivate, onClose }: TabBarPr
   if (tabs.length === 0) return null;
 
   return (
-    <div className="flex items-center border-b border-[var(--border)] bg-[var(--bg-tertiary)] overflow-x-auto shrink-0">
+    <div className="flex items-center border-b border-[var(--border)] bg-[var(--bg-tertiary)] overflow-x-auto shrink-0 min-w-0 max-w-full">
       {tabs.map(tab => (
         <div
           key={tab.id}

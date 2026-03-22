@@ -105,8 +105,23 @@ export async function GET(req: Request) {
     try {
       const stat = statSync(fullPath);
       const size = stat.size;
+      const ext = extname(fullPath).replace('.', '').toLowerCase();
       const sizeKB = Math.round(size / 1024);
       const sizeMB = (size / (1024 * 1024)).toFixed(1);
+
+      // Binary file types
+      const BINARY_EXTS = new Set([
+        'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'avif',
+        'mp3', 'mp4', 'wav', 'ogg', 'webm', 'mov', 'avi',
+        'zip', 'gz', 'tar', 'bz2', 'xz', '7z', 'rar',
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+        'exe', 'dll', 'so', 'dylib', 'bin', 'o', 'a',
+        'woff', 'woff2', 'ttf', 'eot', 'otf',
+        'sqlite', 'db', 'sqlite3', 'class', 'jar', 'pyc', 'wasm',
+      ]);
+      if (BINARY_EXTS.has(ext)) {
+        return NextResponse.json({ binary: true, fileType: ext, size, sizeLabel: sizeKB > 1024 ? `${sizeMB} MB` : `${sizeKB} KB` });
+      }
 
       if (size > 2_000_000) {
         return NextResponse.json({ tooLarge: true, size, sizeLabel: `${sizeMB} MB`, message: 'File exceeds 2 MB limit' });
@@ -115,7 +130,7 @@ export async function GET(req: Request) {
         return NextResponse.json({ large: true, size, sizeLabel: `${sizeKB} KB` });
       }
       const content = readFileSync(fullPath, 'utf-8');
-      return NextResponse.json({ content });
+      return NextResponse.json({ content, language: ext });
     } catch {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }

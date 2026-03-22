@@ -55,20 +55,18 @@ function TreeNode({ node, depth, selected, onSelect }: {
   }
 
   const isSelected = selected === node.path;
-  const canOpen = node.fileType === 'md' || node.fileType === 'image';
 
   return (
     <button
-      onClick={() => canOpen && onSelect(node.path)}
+      onClick={() => onSelect(node.path)}
       className={`w-full text-left flex items-center gap-1 px-1 py-0.5 rounded text-xs truncate ${
-        !canOpen ? 'text-[var(--text-secondary)]/40 cursor-default'
-        : isSelected ? 'bg-[var(--accent)]/20 text-[var(--accent)]'
+        isSelected ? 'bg-[var(--accent)]/20 text-[var(--accent)]'
         : 'hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
       }`}
       style={{ paddingLeft: depth * 12 + 16 }}
       title={node.path}
     >
-      {node.fileType === 'image' ? '🖼 ' : ''}{node.name.replace(/\.md$/, '')}
+      {node.fileType === 'image' ? '🖼 ' : ''}{node.name}
     </button>
   );
 }
@@ -82,6 +80,20 @@ function flattenTree(nodes: FileNode[]): FileNode[] {
     if (node.children) result.push(...flattenTree(node.children));
   }
   return result;
+}
+
+const BINARY_EXTS = /\.(png|jpg|jpeg|gif|bmp|ico|webp|avif|mp3|mp4|wav|ogg|webm|mov|avi|zip|gz|tar|bz2|xz|7z|rar|pdf|doc|docx|xls|xlsx|ppt|pptx|exe|dll|so|dylib|bin|woff|woff2|ttf|eot|otf|sqlite|db|class|jar|pyc|wasm|o|a)$/i;
+
+function filterTree(nodes: FileNode[]): FileNode[] {
+  return nodes.reduce<FileNode[]>((acc, node) => {
+    if (node.type === 'dir') {
+      const children = filterTree(node.children || []);
+      if (children.length > 0) acc.push({ ...node, children });
+    } else if (!BINARY_EXTS.test(node.name)) {
+      acc.push(node);
+    }
+    return acc;
+  }, []);
 }
 
 // ─── Main Component ──────────────────────────────────────
@@ -176,7 +188,9 @@ export default function DocsViewer() {
       setLoading(true);
       const res = await fetch(`/api/docs?root=${activeRoot}&file=${encodeURIComponent(path)}`);
       const data = await res.json();
-      if (data.tooLarge) {
+      if (data.binary) {
+        setFileWarning(`${data.fileType?.toUpperCase() || 'Binary'} file — ${data.sizeLabel} — cannot be displayed`);
+      } else if (data.tooLarge) {
         setFileWarning(`File too large (${data.sizeLabel})`);
       } else {
         fileContent = data.content || null;
@@ -185,11 +199,15 @@ export default function DocsViewer() {
     }
     setContent(fileContent);
 
+    const MAX_TABS = 8;
     const newTab: DocTab = { id: genTabId(), filePath: path, fileName, rootIdx: activeRoot, isImage: isImg, content: fileContent };
     setDocTabs(prev => {
-      // Double-check no duplicate
       if (prev.find(t => t.filePath === path)) return prev;
-      const updated = [...prev, newTab];
+      let updated = [...prev, newTab];
+      // Auto-close oldest tabs if over limit
+      while (updated.length > MAX_TABS) {
+        updated = updated.slice(1);
+      }
       setActiveDocTabId(newTab.id);
       persistDocTabs(updated, newTab.id);
       return updated;
@@ -259,6 +277,7 @@ export default function DocsViewer() {
   }, [activeRoot, fetchTree]);
 
   const [fileWarning, setFileWarning] = useState<string | null>(null);
+  const [hideUnsupported, setHideUnsupported] = useState(true);
 
   // Fetch file content
   const isImageFile = (path: string) => /\.(png|jpg|jpeg|gif|svg|webp|bmp|ico|avif)$/i.test(path);
@@ -321,9 +340,9 @@ export default function DocsViewer() {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
       {/* Doc content area */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
         {/* Collapsible sidebar — file tree */}
         {sidebarOpen && (
           <aside style={{ width: sidebarWidth }} className="flex flex-col shrink-0 overflow-hidden">
@@ -344,8 +363,15 @@ export default function DocsViewer() {
             <div className="px-3 py-1.5 border-b border-[var(--border)] flex items-center">
               <span className="text-[10px] text-[var(--text-secondary)] truncate">{roots[activeRoot] || 'Docs'}</span>
               <button
+                onClick={() => setHideUnsupported(v => !v)}
+                className={`text-[9px] ml-auto shrink-0 px-1 rounded ${hideUnsupported ? 'text-[var(--accent)]' : 'text-[var(--text-secondary)]'} hover:text-[var(--text-primary)]`}
+                title={hideUnsupported ? 'Show all files' : 'Hide binary files'}
+              >
+                {hideUnsupported ? 'Docs' : 'All'}
+              </button>
+              <button
                 onClick={() => { fetchTree(activeRoot); if (selectedFile) openFile(selectedFile); }}
-                className="text-[9px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] ml-auto shrink-0"
+                className="text-[9px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] shrink-0"
                 title="Refresh files"
               >
                 ↻
@@ -384,7 +410,7 @@ export default function DocsViewer() {
                   ))
                 )
               ) : (
-                tree.map(node => (
+                (hideUnsupported ? filterTree(tree) : tree).map(node => (
                   <TreeNode key={node.path} node={node} depth={0} selected={selectedFile} onSelect={openFileInTab} />
                 ))
               )}
@@ -493,7 +519,7 @@ export default function DocsViewer() {
                   spellCheck={false}
                 />
               </div>
-            ) : (
+            ) : selectedFile.endsWith('.md') ? (
             <div className="flex-1 overflow-y-auto px-8 py-6">
               {loading ? (
                 <div className="text-xs text-[var(--text-secondary)]">Loading...</div>
@@ -502,6 +528,17 @@ export default function DocsViewer() {
                   <MarkdownContent content={content} />
                 </div>
               )}
+            </div>
+            ) : (
+            <div className="flex-1 overflow-y-auto">
+              <pre className="p-4 text-[12px] leading-[1.5] font-mono text-[var(--text-primary)] whitespace-pre" style={{ fontFamily: 'Menlo, Monaco, "Courier New", monospace', tabSize: 2 }}>
+                {content.split('\n').map((line, i) => (
+                  <div key={i} className="flex hover:bg-[var(--bg-tertiary)]/50">
+                    <span className="select-none text-[var(--text-secondary)]/40 text-right pr-4 w-10 shrink-0">{i + 1}</span>
+                    <span className="flex-1">{line || ' '}</span>
+                  </div>
+                ))}
+              </pre>
             </div>
             )
           ) : (
