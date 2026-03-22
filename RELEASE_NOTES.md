@@ -1,12 +1,16 @@
-# Forge v0.4.6
+# Forge v0.4.7
 
-Released: 2026-03-21
+Released: 2026-03-22
 
-## Changes since v0.4.5
+## Changes since v0.4.6
+
+### Bug Fixes
+- fix: serial issue scanning, shell ANSI-C escaping, pipeline navigation
+- fix: prevent concurrent startTunnel calls from killing each other (#16)
 
 ### Other
-- improve help features
-- imporve help features
+- improve pipeline
+- fix(#17): normalize SQLite datetime strings to ISO 8601 UTC
 
 
-**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.4.5...v0.4.6
+**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.4.6...v0.4.7
