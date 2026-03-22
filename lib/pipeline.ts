@@ -578,20 +578,11 @@ function checkPipelineCompletion(pipeline: Pipeline) {
     savePipeline(pipeline);
     notifyPipelineComplete(pipeline);
 
-    // Update issue_autofix_processed status
-    if (pipeline.workflowName === 'issue-fix-and-review' || pipeline.workflowName === 'issue-auto-fix') {
-      try {
-        const { updateProcessedStatus } = require('./issue-scanner');
-        const issueId = parseInt(pipeline.input.issue_id);
-        const projectInfo = getProjectInfo(pipeline.input.project);
-        if (projectInfo && issueId) {
-          const prOutput = pipeline.nodes['push-and-pr']?.outputs?.pr_url || '';
-          const prMatch = prOutput.match(/\/pull\/(\d+)/);
-          const prNumber = prMatch ? parseInt(prMatch[1]) : undefined;
-          updateProcessedStatus(projectInfo.path, issueId, pipeline.status, prNumber);
-        }
-      } catch {}
-    }
+    // Sync run status to project pipeline runs
+    try {
+      const { syncRunStatus } = require('./pipeline-scheduler');
+      syncRunStatus(pipeline.id);
+    } catch {}
 
     // Release project lock
     const workflow = getWorkflow(pipeline.workflowName);

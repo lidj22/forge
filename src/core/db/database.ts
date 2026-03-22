@@ -155,6 +155,29 @@ function initSchema(db: Database.Database) {
       data TEXT NOT NULL DEFAULT '{}'
     );
 
+    -- Project pipeline bindings (which workflows are attached to which projects)
+    CREATE TABLE IF NOT EXISTS project_pipelines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_path TEXT NOT NULL,
+      project_name TEXT NOT NULL,
+      workflow_name TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      config TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(project_path, workflow_name)
+    );
+
+    -- Pipeline execution log (per project, replaces issue_autofix_processed)
+    CREATE TABLE IF NOT EXISTS pipeline_runs (
+      id TEXT PRIMARY KEY,
+      project_path TEXT NOT NULL,
+      workflow_name TEXT NOT NULL,
+      pipeline_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      summary TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Project favorites
     CREATE TABLE IF NOT EXISTS project_favorites (
       project_path TEXT PRIMARY KEY,
