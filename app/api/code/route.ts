@@ -23,7 +23,8 @@ const CODE_EXTS = new Set([
   '.css', '.scss', '.html', '.json', '.yaml', '.yml', '.toml',
   '.md', '.txt', '.sh', '.bash', '.zsh', '.fish',
   '.sql', '.graphql', '.proto', '.env', '.gitignore',
-  '.xml', '.csv', '.lock',
+  '.xml', '.csv', '.lock', '.properties', '.gradle', '.groovy',
+  '.scala', '.clj', '.cljs', '.jsp', '.erb', '.vue', '.svelte',
 ]);
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico', '.avif']);
@@ -36,7 +37,7 @@ function isCodeFile(name: string): boolean {
 }
 
 function scanDir(dir: string, base: string, depth: number = 0): FileNode[] {
-  if (depth > 5) return [];
+  if (depth > 10) return [];
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     const nodes: FileNode[] = [];

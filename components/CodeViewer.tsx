@@ -112,6 +112,10 @@ const KEYWORDS = new Set([
   'true', 'false', 'null', 'undefined', 'void',
   'def', 'self', 'None', 'True', 'False', 'class', 'lambda', 'with', 'as', 'in', 'not', 'and', 'or',
   'func', 'package', 'struct', 'go', 'defer', 'select', 'chan', 'map', 'range',
+  'final', 'synchronized', 'volatile', 'transient', 'native',
+  'throws', 'int', 'long', 'double', 'float', 'char', 'byte', 'short', 'boolean',
+  'override',
+  'val', 'object', 'trait', 'sealed', 'implicit', 'lazy', 'match',
 ]);
 
 function highlightLine(line: string, lang: string): React.ReactNode {
