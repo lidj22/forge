@@ -1257,13 +1257,22 @@ const MemoTerminalPane = memo(function TerminalPane({
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             try { term.write(msg.data); } catch {};
-            // Bell: detect claude completion (cost summary or prompt after activity)
+            // Bell: detect claude completion
             if (bellEnabledPanes.has(id)) {
-              bellOutputBuffer += msg.data as string;
-              // Keep only last 500 chars
-              if (bellOutputBuffer.length > 500) bellOutputBuffer = bellOutputBuffer.slice(-500);
-              // Claude outputs cost/token info when done, or returns to prompt ❯
-              if (bellOutputBuffer.includes('input tokens') || bellOutputBuffer.includes('output tokens') || bellOutputBuffer.includes('api_cost')) {
+              const text = msg.data as string;
+              bellOutputBuffer += text;
+              if (bellOutputBuffer.length > 1000) bellOutputBuffer = bellOutputBuffer.slice(-1000);
+              // Claude completion markers:
+              // - "Cogitated for" / "Canoodling" + time = finished thinking
+              // - "input tokens" / "output tokens" / "api_cost" = cost summary
+              // - Prompt ❯ appearing after substantial output (>500 bytes)
+              if (
+                bellOutputBuffer.includes('Cogitated for') ||
+                bellOutputBuffer.includes('input tokens') ||
+                bellOutputBuffer.includes('output tokens') ||
+                bellOutputBuffer.includes('api_cost') ||
+                (bellOutputBuffer.length > 500 && text.includes('❯'))
+              ) {
                 bellOutputBuffer = '';
                 fireBellNotification(id);
               }
