@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="app/icon.png" width="80" height="80" alt="Forge">
+  <img src="app/icon.svg" width="80" height="80" alt="Forge">
 </p>
 
 <h1 align="center">Forge</h1>
