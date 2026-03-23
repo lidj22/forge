@@ -37,6 +37,7 @@ interface TabState {
   ratios: Record<number, number>;
   activeId: number;
   projectPath?: string;
+  bellEnabled?: boolean;
 }
 
 // ─── Layout persistence ──────────────────────────────────────
@@ -145,6 +146,11 @@ function firstTerminalId(n: SplitNode): number {
   return n.type === 'terminal' ? n.id : firstTerminalId(n.first);
 }
 
+function collectPaneIds(tree: SplitNode): number[] {
+  if (tree.type === 'terminal') return [tree.id];
+  return [...collectPaneIds(tree.first), ...collectPaneIds(tree.second)];
+}
+
 function collectSessionNames(tree: SplitNode): string[] {
   if (tree.type === 'terminal') return tree.sessionName ? [tree.sessionName] : [];
   return [...collectSessionNames(tree.first), ...collectSessionNames(tree.second)];
@@ -157,6 +163,34 @@ function collectAllSessionNames(tabs: TabState[]): string[] {
 // ─── Pending commands for new terminal panes ────────────────
 
 const pendingCommands = new Map<number, string>();
+
+// ─── Bell notification tracking ─────────────────────────────
+
+const bellEnabledPanes = new Set<number>();
+const bellPaneLabels = new Map<number, string>();
+const bellLastFired = new Map<number, number>(); // paneId -> timestamp
+const BELL_COOLDOWN = 30000; // 30s cooldown between bells
+
+function fireBellNotification(paneId: number) {
+  const now = Date.now();
+  const last = bellLastFired.get(paneId) || 0;
+  if (now - last < BELL_COOLDOWN) return;
+  bellLastFired.set(paneId, now);
+
+  const label = bellPaneLabels.get(paneId) || 'Terminal';
+
+  // Browser notification
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    new Notification('Forge — Terminal Idle', { body: `"${label}" appears to have finished.`, icon: '/icon.png' });
+  }
+
+  // Telegram + in-app via API
+  fetch('/api/terminal-bell', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tabLabel: label }),
+  }).catch(() => {});
+}
 
 // ─── Global drag lock — suppress terminal fit() during split drag ──
 
@@ -498,6 +532,29 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
 
   const usedSessions = collectAllSessionNames(tabs);
 
+  // Toggle bell for a tab
+  const toggleBell = useCallback((tabId: number) => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    setTabs(prev => prev.map(t => t.id === tabId ? { ...t, bellEnabled: !t.bellEnabled } : t));
+  }, []);
+
+  // Sync bell state to module-level sets for MemoTerminalPane to read
+  useEffect(() => {
+    bellEnabledPanes.clear();
+    bellPaneLabels.clear();
+    for (const tab of tabs) {
+      if (tab.bellEnabled) {
+        const paneIds = collectPaneIds(tab.tree);
+        for (const id of paneIds) {
+          bellEnabledPanes.add(id);
+          bellPaneLabels.set(id, tab.label);
+        }
+      }
+    }
+  }, [tabs]);
+
   // Auto-refresh tmux sessions periodically to show detached count
   useEffect(() => {
     if (!hydrated) return;
@@ -570,6 +627,11 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                   {tab.label}
                 </span>
               )}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleBell(tab.id); }}
+                className={`text-[10px] ml-1 ${tab.bellEnabled ? 'text-yellow-400' : 'text-gray-600 hover:text-gray-400'}`}
+                title={tab.bellEnabled ? 'Disable notification' : 'Enable notification when idle'}
+              >{tab.bellEnabled ? '🔔' : '🔕'}</button>
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}
@@ -1058,6 +1120,8 @@ const MemoTerminalPane = memo(function TerminalPane({
     if (!containerRef.current) return;
 
     let disposed = false; // guard against post-cleanup writes (React Strict Mode)
+    let bellIdleTimer = 0;
+    let bellActivityBytes = 0;
 
     // Read terminal theme from CSS variables
     const cs = getComputedStyle(document.documentElement);
@@ -1194,6 +1258,15 @@ const MemoTerminalPane = memo(function TerminalPane({
           const msg = JSON.parse(event.data);
           if (msg.type === 'output') {
             try { term.write(msg.data); } catch {};
+            // Bell idle detection
+            bellActivityBytes += (msg.data as string).length;
+            clearTimeout(bellIdleTimer);
+            if (bellActivityBytes >= 200 && bellEnabledPanes.has(id)) {
+              bellIdleTimer = window.setTimeout(() => {
+                bellActivityBytes = 0;
+                fireBellNotification(id);
+              }, 8000);
+            }
           } else if (msg.type === 'connected') {
             connectedSession = msg.sessionName;
             createRetries = 0;
@@ -1342,6 +1415,7 @@ const MemoTerminalPane = memo(function TerminalPane({
       visObserver.disconnect();
       clearTimeout(resizeTimer);
       clearTimeout(reconnectTimer);
+      clearTimeout(bellIdleTimer);
       window.removeEventListener('terminal-drag-end', onDragEnd);
       resizeObserver.disconnect();
       // Strict Mode cleanup: if disposed within 2s of mount and we created a
