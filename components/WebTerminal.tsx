@@ -1122,6 +1122,7 @@ const MemoTerminalPane = memo(function TerminalPane({
     let disposed = false; // guard against post-cleanup writes (React Strict Mode)
     let bellOutputBuffer = '';
     let bellFired = true; // start suppressed — only fire after user sends new input
+    let bellNewBytes = 0; // bytes of output since last user input
 
     // Read terminal theme from CSS variables
     const cs = getComputedStyle(document.documentElement);
@@ -1259,14 +1260,14 @@ const MemoTerminalPane = memo(function TerminalPane({
           if (msg.type === 'output') {
             try { term.write(msg.data); } catch {};
             // Bell: detect claude completion
-            if (bellEnabledPanes.has(id)) {
+            if (bellEnabledPanes.has(id) && !bellFired) {
               const text = msg.data as string;
-              bellOutputBuffer += text;
-              if (bellOutputBuffer.length > 1000) bellOutputBuffer = bellOutputBuffer.slice(-1000);
-              // Claude completion markers:
-              // - "Cogitated for" = finished thinking (new Claude Code format)
-              // - "input tokens" / "output tokens" / "api_cost" = cost summary (old format)
-              if (!bellFired) {
+              bellNewBytes += text.length;
+              // Only start checking after 2000+ bytes of new output
+              // This skips screen redraws that contain old completion markers
+              if (bellNewBytes > 2000) {
+                bellOutputBuffer += text;
+                if (bellOutputBuffer.length > 500) bellOutputBuffer = bellOutputBuffer.slice(-500);
                 const hasCostInfo = bellOutputBuffer.includes('Cogitated for') ||
                   bellOutputBuffer.includes('input tokens') ||
                   bellOutputBuffer.includes('output tokens') ||
@@ -1371,6 +1372,7 @@ const MemoTerminalPane = memo(function TerminalPane({
       // Reset bell after user types (new interaction = allow bell to fire again)
       bellFired = false;
       bellOutputBuffer = '';
+      bellNewBytes = 0;
     });
 
     // ── Resize handling ──
