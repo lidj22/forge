@@ -1119,9 +1119,9 @@ const MemoTerminalPane = memo(function TerminalPane({
     if (!containerRef.current) return;
 
     let disposed = false; // guard against post-cleanup writes (React Strict Mode)
-    let bellOutputBuffer = '';
-    let bellFired = true; // start suppressed — only fire after user sends new input
-    let bellNewBytes = 0; // bytes of output since last user input
+    let bellArmed = false; // armed after user presses Enter
+    let bellNewBytes = 0;
+    let bellIdleTimer = 0;
 
     // Read terminal theme from CSS variables
     const cs = getComputedStyle(document.documentElement);
@@ -1259,23 +1259,16 @@ const MemoTerminalPane = memo(function TerminalPane({
           if (msg.type === 'output') {
             try { term.write(msg.data); } catch {};
             // Bell: detect claude completion
-            if (bellEnabledPanes.has(id) && !bellFired) {
-              const text = msg.data as string;
-              bellNewBytes += text.length;
-              // Only start checking after 2000+ bytes of new output
-              // This skips screen redraws that contain old completion markers
+            // Bell: idle detection after user submits prompt
+            if (bellEnabledPanes.has(id) && bellArmed) {
+              bellNewBytes += (msg.data as string).length;
+              clearTimeout(bellIdleTimer);
+              // After 2000+ bytes of output, start idle timer
               if (bellNewBytes > 2000) {
-                bellOutputBuffer += text;
-                if (bellOutputBuffer.length > 500) bellOutputBuffer = bellOutputBuffer.slice(-500);
-                const hasCostInfo = bellOutputBuffer.includes('Cogitated for') ||
-                  bellOutputBuffer.includes('input tokens') ||
-                  bellOutputBuffer.includes('output tokens') ||
-                  bellOutputBuffer.includes('api_cost');
-                if (hasCostInfo) {
-                  bellOutputBuffer = '';
-                  bellFired = true;
+                bellIdleTimer = window.setTimeout(() => {
+                  bellArmed = false;
                   fireBellNotification(id);
-                }
+                }, 15000); // 15s no output = claude finished
               }
             }
           } else if (msg.type === 'connected') {
@@ -1368,11 +1361,11 @@ const MemoTerminalPane = memo(function TerminalPane({
 
     term.onData((data) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
-      // Reset bell only on Enter (user submitted a new prompt to claude)
+      // Arm bell on Enter (user submitted a new prompt)
       if (data === '\r' || data === '\n') {
-        bellFired = false;
-        bellOutputBuffer = '';
+        bellArmed = true;
         bellNewBytes = 0;
+        clearTimeout(bellIdleTimer);
       }
     });
 
