@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { getConfigDir } from '@/lib/dirs';
+import { getConfigDir, getDataDir } from '@/lib/dirs';
 import { loadSettings } from '@/lib/settings';
 import { execSync } from 'node:child_process';
 
 const HELP_DIR = join(getConfigDir(), 'help');
 const SOURCE_HELP_DIR = join(process.cwd(), 'lib', 'help-docs');
 
-/** Ensure help docs are copied to ~/.forge/help/ */
+/** Ensure help docs are copied to ~/.forge/help/ and CLAUDE.md to ~/.forge/data/ */
 function ensureHelpDocs() {
   if (!existsSync(HELP_DIR)) mkdirSync(HELP_DIR, { recursive: true });
   if (existsSync(SOURCE_HELP_DIR)) {
@@ -16,9 +16,15 @@ function ensureHelpDocs() {
       if (!file.endsWith('.md')) continue;
       const src = join(SOURCE_HELP_DIR, file);
       const dest = join(HELP_DIR, file);
-      // Always overwrite to keep docs up to date
       writeFileSync(dest, readFileSync(src));
     }
+  }
+  // Copy CLAUDE.md to data dir so Help AI (working in ~/.forge/data/) picks it up
+  const dataDir = getDataDir();
+  const claudeMdSrc = join(HELP_DIR, 'CLAUDE.md');
+  const claudeMdDest = join(dataDir, 'CLAUDE.md');
+  if (existsSync(claudeMdSrc)) {
+    writeFileSync(claudeMdDest, readFileSync(claudeMdSrc));
   }
 }
 
@@ -51,7 +57,7 @@ export async function GET(req: Request) {
     const docs = existsSync(HELP_DIR)
       ? readdirSync(HELP_DIR).filter(f => f.endsWith('.md')).sort()
       : [];
-    return NextResponse.json({ agent, docsCount: docs.length, helpDir: HELP_DIR });
+    return NextResponse.json({ agent, docsCount: docs.length, helpDir: HELP_DIR, dataDir: getDataDir() });
   }
 
   if (action === 'docs') {

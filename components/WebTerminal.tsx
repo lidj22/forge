@@ -478,6 +478,15 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
     });
   }, [activeTab, updateActiveTab]);
 
+  const closePaneById = useCallback((id: number) => {
+    updateActiveTab(t => {
+      if (countTerminals(t.tree) <= 1) return t;
+      const newTree = removeNodeById(t.tree, id) || t.tree;
+      const newActiveId = t.activeId === id ? firstTerminalId(newTree) : t.activeId;
+      return { ...t, tree: newTree, activeId: newActiveId };
+    });
+  }, [updateActiveTab]);
+
   const setActiveId = useCallback((id: number) => {
     updateActiveTab(t => ({ ...t, activeId: id }));
   }, [updateActiveTab]);
@@ -643,11 +652,6 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
               title={browserOpen ? 'Close browser' : 'Open browser'}
             >
               Browser
-            </button>
-          )}
-          {activeTab && countTerminals(activeTab.tree) > 1 && (
-            <button onClick={onClosePane} className="text-[10px] px-2 py-0.5 text-[var(--accent)] hover:text-red-400 hover:bg-[var(--term-border)] rounded font-medium">
-              Close Pane
             </button>
           )}
         </div>
@@ -876,6 +880,8 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
             onSessionConnected={onSessionConnected}
             refreshKeys={refreshKeys}
             skipPermissions={skipPermissions}
+            canClose={countTerminals(tab.tree) > 1}
+            onClosePane={tab.id === activeTabId ? closePaneById : undefined}
           />
         </div>
       ))}
@@ -888,7 +894,7 @@ export default WebTerminal;
 // ─── Pane renderer ───────────────────────────────────────────
 
 function PaneRenderer({
-  node, activeId, onFocus, ratios, setRatios, onSessionConnected, refreshKeys, skipPermissions,
+  node, activeId, onFocus, ratios, setRatios, onSessionConnected, refreshKeys, skipPermissions, canClose, onClosePane,
 }: {
   node: SplitNode;
   activeId: number;
@@ -898,11 +904,20 @@ function PaneRenderer({
   onSessionConnected: (paneId: number, sessionName: string) => void;
   refreshKeys: Record<number, number>;
   skipPermissions?: boolean;
+  canClose?: boolean;
+  onClosePane?: (id: number) => void;
 }) {
   if (node.type === 'terminal') {
     return (
-      <div className={`h-full w-full ${activeId === node.id ? 'ring-1 ring-[#7c5bf0]/50 ring-inset' : ''}`} onMouseDown={() => onFocus(node.id)}>
+      <div className={`h-full w-full relative group/pane ${activeId === node.id ? 'ring-1 ring-[#7c5bf0]/50 ring-inset' : ''}`} onMouseDown={() => onFocus(node.id)}>
         <MemoTerminalPane key={`${node.id}-${refreshKeys[node.id] || 0}`} id={node.id} sessionName={node.sessionName} projectPath={node.projectPath} skipPermissions={skipPermissions} onSessionConnected={onSessionConnected} />
+        {canClose && onClosePane && (
+          <button
+            onClick={(e) => { e.stopPropagation(); if (confirm('Close this pane?')) onClosePane(node.id); }}
+            className="absolute top-1.5 right-1.5 z-10 w-6 h-6 flex items-center justify-center rounded bg-red-500/80 text-white hover:bg-red-500 opacity-0 group-hover/pane:opacity-100 transition-opacity text-xs font-bold shadow"
+            title="Close this pane"
+          >✕</button>
+        )}
       </div>
     );
   }
@@ -911,8 +926,8 @@ function PaneRenderer({
 
   return (
     <DraggableSplit splitId={node.id} direction={node.direction} ratio={ratio} setRatios={setRatios}>
-      <PaneRenderer node={node.first} activeId={activeId} onFocus={onFocus} ratios={ratios} setRatios={setRatios} onSessionConnected={onSessionConnected} refreshKeys={refreshKeys} skipPermissions={skipPermissions} />
-      <PaneRenderer node={node.second} activeId={activeId} onFocus={onFocus} ratios={ratios} setRatios={setRatios} onSessionConnected={onSessionConnected} refreshKeys={refreshKeys} skipPermissions={skipPermissions} />
+      <PaneRenderer node={node.first} activeId={activeId} onFocus={onFocus} ratios={ratios} setRatios={setRatios} onSessionConnected={onSessionConnected} refreshKeys={refreshKeys} skipPermissions={skipPermissions} canClose={canClose} onClosePane={onClosePane} />
+      <PaneRenderer node={node.second} activeId={activeId} onFocus={onFocus} ratios={ratios} setRatios={setRatios} onSessionConnected={onSessionConnected} refreshKeys={refreshKeys} skipPermissions={skipPermissions} canClose={canClose} onClosePane={onClosePane} />
     </DraggableSplit>
   );
 }
@@ -1198,12 +1213,29 @@ const MemoTerminalPane = memo(function TerminalPane({
             // Auto-run claude for project tabs (only if no pendingCommand already set)
             if (isNewlyCreated && projectPathRef.current && !pendingCommands.has(id)) {
               isNewlyCreated = false;
-              setTimeout(() => {
-                if (!disposed && ws?.readyState === WebSocket.OPEN) {
+              // Check if project has existing claude sessions to decide -c flag
+              const pp = projectPathRef.current;
+              const pName = pp.replace(/\/+$/, '').split('/').pop() || '';
+              fetch(`/api/claude-sessions/${encodeURIComponent(pName)}`)
+                .then(r => r.json())
+                .then(sData => {
+                  const hasSession = Array.isArray(sData) ? sData.length > 0 : false;
+                  const resumeFlag = hasSession ? ' -c' : '';
                   const skipFlag = skipPermRef.current ? ' --dangerously-skip-permissions' : '';
-                  ws.send(JSON.stringify({ type: 'input', data: `cd "${projectPathRef.current}" && claude${skipFlag}\n` }));
-                }
-              }, 300);
+                  setTimeout(() => {
+                    if (!disposed && ws?.readyState === WebSocket.OPEN) {
+                      ws.send(JSON.stringify({ type: 'input', data: `cd "${pp}" && claude${resumeFlag}${skipFlag}\n` }));
+                    }
+                  }, 300);
+                })
+                .catch(() => {
+                  const skipFlag = skipPermRef.current ? ' --dangerously-skip-permissions' : '';
+                  setTimeout(() => {
+                    if (!disposed && ws?.readyState === WebSocket.OPEN) {
+                      ws.send(JSON.stringify({ type: 'input', data: `cd "${pp}" && claude${skipFlag}\n` }));
+                    }
+                  }, 300);
+                });
             }
             isNewlyCreated = false;
             // Force tmux to redraw by toggling size, then send reset

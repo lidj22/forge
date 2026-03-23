@@ -16,7 +16,7 @@ const WebTerminal = lazy(() => import('./WebTerminal'));
 const DocsViewer = lazy(() => import('./DocsViewer'));
 const CodeViewer = lazy(() => import('./CodeViewer'));
 const ProjectManager = lazy(() => import('./ProjectManager'));
-const PreviewPanel = lazy(() => import('./PreviewPanel'));
+const BrowserPanel = lazy(() => import('./BrowserPanel'));
 const PipelineView = lazy(() => import('./PipelineView'));
 const HelpDialog = lazy(() => import('./HelpDialog'));
 const LogViewer = lazy(() => import('./LogViewer'));
@@ -285,7 +285,6 @@ export default function Dashboard({ user }: { user: any }) {
                 : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
             }`}
           >?</button>
-          {/* Preview + Tunnel */}
           <button
             onClick={() => setViewMode('preview')}
             className={`text-[10px] px-2 py-0.5 border rounded transition-colors ${
@@ -294,7 +293,7 @@ export default function Dashboard({ user }: { user: any }) {
                 : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
             }`}
           >
-            Preview
+            Browser
           </button>
           <TunnelToggle />
           {onlineCount.total > 0 && (
@@ -570,6 +569,13 @@ export default function Dashboard({ user }: { user: any }) {
           </Suspense>
         )}
 
+        {/* Browser (full page) */}
+        {viewMode === 'preview' && (
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <BrowserPanel />
+          </Suspense>
+        )}
+
         {/* Pipelines */}
         {viewMode === 'pipelines' && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
@@ -581,12 +587,6 @@ export default function Dashboard({ user }: { user: any }) {
           </Suspense>
         )}
 
-        {/* Preview */}
-        {viewMode === 'preview' && (
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
-            <PreviewPanel />
-          </Suspense>
-        )}
 
         {/* Skills */}
         {viewMode === 'skills' && (

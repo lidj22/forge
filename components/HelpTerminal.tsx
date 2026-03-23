@@ -26,6 +26,8 @@ export default function HelpTerminal() {
     if (!containerRef.current) return;
 
     let disposed = false;
+    let dataDir = '~/.forge/data';
+
     const cs = getComputedStyle(document.documentElement);
     const tv = (name: string) => cs.getPropertyValue(name).trim();
     const term = new Terminal({
@@ -73,7 +75,7 @@ export default function HelpTerminal() {
               isNewSession = false;
               setTimeout(() => {
                 if (socket.readyState === WebSocket.OPEN) {
-                  socket.send(JSON.stringify({ type: 'input', data: `cd ~/.forge/help 2>/dev/null && claude\n` }));
+                  socket.send(JSON.stringify({ type: 'input', data: `cd "${dataDir}" 2>/dev/null && claude\n` }));
                 }
               }, 300);
             }
@@ -94,7 +96,11 @@ export default function HelpTerminal() {
       socket.onerror = () => {};
     }
 
-    connect();
+    // Fetch data dir then connect
+    fetch('/api/help?action=status').then(r => r.json())
+      .then(data => { if (data.dataDir) dataDir = data.dataDir; })
+      .catch(() => {})
+      .finally(() => { if (!disposed) connect(); });
 
     term.onData((data) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));

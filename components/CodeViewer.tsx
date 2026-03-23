@@ -5,6 +5,7 @@ import type { WebTerminalHandle, WebTerminalProps } from './WebTerminal';
 import { useSidebarResize } from '@/hooks/useSidebarResize';
 
 const WebTerminal = lazy(() => import('./WebTerminal'));
+const BrowserPanel = lazy(() => import('./BrowserPanel'));
 
 interface FileNode {
   name: string;
@@ -190,8 +191,6 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
-  const [browserUrl, setBrowserUrl] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('forge-browser-url') || '' : '');
-  const [browserKey, setBrowserKey] = useState(0);
   const [browserWidth, setBrowserWidth] = useState(640);
   const browserDragRef = useRef<{ startX: number; startW: number } | null>(null);
   const [browserDragging, setBrowserDragging] = useState(false);
@@ -430,7 +429,7 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
       <div className={`flex ${codeOpen ? 'shrink-0' : 'flex-1'}`} style={codeOpen ? { height: terminalHeight } : undefined}>
         <div className="flex-1 min-w-0">
           <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-            <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} onCodeOpenChange={handleCodeOpenChange} browserOpen={browserOpen} onBrowserToggle={() => { setBrowserOpen(v => !v); if (!browserOpen) setBrowserKey(k => k + 1); }} />
+            <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} onCodeOpenChange={handleCodeOpenChange} browserOpen={browserOpen} onBrowserToggle={() => setBrowserOpen(v => !v)} />
           </Suspense>
         </div>
         {browserOpen && (
@@ -455,43 +454,9 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
             }}
             className="w-1 bg-[var(--border)] cursor-col-resize shrink-0 hover:bg-[var(--accent)]/50"
           />
-          <div style={{ width: browserWidth }} className="shrink-0 flex flex-col">
-            <div className="flex items-center gap-1 px-2 py-1 border-b border-[var(--border)] bg-[var(--bg-tertiary)] shrink-0">
-              <input
-                type="text"
-                defaultValue={browserUrl}
-                placeholder="http://localhost:3000"
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    const url = (e.target as HTMLInputElement).value.trim();
-                    if (url) {
-                      setBrowserUrl(url);
-                      localStorage.setItem('forge-browser-url', url);
-                      setBrowserKey(k => k + 1);
-                    }
-                  }
-                }}
-                className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-0.5 text-[10px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] min-w-0"
-              />
-              <button onClick={() => setBrowserKey(k => k + 1)} className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-1" title="Refresh">↻</button>
-              <button onClick={() => window.open(browserUrl, '_blank')} className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-1" title="Open in new tab">↗</button>
-              <button onClick={() => setBrowserOpen(false)} className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--red)] px-1" title="Close">✕</button>
-            </div>
-            <div className="flex-1 relative">
-              {browserUrl ? (
-                <iframe
-                  key={browserKey}
-                  src={browserUrl}
-                  className="absolute inset-0 w-full h-full border-0 bg-white"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-[var(--text-secondary)] text-xs">
-                  Enter a URL and press Enter
-                </div>
-              )}
-              {browserDragging && <div className="absolute inset-0 z-10" />}
-            </div>
+          <div style={{ width: browserWidth }} className="shrink-0 flex flex-col relative">
+            <BrowserPanel onClose={() => setBrowserOpen(false)} />
+            {browserDragging && <div className="absolute inset-0 z-10" />}
           </div>
           </>
         )}

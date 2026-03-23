@@ -82,6 +82,23 @@ export function ensureInitialized() {
   // Auto-detect claude path if not configured
   autoDetectClaude();
 
+  // Sync help docs + CLAUDE.md to data dir on startup
+  try {
+    const { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } = require('node:fs');
+    const { join: joinPath } = require('node:path');
+    const { getConfigDir, getDataDir } = require('./dirs');
+    const helpDir = joinPath(getConfigDir(), 'help');
+    const sourceDir = joinPath(process.cwd(), 'lib', 'help-docs');
+    if (existsSync(sourceDir)) {
+      if (!existsSync(helpDir)) mkdirSync(helpDir, { recursive: true });
+      for (const f of readdirSync(sourceDir)) {
+        if (f.endsWith('.md')) writeFileSync(joinPath(helpDir, f), readFileSync(joinPath(sourceDir, f)));
+      }
+      const claudeMd = joinPath(helpDir, 'CLAUDE.md');
+      if (existsSync(claudeMd)) writeFileSync(joinPath(getDataDir(), 'CLAUDE.md'), readFileSync(claudeMd));
+    }
+  } catch {}
+
   // Sync skills registry (async, non-blocking) — on startup + every 30 min
   try {
     const { syncSkills } = require('./skills');
