@@ -42,8 +42,64 @@ interface ProjectInfo {
   language: string | null;
 }
 
+function FloatingBrowser({ onClose }: { onClose: () => void }) {
+  const [pos, setPos] = useState({ x: 60, y: 60 });
+  const [size, setSize] = useState({ w: 700, h: 500 });
+  const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number } | null>(null);
+
+  return (
+    <div
+      className="fixed z-50 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-2xl flex flex-col overflow-hidden"
+      style={{ left: pos.x, top: pos.y, width: size.w, height: size.h }}
+    >
+      <div
+        className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-tertiary)] border-b border-[var(--border)] cursor-move shrink-0 select-none"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          dragRef.current = { startX: e.clientX, startY: e.clientY, origX: pos.x, origY: pos.y };
+          const onMove = (ev: MouseEvent) => {
+            if (!dragRef.current) return;
+            setPos({ x: Math.max(0, dragRef.current.origX + ev.clientX - dragRef.current.startX), y: Math.max(0, dragRef.current.origY + ev.clientY - dragRef.current.startY) });
+          };
+          const onUp = () => { dragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        }}
+      >
+        <span className="text-[11px] font-semibold text-[var(--text-primary)]">Browser</span>
+        <button onClick={onClose} className="ml-auto text-[var(--text-secondary)] hover:text-[var(--red)] text-sm leading-none">✕</button>
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col">
+        <BrowserPanel />
+      </div>
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: size.w, origH: size.h };
+          const onMove = (ev: MouseEvent) => {
+            if (!resizeRef.current) return;
+            setSize({ w: Math.max(400, resizeRef.current.origW + ev.clientX - resizeRef.current.startX), h: Math.max(300, resizeRef.current.origH + ev.clientY - resizeRef.current.startY) });
+          };
+          const onUp = () => { resizeRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        }}
+        className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
+        style={{ background: 'linear-gradient(135deg, transparent 50%, var(--border) 50%)' }}
+      />
+    </div>
+  );
+}
+
 export default function Dashboard({ user }: { user: any }) {
-  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects' | 'preview' | 'pipelines' | 'skills' | 'logs'>('terminal');
+  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects' | 'pipelines' | 'skills' | 'logs'>('terminal');
+  const [browserMode, setBrowserMode] = useState<'none' | 'float' | 'right' | 'left'>('none');
+  const [showBrowserMenu, setShowBrowserMenu] = useState(false);
+  const [browserWidth, setBrowserWidth] = useState(600);
+  const browserDragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const [browserDragging, setBrowserDragging] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
@@ -172,7 +228,34 @@ export default function Dashboard({ user }: { user: any }) {
   const queued = tasks.filter(t => t.status === 'queued');
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="h-screen flex">
+      {/* Browser — left side */}
+      {browserMode === 'left' && (
+        <>
+        <div style={{ width: browserWidth }} className="shrink-0 flex flex-col relative">
+          <Suspense fallback={null}><BrowserPanel onClose={() => setBrowserMode('none')} /></Suspense>
+          {browserDragging && <div className="absolute inset-0 z-10" />}
+        </div>
+        <div
+          onMouseDown={(e) => {
+            e.preventDefault();
+            browserDragRef.current = { startX: e.clientX, startW: browserWidth };
+            setBrowserDragging(true);
+            const onMove = (ev: MouseEvent) => {
+              if (!browserDragRef.current) return;
+              setBrowserWidth(Math.max(320, Math.min(1200, browserDragRef.current.startW + (ev.clientX - browserDragRef.current.startX))));
+            };
+            const onUp = () => { browserDragRef.current = null; setBrowserDragging(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          }}
+          className="w-1 bg-[var(--border)] cursor-col-resize shrink-0 hover:bg-[var(--accent)]/50"
+        />
+        </>
+      )}
+
+      {/* Forge main area */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       {/* Top bar */}
       <header className="h-12 border-b-2 border-[var(--border)] flex items-center justify-between px-4 shrink-0 bg-[var(--bg-secondary)]">
         <div className="flex items-center gap-4">
@@ -285,16 +368,47 @@ export default function Dashboard({ user }: { user: any }) {
                 : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
             }`}
           >?</button>
-          <button
-            onClick={() => setViewMode('preview')}
-            className={`text-[10px] px-2 py-0.5 border rounded transition-colors ${
-              viewMode === 'preview'
-                ? 'border-[var(--accent)] text-[var(--accent)]'
-                : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
-            }`}
-          >
-            Browser
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowBrowserMenu(v => !v)}
+              className={`text-[10px] px-2 py-0.5 border rounded transition-colors ${
+                browserMode !== 'none'
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
+              }`}
+            >
+              Browser
+            </button>
+            {showBrowserMenu && (
+              <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowBrowserMenu(false)} />
+              <div className="absolute top-full right-0 mt-1 z-50 bg-[var(--bg-secondary)] border border-[var(--border)] rounded shadow-lg py-1 min-w-[140px]">
+                {browserMode !== 'none' && (
+                  <button onClick={() => { setBrowserMode('none'); setShowBrowserMenu(false); }} className="w-full text-left px-3 py-1.5 text-[10px] text-red-400 hover:bg-[var(--bg-tertiary)]">
+                    Close Browser
+                  </button>
+                )}
+                <button onClick={() => { setBrowserMode('float'); setShowBrowserMenu(false); }} className={`w-full text-left px-3 py-1.5 text-[10px] hover:bg-[var(--bg-tertiary)] ${browserMode === 'float' ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                  Floating Window
+                </button>
+                <button onClick={() => { setBrowserMode('right'); setShowBrowserMenu(false); }} className={`w-full text-left px-3 py-1.5 text-[10px] hover:bg-[var(--bg-tertiary)] ${browserMode === 'right' ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                  Right Side
+                </button>
+                <button onClick={() => { setBrowserMode('left'); setShowBrowserMenu(false); }} className={`w-full text-left px-3 py-1.5 text-[10px] hover:bg-[var(--bg-tertiary)] ${browserMode === 'left' ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                  Left Side
+                </button>
+                <button onClick={() => {
+                  const url = localStorage.getItem('forge-browser-url');
+                  if (url) window.open(url, '_blank');
+                  else { const u = prompt('Enter URL to open:'); if (u) window.open(u.trim(), '_blank'); }
+                  setShowBrowserMenu(false);
+                }} className="w-full text-left px-3 py-1.5 text-[10px] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]">
+                  New Tab
+                </button>
+              </div>
+              </>
+            )}
+          </div>
           <TunnelToggle />
           {onlineCount.total > 0 && (
             <span className="text-[10px] text-[var(--text-secondary)] flex items-center gap-1" title={`${onlineCount.total} online${onlineCount.remote > 0 ? `, ${onlineCount.remote} remote` : ''}`}>
@@ -569,13 +683,6 @@ export default function Dashboard({ user }: { user: any }) {
           </Suspense>
         )}
 
-        {/* Browser (full page) */}
-        {viewMode === 'preview' && (
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
-            <BrowserPanel />
-          </Suspense>
-        )}
-
         {/* Pipelines */}
         {viewMode === 'pipelines' && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
@@ -616,6 +723,39 @@ export default function Dashboard({ user }: { user: any }) {
           </Suspense>
         </div>
       </div>
+      </div>{/* close Forge main area */}
+
+      {/* Browser — right side */}
+      {browserMode === 'right' && (
+        <>
+        <div
+          onMouseDown={(e) => {
+            e.preventDefault();
+            browserDragRef.current = { startX: e.clientX, startW: browserWidth };
+            setBrowserDragging(true);
+            const onMove = (ev: MouseEvent) => {
+              if (!browserDragRef.current) return;
+              setBrowserWidth(Math.max(320, Math.min(1200, browserDragRef.current.startW - (ev.clientX - browserDragRef.current.startX))));
+            };
+            const onUp = () => { browserDragRef.current = null; setBrowserDragging(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          }}
+          className="w-1 bg-[var(--border)] cursor-col-resize shrink-0 hover:bg-[var(--accent)]/50"
+        />
+        <div style={{ width: browserWidth }} className="shrink-0 flex flex-col relative">
+          <Suspense fallback={null}><BrowserPanel onClose={() => setBrowserMode('none')} /></Suspense>
+          {browserDragging && <div className="absolute inset-0 z-10" />}
+        </div>
+        </>
+      )}
+
+      {/* Browser — floating window */}
+      {browserMode === 'float' && (
+        <Suspense fallback={null}>
+          <FloatingBrowser onClose={() => setBrowserMode('none')} />
+        </Suspense>
+      )}
 
       {showNewTask && (
         <NewTaskModal

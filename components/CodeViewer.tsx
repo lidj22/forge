@@ -5,7 +5,6 @@ import type { WebTerminalHandle, WebTerminalProps } from './WebTerminal';
 import { useSidebarResize } from '@/hooks/useSidebarResize';
 
 const WebTerminal = lazy(() => import('./WebTerminal'));
-const BrowserPanel = lazy(() => import('./BrowserPanel'));
 
 interface FileNode {
   name: string;
@@ -190,10 +189,6 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
-  const [browserOpen, setBrowserOpen] = useState(false);
-  const [browserWidth, setBrowserWidth] = useState(640);
-  const browserDragRef = useRef<{ startX: number; startW: number } | null>(null);
-  const [browserDragging, setBrowserDragging] = useState(false);
 
   const handleCodeOpenChange = useCallback((open: boolean) => {
     setCodeOpen(open);
@@ -426,40 +421,10 @@ export default function CodeViewer({ terminalRef }: { terminalRef: React.RefObje
       )}
 
       {/* Terminal + Browser — main area */}
-      <div className={`flex ${codeOpen ? 'shrink-0' : 'flex-1'}`} style={codeOpen ? { height: terminalHeight } : undefined}>
-        <div className="flex-1 min-w-0">
-          <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-            <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} onCodeOpenChange={handleCodeOpenChange} browserOpen={browserOpen} onBrowserToggle={() => setBrowserOpen(v => !v)} />
-          </Suspense>
-        </div>
-        {browserOpen && (
-          <>
-          <div
-            onMouseDown={(e) => {
-              e.preventDefault();
-              browserDragRef.current = { startX: e.clientX, startW: browserWidth };
-              setBrowserDragging(true);
-              const onMove = (ev: MouseEvent) => {
-                if (!browserDragRef.current) return;
-                setBrowserWidth(Math.max(320, Math.min(1200, browserDragRef.current.startW - (ev.clientX - browserDragRef.current.startX))));
-              };
-              const onUp = () => {
-                browserDragRef.current = null;
-                setBrowserDragging(false);
-                window.removeEventListener('mousemove', onMove);
-                window.removeEventListener('mouseup', onUp);
-              };
-              window.addEventListener('mousemove', onMove);
-              window.addEventListener('mouseup', onUp);
-            }}
-            className="w-1 bg-[var(--border)] cursor-col-resize shrink-0 hover:bg-[var(--accent)]/50"
-          />
-          <div style={{ width: browserWidth }} className="shrink-0 flex flex-col relative">
-            <BrowserPanel onClose={() => setBrowserOpen(false)} />
-            {browserDragging && <div className="absolute inset-0 z-10" />}
-          </div>
-          </>
-        )}
+      <div className={codeOpen ? 'shrink-0' : 'flex-1'} style={codeOpen ? { height: terminalHeight } : undefined}>
+        <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
+          <WebTerminal ref={terminalRef} onActiveSession={handleActiveSession} onCodeOpenChange={handleCodeOpenChange} />
+        </Suspense>
       </div>
 
       {/* Resize handle */}

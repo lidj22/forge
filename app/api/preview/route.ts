@@ -62,6 +62,14 @@ export async function POST(req: Request) {
     const entry = state.entries.get(body.port);
     if (entry?.process) {
       entry.process.kill('SIGTERM');
+    } else {
+      // Process ref lost (hot-reload) — kill by port match
+      try {
+        const pids = execSync(`pgrep -f 'cloudflared tunnel.*localhost:${body.port}'`, { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        for (const pid of pids.split('\n').filter(Boolean)) {
+          try { process.kill(parseInt(pid), 'SIGTERM'); } catch {}
+        }
+      } catch {}
     }
     state.entries.delete(body.port);
     syncConfig();

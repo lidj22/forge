@@ -37,29 +37,40 @@ export default function BrowserPanel({ onClose }: { onClose?: () => void }) {
   };
 
   const handleTunnel = async () => {
-    const p = prompt('Enter port number to create tunnel:');
-    if (!p) return;
-    const port = parseInt(p.trim());
-    if (!port || port < 1 || port > 65535) { alert('Invalid port'); return; }
+    const input = prompt('Enter port(s) to create tunnel (e.g. 3100 or 3100,8080):');
+    if (!input) return;
+    const ports = input.split(',').map(s => parseInt(s.trim())).filter(p => p > 0 && p <= 65535);
+    if (ports.length === 0) { alert('Invalid port(s)'); return; }
     setTunnelStarting(true);
-    try {
-      const res = await fetch('/api/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', port }),
-      });
-      const data = await res.json();
-      if (data.url) {
-        navigate(data.url);
-        setPreviews(prev => {
-          const exists = prev.find(p => p.port === port);
-          if (exists) return prev.map(p => p.port === port ? { ...p, url: data.url, status: 'running' } : p);
-          return [...prev, { port, url: data.url, status: 'running' }];
+    const results: string[] = [];
+    for (const port of ports) {
+      try {
+        const res = await fetch('/api/preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'start', port }),
         });
-      } else {
-        alert(data.error || 'Failed to start tunnel');
-      }
-    } catch { alert('Failed to start tunnel'); }
+        const data = await res.json();
+        if (data.url) {
+          results.push(data.url);
+          setPreviews(prev => {
+            const exists = prev.find(p => p.port === port);
+            if (exists) return prev.map(p => p.port === port ? { ...p, url: data.url, status: 'running' } : p);
+            return [...prev, { port, url: data.url, status: 'running' }];
+          });
+        } else if (data.status === 'starting' || data.status === 'stopped') {
+          // Tunnel started but URL not ready yet or exited
+          results.push('');
+        } else {
+          alert(`Port ${port}: ${data.error || 'Failed'}`);
+        }
+      } catch { alert(`Port ${port}: Failed to start tunnel`); }
+    }
+    // Navigate to first successful URL
+    const firstUrl = results.find(u => u);
+    if (firstUrl) navigate(firstUrl);
+    // Refresh list to pick up any that were still starting
+    setTimeout(fetchPreviews, 3000);
     setTunnelStarting(false);
   };
 
@@ -80,7 +91,7 @@ export default function BrowserPanel({ onClose }: { onClose?: () => void }) {
           ref={browserUrlRef}
           type="text"
           defaultValue={browserUrl}
-          placeholder="URL or port (e.g. 8080)"
+          placeholder="Enter URL"
           onKeyDown={e => {
             if (e.key === 'Enter') {
               const val = (e.target as HTMLInputElement).value.trim();
@@ -98,7 +109,7 @@ export default function BrowserPanel({ onClose }: { onClose?: () => void }) {
           onClick={handleTunnel}
           className="text-[9px] px-1.5 py-0.5 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent)] disabled:opacity-50"
           title="Create tunnel for a port (remote access)"
-        >{tunnelStarting ? '...' : 'Tunnel'}</button>
+        >{tunnelStarting ? 'Starting...' : 'Tunnel'}</button>
         {onClose && (
           <button onClick={onClose} className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--red)] px-1" title="Close">✕</button>
         )}
@@ -132,6 +143,11 @@ export default function BrowserPanel({ onClose }: { onClose?: () => void }) {
       )}
       {/* Content */}
       <div className="flex-1 relative">
+        {tunnelStarting && (
+          <div className="absolute inset-0 flex items-center justify-center text-[var(--text-secondary)] text-xs z-10 bg-[var(--bg-primary)]/80">
+            Creating tunnel... this may take up to 30 seconds
+          </div>
+        )}
         {browserUrl ? (
           <iframe
             key={browserKey}
