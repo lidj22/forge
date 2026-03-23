@@ -16,9 +16,9 @@ export default function MobileView() {
   const [loading, setLoading] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [debug, setDebug] = useState<string[]>([]);
-  const [showDebug, setShowDebug] = useState(false);
-  const showDebugRef = useRef(false);
-  const [hasSession, setHasSession] = useState(false); // whether to use -c flag
+  const [debugLevel, setDebugLevel] = useState<'off' | 'simple' | 'verbose'>('off');
+  const debugLevelRef = useRef<'off' | 'simple' | 'verbose'>('off');
+  const [hasSession, setHasSession] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -99,13 +99,14 @@ export default function MobileView() {
     setMessages(prev => [...prev, { role: 'user', content: text, timestamp: new Date().toISOString() }]);
     setInput('');
     setLoading(true);
-    setDebug(d => [...d.slice(-20), `Send: "${text.slice(0, 40)}" resume=${hasSession}`]);
+    setDebug(d => [...d.slice(-20), `Send: "${text.slice(0, 40)}"`]);
     inputRef.current?.focus();
 
     // Stream response from API
     const abort = new AbortController();
     abortRef.current = abort;
     let assistantText = '';
+    const startTime = Date.now();
 
     try {
       const res = await fetch('/api/mobile-chat', {
@@ -114,7 +115,7 @@ export default function MobileView() {
         body: JSON.stringify({
           message: text,
           projectPath: selectedProject.path,
-          resume: hasSession,
+          resume: false,
         }),
         signal: abort.signal,
       });
@@ -138,13 +139,20 @@ export default function MobileView() {
             const data = JSON.parse(line.slice(6));
             if (data.type === 'chunk') {
               assistantText += data.text;
-              if (showDebugRef.current) setDebug(d => [...d.slice(-30), `chunk: +${data.text.length} chars`]);
+              if (debugLevelRef.current === 'verbose') {
+                // Show content preview in verbose mode
+                const preview = data.text.replace(/\n/g, '↵').slice(0, 80);
+                setDebug(d => [...d.slice(-50), `chunk: ${preview}`]);
+              }
             } else if (data.type === 'stderr') {
-              if (showDebugRef.current) setDebug(d => [...d.slice(-30), `stderr: ${data.text.slice(0, 60)}`]);
+              if (debugLevelRef.current !== 'off') {
+                setDebug(d => [...d.slice(-50), `stderr: ${data.text.trim().slice(0, 100)}`]);
+              }
             } else if (data.type === 'error') {
               assistantText = `Error: ${data.message}`;
+              setDebug(d => [...d.slice(-50), `ERROR: ${data.message}`]);
             } else if (data.type === 'done') {
-              if (showDebugRef.current) setDebug(d => [...d.slice(-30), `done: exit ${data.code}`]);
+              if (debugLevelRef.current !== 'off') setDebug(d => [...d.slice(-50), `done: exit ${data.code}`]);
             }
           } catch {}
         }
@@ -177,7 +185,8 @@ export default function MobileView() {
 
       // After first message, future ones should use -c
       setHasSession(true);
-      setDebug(d => [...d.slice(-20), `Response complete`]);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      setDebug(d => [...d.slice(-50), `Response complete (${elapsed}s, ${assistantText.length} chars)`]);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         setDebug(d => [...d.slice(-20), `Error: ${e.message}`]);
@@ -244,6 +253,7 @@ export default function MobileView() {
         {tunnelUrl && (
           <button onClick={closeTunnel} className="text-xs px-1.5 py-1 border border-green-700 rounded text-green-400" title={tunnelUrl}>●</button>
         )}
+        <a href="/?force=desktop" className="text-[9px] px-1.5 py-1 border border-[#30363d] rounded text-[#8b949e] active:bg-[#30363d]" title="Switch to desktop view">PC</a>
       </header>
 
       {/* Session list */}
@@ -330,15 +340,26 @@ export default function MobileView() {
       </div>
 
       {/* Debug log */}
-      <details
-        className="shrink-0 bg-[#0d1117] border-t border-[#30363d]"
-        onToggle={(e) => { const open = (e.target as HTMLDetailsElement).open; setShowDebug(open); showDebugRef.current = open; }}
-      >
-        <summary className="px-3 py-1 text-[9px] text-[#8b949e] cursor-pointer">Debug {debug.length > 0 ? `(${debug.length})` : ''}</summary>
-        <div className="px-3 py-1 max-h-32 overflow-y-auto">
-          {debug.map((d, i) => <div key={i} className="text-[9px] text-[#8b949e] font-mono">{d}</div>)}
+      <div className="shrink-0 bg-[#0d1117] border-t border-[#30363d]">
+        <div className="flex items-center gap-2 px-3 py-1">
+          <span className="text-[9px] text-[#8b949e]">Debug:</span>
+          {(['off', 'simple', 'verbose'] as const).map(level => (
+            <button
+              key={level}
+              onClick={() => { setDebugLevel(level); debugLevelRef.current = level; if (level === 'off') setDebug([]); }}
+              className={`text-[9px] px-1.5 py-0.5 rounded ${debugLevel === level ? 'bg-[#30363d] text-[#e6edf3]' : 'text-[#8b949e]'}`}
+            >{level}</button>
+          ))}
+          {debug.length > 0 && (
+            <button onClick={() => setDebug([])} className="text-[9px] text-[#8b949e] ml-auto">Clear</button>
+          )}
         </div>
-      </details>
+        {debugLevel !== 'off' && debug.length > 0 && (
+          <div className="px-3 py-1 max-h-32 overflow-y-auto border-t border-[#30363d]/50">
+            {debug.map((d, i) => <div key={i} className="text-[9px] text-[#8b949e] font-mono">{d}</div>)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -558,6 +558,12 @@ export default function Dashboard({ user }: { user: any }) {
                   >
                     Logs
                   </button>
+                  <a
+                    href="/mobile"
+                    className="block w-full text-left text-[11px] px-3 py-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    Mobile View
+                  </a>
                   <div className="border-t border-[var(--border)] my-1" />
                   <button
                     onClick={() => signOut({ callbackUrl: '/login' })}
