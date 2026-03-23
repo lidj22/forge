@@ -168,16 +168,15 @@ const pendingCommands = new Map<number, string>();
 
 const bellEnabledPanes = new Set<number>();
 const bellPaneLabels = new Map<number, string>();
-const bellLastFired = new Map<number, number>(); // paneId -> timestamp
-const BELL_COOLDOWN = 30000; // 30s cooldown between bells
+const bellLastFired = new Map<string, number>(); // tabLabel -> timestamp
+const BELL_COOLDOWN = 120000; // 2min cooldown between bells
 
 function fireBellNotification(paneId: number) {
-  const now = Date.now();
-  const last = bellLastFired.get(paneId) || 0;
-  if (now - last < BELL_COOLDOWN) return;
-  bellLastFired.set(paneId, now);
-
   const label = bellPaneLabels.get(paneId) || 'Terminal';
+  const now = Date.now();
+  const last = bellLastFired.get(label) || 0;
+  if (now - last < BELL_COOLDOWN) return;
+  bellLastFired.set(label, now);
 
   // Browser notification
   if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
