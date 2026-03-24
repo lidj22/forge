@@ -14,6 +14,9 @@ pkill -f 'next start' 2>/dev/null
 pkill -f 'next dev' 2>/dev/null
 sleep 1
 
+export PORT=${PORT:-8403}
+export TERMINAL_PORT=${TERMINAL_PORT:-8404}
+
 if [ "$1" = "dev" ]; then
   pnpm dev
 else
