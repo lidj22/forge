@@ -341,12 +341,40 @@ function executeTask(task: Task): Promise<void> {
         .replace(/\r/g, '')                          // carriage return
         .replace(/\x07/g, '');                       // bell
 
+      // Auto-kill PTY after idle (interactive agents don't exit on their own)
+      let ptyBytes = 0;
+      let ptyIdleTimer: any = null;
+      const PTY_IDLE_MS = 15000; // 15s idle = done
+
       // Create a child-like interface for pty
+      const exitCallbacks: Function[] = [];
       child = {
-        stdout: { on: (evt: string, cb: Function) => { if (evt === 'data') ptyProcess.onData((data: string) => cb(Buffer.from(stripAnsi(data)))); } },
-        stderr: { on: (_evt: string, _cb: Function) => {} }, // pty combines stdout+stderr
-        on: (evt: string, cb: Function) => { if (evt === 'exit') ptyProcess.onExit(({ exitCode }: any) => cb(exitCode, null)); if (evt === 'error') {} },
-        kill: (sig: string) => ptyProcess.kill(sig),
+        stdout: { on: (evt: string, cb: Function) => {
+          if (evt === 'data') ptyProcess.onData((data: string) => {
+            const clean = stripAnsi(data);
+            ptyBytes += clean.length;
+            cb(Buffer.from(clean));
+            // Reset idle timer
+            if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
+            if (ptyBytes > 500) {
+              ptyIdleTimer = setTimeout(() => {
+                console.log(`[task] PTY idle timeout — killing process (${ptyBytes} bytes received)`);
+                try { ptyProcess.kill(); } catch {}
+              }, PTY_IDLE_MS);
+            }
+          });
+        }},
+        stderr: { on: (_evt: string, _cb: Function) => {} },
+        on: (evt: string, cb: Function) => {
+          if (evt === 'exit') {
+            exitCallbacks.push(cb);
+            ptyProcess.onExit(({ exitCode }: any) => {
+              if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
+              for (const fn of exitCallbacks) fn(exitCode, null);
+            });
+          }
+        },
+        kill: (sig: string) => { if (ptyIdleTimer) clearTimeout(ptyIdleTimer); ptyProcess.kill(sig); },
         stdin: null,
         pid: ptyProcess.pid,
       };
