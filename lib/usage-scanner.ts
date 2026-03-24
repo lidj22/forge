@@ -26,14 +26,11 @@ function getModelFamily(model: string): string {
   return 'unknown';
 }
 
-function calcCost(family: string, input: number, output: number, cacheRead: number, cacheCreate: number): number {
+function calcCost(family: string, input: number, output: number): number {
   const p = PRICING[family] || PRICING['default'];
-  return (
-    (input * p.input / 1_000_000) +
-    (output * p.output / 1_000_000) +
-    (cacheRead * p.input * 0.1 / 1_000_000) +
-    (cacheCreate * p.input * 0.25 / 1_000_000)
-  );
+  // Only count input + output tokens. Cache tokens excluded from cost estimate
+  // because subscriptions (Max/Pro) don't charge per-token for cache.
+  return (input * p.input / 1_000_000) + (output * p.output / 1_000_000);
 }
 
 function dirToProjectPath(dirName: string): string {
@@ -136,7 +133,7 @@ export function scanUsage(): { scanned: number; updated: number; errors: number 
 
         for (const [key, b] of buckets) {
           const [day, model] = key.split('|');
-          const cost = calcCost(model, b.input, b.output, b.cacheRead, b.cacheCreate);
+          const cost = calcCost(model, b.input, b.output);
           upsert.run(sessionId, projectPath, projectName, model, day, b.input, b.output, b.cacheRead, b.cacheCreate, cost, b.count);
         }
 
@@ -162,7 +159,7 @@ export function recordUsage(opts: {
   taskId?: string;
 }): void {
   const family = getModelFamily(opts.model);
-  const cost = calcCost(family, opts.inputTokens, opts.outputTokens, opts.cacheReadTokens || 0, opts.cacheCreateTokens || 0);
+  const cost = calcCost(family, opts.inputTokens, opts.outputTokens);
   const day = toLocalDate(new Date().toISOString());
 
   db().prepare(`
