@@ -29,6 +29,7 @@ export interface Settings {
   favoriteProjects: string[];           // Favorite project paths (shown at top of sidebar)
   defaultAgent: string;                  // Default agent ID (e.g., 'claude', 'codex', 'aider')
   telegramAgent: string;                 // Default agent for Telegram (empty = use defaultAgent)
+  docRootAgents: Record<string, string>; // Per doc root agent override: { "/path/to/vault": "claude" }
   agents: Record<string, {
     path?: string; name?: string; enabled?: boolean;
     flags?: string[]; taskFlags?: string; interactiveCmd?: string; resumeFlag?: string; outputFormat?: string;
@@ -60,6 +61,7 @@ const defaults: Settings = {
   favoriteProjects: [],
   defaultAgent: 'claude',
   telegramAgent: '',
+  docRootAgents: {},
   agents: {},
 };
 

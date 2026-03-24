@@ -18,7 +18,7 @@ function getWsUrl() {
   return `${wsProtocol}//${wsHost}:${webPort + 1}`;
 }
 
-export default function DocTerminal({ docRoot }: { docRoot: string }) {
+export default function DocTerminal({ docRoot, agent }: { docRoot: string; agent?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -32,9 +32,9 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
       .catch(() => {});
     fetch('/api/agents').then(r => r.json())
       .then(data => {
-        const defaultId = data.defaultAgent || 'claude';
-        const agent = (data.agents || []).find((a: any) => a.id === defaultId);
-        if (agent?.path) agentCmdRef.current = agent.path;
+        const targetId = agent || data.defaultAgent || 'claude';
+        const found = (data.agents || []).find((a: any) => a.id === targetId);
+        if (found?.path) agentCmdRef.current = found.path;
       })
       .catch(() => {});
   }, []);

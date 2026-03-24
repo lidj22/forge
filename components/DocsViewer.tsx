@@ -108,6 +108,9 @@ export default function DocsViewer() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [terminalHeight, setTerminalHeight] = useState(250);
+  const [docAgents, setDocAgents] = useState<Record<string, string>>({});
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
+  const [selectedDocAgent, setSelectedDocAgent] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -266,6 +269,16 @@ export default function DocsViewer() {
   }, []);
 
   useEffect(() => { fetchTree(activeRoot); }, [activeRoot, fetchTree]);
+
+  // Fetch agent config for doc roots
+  useEffect(() => {
+    fetch('/api/settings').then(r => r.json())
+      .then((s: any) => setDocAgents(s.docRootAgents || {}))
+      .catch(() => {});
+    fetch('/api/agents').then(r => r.json())
+      .then(data => setAvailableAgents((data.agents || []).filter((a: any) => a.enabled)))
+      .catch(() => {});
+  }, []);
 
   // Re-fetch when tab becomes visible (settings may have changed)
   useEffect(() => {
@@ -555,11 +568,28 @@ export default function DocsViewer() {
         className="h-1 bg-[var(--border)] cursor-row-resize hover:bg-[var(--accent)]/50 shrink-0"
       />
 
-      {/* Bottom — Claude console */}
-      <div className="shrink-0" style={{ height: terminalHeight }}>
-        <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-          <DocTerminal docRoot={rootPaths[activeRoot] || ''} />
-        </Suspense>
+      {/* Bottom — Agent console */}
+      <div className="shrink-0 flex flex-col" style={{ height: terminalHeight }}>
+        {availableAgents.length > 1 && (
+          <div className="flex items-center gap-1 px-2 py-0.5 bg-[var(--bg-tertiary)] border-b border-[var(--border)] shrink-0">
+            <span className="text-[8px] text-[var(--text-secondary)]">Agent:</span>
+            <select
+              value={selectedDocAgent || docAgents[rootPaths[activeRoot]] || ''}
+              onChange={e => setSelectedDocAgent(e.target.value)}
+              className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-1 py-0.5 text-[9px] text-[var(--text-primary)]"
+            >
+              <option value="">Default</option>
+              {availableAgents.map(a => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex-1 min-h-0">
+          <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
+            <DocTerminal docRoot={rootPaths[activeRoot] || ''} agent={selectedDocAgent || docAgents[rootPaths[activeRoot]] || undefined} />
+          </Suspense>
+        </div>
       </div>
     </div>
   );

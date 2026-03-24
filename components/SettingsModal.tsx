@@ -203,6 +203,7 @@ interface Settings {
   telegramModel: string;
   skipPermissions: boolean;
   notificationRetentionDays: number;
+  docRootAgents: Record<string, string>;
   _secretStatus?: Record<string, boolean>;
 }
 
@@ -230,6 +231,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     telegramModel: 'sonnet',
     skipPermissions: false,
     notificationRetentionDays: 30,
+    docRootAgents: {},
   });
   const [secretStatus, setSecretStatus] = useState<Record<string, boolean>>({});
   const [newRoot, setNewRoot] = useState('');
@@ -379,13 +381,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             Markdown document directories (e.g. Obsidian vaults). Shown in the Docs tab.
           </p>
 
-          {(settings.docRoots || []).map(root => (
+          {(settings.docRoots || []).map((root: string) => (
             <div key={root} className="flex items-center gap-2">
               <span className="flex-1 text-xs px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded font-mono truncate">
                 {root}
               </span>
+              <DocRootAgentSelect root={root} settings={settings} setSettings={setSettings} />
               <button
-                onClick={() => setSettings({ ...settings, docRoots: settings.docRoots.filter(r => r !== root) })}
+                onClick={() => {
+                  const docRootAgents = { ...(settings.docRootAgents || {}) };
+                  delete docRootAgents[root];
+                  setSettings({ ...settings, docRoots: settings.docRoots.filter((r: string) => r !== root), docRootAgents });
+                }}
                 className="text-[10px] px-2 py-1 text-[var(--red)] hover:bg-[var(--red)] hover:text-white rounded transition-colors"
               >
                 Remove
@@ -1164,5 +1171,38 @@ function TelegramAgentSelect({ settings, setSettings }: { settings: any; setSett
       </select>
       <span className="text-[8px] text-[var(--text-secondary)]">Used for /task without @agent</span>
     </div>
+  );
+}
+
+// ─── Doc Root Agent Selector ──────────────────────────────
+
+function DocRootAgentSelect({ root, settings, setSettings }: { root: string; settings: any; setSettings: (s: any) => void }) {
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.json())
+      .then(data => setAgents((data.agents || []).filter((a: any) => a.enabled)))
+      .catch(() => {});
+  }, []);
+
+  if (agents.length <= 1) return null;
+
+  const currentAgent = (settings.docRootAgents || {})[root] || '';
+
+  return (
+    <select
+      value={currentAgent}
+      onChange={e => {
+        const docRootAgents = { ...(settings.docRootAgents || {}), [root]: e.target.value || undefined };
+        if (!e.target.value) delete docRootAgents[root];
+        setSettings({ ...settings, docRootAgents });
+      }}
+      className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-1 py-1 text-[9px] text-[var(--text-primary)] w-20"
+      title="Agent for this doc root"
+    >
+      <option value="">Default</option>
+      {agents.map(a => (
+        <option key={a.id} value={a.id}>{a.name.split(' ')[0]}</option>
+      ))}
+    </select>
   );
 }
