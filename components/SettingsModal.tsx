@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 function SecretInput({ value, onChange, placeholder, className }: {
   value: string;
@@ -244,6 +244,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tunnelPassword, setTunnelPassword] = useState('');
   const [tunnelPasswordError, setTunnelPasswordError] = useState('');
   const [editingSecret, setEditingSecret] = useState<{ field: string; label: string } | null>(null);
+  const [hasUnsaved, setHasUnsaved] = useState(false);
+  const origSettingsRef = useRef('');
 
   const refreshTunnel = useCallback(() => {
     fetch('/api/tunnel').then(r => r.json()).then(setTunnel).catch(() => {});
@@ -254,6 +256,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       const status = data._secretStatus || {};
       delete data._secretStatus;
       setSettings(data);
+      origSettingsRef.current = JSON.stringify(data);
       setSecretStatus(status);
     });
   }, []);
@@ -276,9 +279,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),
     });
+    origSettingsRef.current = JSON.stringify(settings);
+    setHasUnsaved(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  // Track unsaved changes
+  useEffect(() => {
+    if (origSettingsRef.current) {
+      setHasUnsaved(JSON.stringify(settings) !== origSettingsRef.current);
+    }
+  }, [settings]);
 
   const saveSecret = async (field: string, adminPassword: string, newValue: string): Promise<string | null> => {
     const res = await fetch('/api/settings', {
@@ -308,7 +320,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => {
+      if (hasUnsaved && !confirm('You have unsaved changes. Close anyway?')) return;
+      onClose();
+    }}>
       <div
         className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg w-[500px] max-h-[80vh] overflow-y-auto p-5 space-y-5"
         onClick={e => e.stopPropagation()}
@@ -857,7 +872,8 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
       } catch {}
       setLoading(false);
     })();
-  }, [settings.agents]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only fetch once on mount
 
   const defaultAgent = settings.defaultAgent || 'claude';
 
@@ -880,17 +896,35 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
     setSettings({ ...settings, agents: agentsCfg, claudePath: claude?.path || settings.claudePath });
   };
 
+  const [agentsDirty, setAgentsDirty] = useState(false);
+  const saveTimerRef = useRef<any>(null);
+
+  const debouncedSave = useCallback((updated: AgentEntry[]) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveAgentConfig(updated);
+      setAgentsDirty(false);
+    }, 1000); // save after 1s of no changes
+  }, [saveAgentConfig]);
+
   const updateAgent = (id: string, field: string, value: any) => {
     const updated = agents.map(a => a.id === id ? { ...a, [field]: value } : a);
     setAgents(updated);
-    saveAgentConfig(updated);
+    setAgentsDirty(true);
+    debouncedSave(updated);
+  };
+
+  const saveAgents = () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveAgentConfig(agents);
+    setAgentsDirty(false);
   };
 
   const removeAgent = (id: string) => {
     if (!confirm(`Remove "${id}" agent?`)) return;
     const updated = agents.filter(a => a.id !== id);
     setAgents(updated);
-    saveAgentConfig(updated);
+    debouncedSave(updated);
   };
 
   const addAgent = () => {
@@ -903,7 +937,7 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
     };
     const updated = [...agents, entry];
     setAgents(updated);
-    saveAgentConfig(updated);
+    debouncedSave(updated);
     setShowAdd(false);
     setNewAgent({ id: '', name: '', path: '', taskFlags: '', interactiveCmd: '', resumeFlag: '', outputFormat: 'text', models: { terminal: 'default', task: 'default', telegram: 'default', help: 'default', mobile: 'default' } });
   };
@@ -929,6 +963,12 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
           onClick={() => setShowAdd(v => !v)}
           className="text-[9px] px-2 py-0.5 border border-[var(--border)] text-[var(--text-secondary)] rounded hover:text-[var(--text-primary)]"
         >+ Add</button>
+        {agentsDirty && (
+          <button
+            onClick={saveAgents}
+            className="text-[9px] px-2 py-0.5 bg-[var(--accent)] text-white rounded"
+          >Save Agents</button>
+        )}
       </div>
 
       {/* Default agent selector */}
