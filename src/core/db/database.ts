@@ -36,6 +36,8 @@ function initSchema(db: Database.Database) {
   migrate('ALTER TABLE skills ADD COLUMN deleted_remotely INTEGER NOT NULL DEFAULT 0');
   migrate('ALTER TABLE project_pipelines ADD COLUMN last_run_at TEXT');
   migrate('ALTER TABLE pipeline_runs ADD COLUMN dedup_key TEXT');
+  // Recreate token_usage with day column (drop old version if schema changed)
+  try { db.exec("SELECT day FROM token_usage LIMIT 1"); } catch { try { db.exec("DROP TABLE IF EXISTS token_usage"); db.exec("DROP TABLE IF EXISTS usage_scan_state"); } catch {} }
   // Unique index for dedup (only applies when dedup_key is NOT NULL)
   try { db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_runs_dedup ON pipeline_runs(project_path, workflow_name, dedup_key)'); } catch {}
   // Migrate old issue_autofix_processed → pipeline_runs
@@ -220,7 +222,7 @@ function initSchema(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Token usage tracking
+    -- Token usage tracking (per session + day + model for accurate daily breakdown)
     CREATE TABLE IF NOT EXISTS token_usage (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -228,16 +230,15 @@ function initSchema(db: Database.Database) {
       project_path TEXT NOT NULL,
       project_name TEXT NOT NULL,
       model TEXT NOT NULL DEFAULT 'unknown',
+      day TEXT NOT NULL,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens INTEGER NOT NULL DEFAULT 0,
       cache_create_tokens INTEGER NOT NULL DEFAULT 0,
       cost_usd REAL NOT NULL DEFAULT 0,
       message_count INTEGER NOT NULL DEFAULT 0,
-      started_at TEXT,
-      completed_at TEXT,
       task_id TEXT,
-      UNIQUE(session_id, source, model)
+      UNIQUE(session_id, source, model, day)
     );
 
     -- Track scan progress for incremental JSONL scanning
