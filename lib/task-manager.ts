@@ -349,8 +349,10 @@ function executeTask(task: Task): Promise<void> {
 
       for (const line of lines) {
         if (!line.trim()) continue;
+        let jsonParsed = false;
         try {
           const parsed = JSON.parse(line);
+          jsonParsed = true;
           const entries = parseStreamJson(parsed);
           for (const entry of entries) {
             appendLog(task.id, entry);
@@ -371,7 +373,13 @@ function executeTask(task: Task): Promise<void> {
             if (parsed.total_input_tokens) totalInputTokens = parsed.total_input_tokens;
             if (parsed.total_output_tokens) totalOutputTokens = parsed.total_output_tokens;
           }
-        } catch {}
+        } catch {
+          // Non-JSON output (generic agents) — log as raw text
+          if (!jsonParsed) {
+            resultText += (resultText ? '\n' : '') + line;
+            appendLog(task.id, { type: 'system', subtype: 'text', content: line, timestamp: new Date().toISOString() });
+          }
+        }
       }
     });
 

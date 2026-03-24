@@ -44,12 +44,14 @@ export function listAgents(): AgentConfig[] {
     for (const [id, cfg] of Object.entries(settings.agents)) {
       if (['claude', 'codex', 'aider'].includes(id)) continue;
       if (!cfg.path) continue;
-      const detected = detectAgent(id, cfg.name || id, cfg.path, cfg.flags);
+      const flags = cfg.taskFlags ? cfg.taskFlags.split(/\s+/).filter(Boolean) : cfg.flags;
+      const detected = detectAgent(id, cfg.name || id, cfg.path, flags);
       agents.push({
         ...(detected || {
-          id, name: cfg.name || id, path: cfg.path, type: 'generic' as const, flags: cfg.flags,
+          id, name: cfg.name || id, path: cfg.path, type: 'generic' as const, flags,
           capabilities: { supportsResume: false, supportsStreamJson: false, supportsModel: false, supportsSkipPermissions: false, hasSessionFiles: false },
         }),
+        flags,
         enabled: cfg.enabled !== false,
         detected: !!detected,
       } as any);
