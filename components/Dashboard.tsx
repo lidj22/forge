@@ -21,6 +21,7 @@ const PipelineView = lazy(() => import('./PipelineView'));
 const HelpDialog = lazy(() => import('./HelpDialog'));
 const LogViewer = lazy(() => import('./LogViewer'));
 const SkillsPanel = lazy(() => import('./SkillsPanel'));
+const UsagePanel = lazy(() => import('./UsagePanel'));
 
 interface UsageSummary {
   provider: string;
@@ -94,7 +95,7 @@ function FloatingBrowser({ onClose }: { onClose: () => void }) {
 }
 
 export default function Dashboard({ user }: { user: any }) {
-  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects' | 'pipelines' | 'skills' | 'logs'>('terminal');
+  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects' | 'pipelines' | 'skills' | 'logs' | 'usage'>('terminal');
   const [browserMode, setBrowserMode] = useState<'none' | 'float' | 'right' | 'left'>('none');
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const [browserWidth, setBrowserWidth] = useState(600);
@@ -341,6 +342,17 @@ export default function Dashboard({ user }: { user: any }) {
               }`}
             >
               Skills
+            </button>
+            {/* Usage */}
+            <button
+              onClick={() => setViewMode('usage')}
+              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
+                viewMode === 'usage'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              Usage
             </button>
           </div>
 
@@ -705,6 +717,13 @@ export default function Dashboard({ user }: { user: any }) {
         {viewMode === 'skills' && (
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
             <SkillsPanel />
+          </Suspense>
+        )}
+
+        {/* Usage */}
+        {viewMode === 'usage' && (
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <UsagePanel />
           </Suspense>
         )}
 
