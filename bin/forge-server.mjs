@@ -379,11 +379,13 @@ function startBackground() {
   startServices();
 
   console.log(`[forge] Started in background (pid ${child.pid})`);
-  console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
-  console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
-  console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
-  console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
-  console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
+  if (!getArg('--port')) {
+    console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
+    console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
+    console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
+    console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
+    console.log(`[forge] ⚠️  Default port changed: 3000 → ${webPort}`);
+  }
   console.log(`[forge] Web: http://localhost:${webPort}`);
   console.log(`[forge] Terminal: ws://localhost:${terminalPort}`);
   console.log(`[forge] Data: ${DATA_DIR}`);
