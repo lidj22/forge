@@ -862,7 +862,7 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
 
         const merged: AgentEntry[] = [];
 
-        // Add detected agents
+        // Add agents from API (may be detected or configured-only)
         for (const a of detected) {
           const cfg = configured[a.id] || {};
           merged.push({
@@ -875,7 +875,7 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
             interactiveCmd: cfg.interactiveCmd || a.path,
             resumeFlag: cfg.resumeFlag || (a.capabilities?.supportsResume ? '-c' : ''),
             outputFormat: cfg.outputFormat || (a.capabilities?.supportsStreamJson ? 'stream-json' : 'text'),
-            detected: true,
+            detected: a.detected !== false, // use API's detection status
           });
         }
 
