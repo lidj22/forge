@@ -39,15 +39,36 @@ export function listAgents(): AgentConfig[] {
     agents.push({ ...aider, enabled: aiderConfig?.enabled !== false });
   }
 
-  // Custom agents from settings
+  // Custom agents from settings (always include, don't require binary detection)
   if (settings.agents) {
     for (const [id, cfg] of Object.entries(settings.agents)) {
       if (['claude', 'codex', 'aider'].includes(id)) continue; // already handled
       if (!cfg.path) continue;
-      const custom = detectAgent(id, cfg.name || id, cfg.path, cfg.flags);
-      if (custom) {
-        agents.push({ ...custom, name: cfg.name || id, enabled: cfg.enabled !== false });
-      }
+      // Try detect, but add anyway even if not found
+      const detected = detectAgent(id, cfg.name || id, cfg.path, cfg.flags);
+      agents.push(detected || {
+        id,
+        name: cfg.name || id,
+        path: cfg.path,
+        enabled: cfg.enabled !== false,
+        type: 'generic',
+        flags: cfg.flags,
+        capabilities: { supportsResume: false, supportsStreamJson: false, supportsModel: false, supportsSkipPermissions: false, hasSessionFiles: false },
+      });
+    }
+  }
+
+  // Also include codex/aider from settings even if not installed
+  for (const [id, name, defaultPath, flags] of [['codex', 'OpenAI Codex', 'codex', undefined], ['aider', 'Aider', 'aider', ['--message']]] as const) {
+    if (agents.find(a => a.id === id)) continue;
+    const cfg = settings.agents?.[id];
+    if (cfg?.enabled === false) continue;
+    if (cfg?.path) {
+      agents.push({
+        id, name: cfg.name || name, path: cfg.path, enabled: true, type: 'generic',
+        flags: cfg.flags || (flags as string[] | undefined),
+        capabilities: { supportsResume: false, supportsStreamJson: false, supportsModel: false, supportsSkipPermissions: false, hasSessionFiles: false },
+      });
     }
   }
 
