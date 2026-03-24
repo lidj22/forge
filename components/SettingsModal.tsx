@@ -203,7 +203,6 @@ interface Settings {
   telegramModel: string;
   skipPermissions: boolean;
   notificationRetentionDays: number;
-  docRootAgents: Record<string, string>;
   _secretStatus?: Record<string, boolean>;
 }
 
@@ -231,7 +230,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     telegramModel: 'sonnet',
     skipPermissions: false,
     notificationRetentionDays: 30,
-    docRootAgents: {},
   });
   const [secretStatus, setSecretStatus] = useState<Record<string, boolean>>({});
   const [newRoot, setNewRoot] = useState('');
@@ -386,13 +384,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <span className="flex-1 text-xs px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded font-mono truncate">
                 {root}
               </span>
-              <DocRootAgentSelect root={root} settings={settings} setSettings={setSettings} />
               <button
-                onClick={() => {
-                  const docRootAgents = { ...(settings.docRootAgents || {}) };
-                  delete docRootAgents[root];
-                  setSettings({ ...settings, docRoots: settings.docRoots.filter((r: string) => r !== root), docRootAgents });
-                }}
+                onClick={() => setSettings({ ...settings, docRoots: settings.docRoots.filter((r: string) => r !== root) })}
                 className="text-[10px] px-2 py-1 text-[var(--red)] hover:bg-[var(--red)] hover:text-white rounded transition-colors"
               >
                 Remove
@@ -427,6 +420,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               Add
             </button>
           </div>
+          <DocsAgentSelect settings={settings} setSettings={setSettings} />
         </div>
 
         {/* Agents */}
@@ -1174,9 +1168,9 @@ function TelegramAgentSelect({ settings, setSettings }: { settings: any; setSett
   );
 }
 
-// ─── Doc Root Agent Selector ──────────────────────────────
+// ─── Docs Agent Selector ──────────────────────────────
 
-function DocRootAgentSelect({ root, settings, setSettings }: { root: string; settings: any; setSettings: (s: any) => void }) {
+function DocsAgentSelect({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     fetch('/api/agents').then(r => r.json())
@@ -1186,23 +1180,19 @@ function DocRootAgentSelect({ root, settings, setSettings }: { root: string; set
 
   if (agents.length <= 1) return null;
 
-  const currentAgent = (settings.docRootAgents || {})[root] || '';
-
   return (
-    <select
-      value={currentAgent}
-      onChange={e => {
-        const docRootAgents = { ...(settings.docRootAgents || {}), [root]: e.target.value || undefined };
-        if (!e.target.value) delete docRootAgents[root];
-        setSettings({ ...settings, docRootAgents });
-      }}
-      className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-1 py-1 text-[9px] text-[var(--text-primary)] w-20"
-      title="Agent for this doc root"
-    >
-      <option value="">Default</option>
-      {agents.map(a => (
-        <option key={a.id} value={a.id}>{a.name.split(' ')[0]}</option>
-      ))}
-    </select>
+    <div className="flex items-center gap-2 mt-1">
+      <span className="text-[9px] text-[var(--text-secondary)]">Docs Agent:</span>
+      <select
+        value={settings.docsAgent || ''}
+        onChange={e => setSettings({ ...settings, docsAgent: e.target.value })}
+        className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[10px] text-[var(--text-primary)]"
+      >
+        <option value="">Global default ({settings.defaultAgent || 'claude'})</option>
+        {agents.map(a => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+    </div>
   );
 }

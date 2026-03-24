@@ -108,7 +108,7 @@ export default function DocsViewer() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [terminalHeight, setTerminalHeight] = useState(250);
-  const [docAgents, setDocAgents] = useState<Record<string, string>>({});
+  const [docsAgent, setDocsAgent] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -271,7 +271,7 @@ export default function DocsViewer() {
   // Fetch agent config for doc roots
   useEffect(() => {
     fetch('/api/settings').then(r => r.json())
-      .then((s: any) => setDocAgents(s.docRootAgents || {}))
+      .then((s: any) => setDocsAgent(s.docsAgent || ''))
       .catch(() => {});
   }, []);
 
@@ -566,7 +566,7 @@ export default function DocsViewer() {
       {/* Bottom — Agent console */}
       <div className="shrink-0" style={{ height: terminalHeight }}>
         <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-          <DocTerminal docRoot={rootPaths[activeRoot] || ''} agent={docAgents[rootPaths[activeRoot]] || undefined} />
+          <DocTerminal docRoot={rootPaths[activeRoot] || ''} agent={docsAgent || undefined} />
         </Suspense>
       </div>
     </div>
