@@ -149,6 +149,7 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
     });
     setInstallTarget({ skill: '', show: false });
     fetchSkills();
+    alert(`"${name}" installed. Restart Claude in terminal to apply.`);
   };
 
   const toggleDetail = async (name: string) => {
@@ -497,6 +498,7 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                                         body: JSON.stringify({ action: 'install-local', name: itemName, type: localItem.type, sourceProject: localItem.projectPath, target: 'global', force: true }) });
                                       const data = await res.json();
                                       if (!data.ok) alert(data.error);
+                                      else alert(`"${itemName}" installed globally. Restart Claude to apply.`);
                                       setInstallTarget({ skill: '', show: false });
                                       fetchSkills();
                                     }}
@@ -511,6 +513,7 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
                                           body: JSON.stringify({ action: 'install-local', name: itemName, type: localItem.type, sourceProject: localItem.projectPath, target: p.path, force: true }) });
                                         const data = await res.json();
                                         if (!data.ok) alert(data.error);
+                                        else alert(`"${itemName}" installed to ${p.name}. Restart Claude to apply.`);
                                         setInstallTarget({ skill: '', show: false });
                                         fetchSkills();
                                       }}
