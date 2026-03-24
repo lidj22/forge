@@ -225,11 +225,16 @@ export function queryUsage(opts: {
   byDay: { date: string; input: number; output: number; cost: number }[];
   bySource: { source: string; input: number; output: number; cost: number; messages: number }[];
 } {
+  // Get local timezone offset for date grouping (e.g., '+8 hours' for UTC+8)
+  const tzOffsetMin = new Date().getTimezoneOffset(); // negative for east of UTC
+  const tzOffsetHours = -tzOffsetMin / 60;
+  const tzModifier = `${tzOffsetHours >= 0 ? '+' : ''}${tzOffsetHours} hours`;
+
   let where = '1=1';
   const params: any[] = [];
 
   if (opts.days) {
-    where += ` AND completed_at >= datetime('now', '-${opts.days} days')`;
+    where += ` AND completed_at >= datetime('now', '${tzModifier}', '-${opts.days} days')`;
   }
   if (opts.projectName) {
     where += ' AND project_name = ?';
@@ -274,10 +279,10 @@ export function queryUsage(opts: {
 
   // By day
   const byDay = (db().prepare(`
-    SELECT date(completed_at) as date, SUM(input_tokens) as input, SUM(output_tokens) as output,
+    SELECT date(completed_at, '${tzModifier}') as date, SUM(input_tokens) as input, SUM(output_tokens) as output,
            SUM(cost_usd) as cost
     FROM token_usage WHERE ${where} AND completed_at IS NOT NULL
-    GROUP BY date(completed_at) ORDER BY date DESC LIMIT 30
+    GROUP BY date(completed_at, '${tzModifier}') ORDER BY date DESC LIMIT 30
   `).all(...params) as any[]).map(r => ({
     date: r.date, input: r.input, output: r.output, cost: Number(r.cost.toFixed(4)),
   }));
