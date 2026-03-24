@@ -38,6 +38,7 @@ interface TabState {
   activeId: number;
   projectPath?: string;
   bellEnabled?: boolean;
+  agent?: string; // agent ID (e.g., 'claude', 'codex', 'aider')
 }
 
 // ─── Layout persistence ──────────────────────────────────────
@@ -219,6 +220,9 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
   const [allProjects, setAllProjects] = useState<{ name: string; path: string; root: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [expandedRoot, setExpandedRoot] = useState<string | null>(null);
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+  const [defaultAgentId, setDefaultAgentId] = useState('claude');
 
   // Restore shared state from server after mount
   useEffect(() => {
@@ -626,6 +630,9 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                   {tab.label}
                 </span>
               )}
+              {tab.agent && tab.agent !== 'claude' && (
+                <span className="text-[8px] text-[var(--accent)] ml-0.5">{tab.agent}</span>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); toggleBell(tab.id); }}
                 className={`text-[10px] ml-1 ${tab.bellEnabled ? 'text-yellow-400' : 'text-gray-600 hover:text-gray-400'}`}
@@ -644,12 +651,19 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
           <button
             onClick={() => {
               setShowNewTabModal(true);
-              // Refresh projects list when opening modal
+              setSelectedAgent('');
+              // Refresh projects + agents when opening modal
               fetch('/api/projects').then(r => r.json())
                 .then((p: { name: string; path: string; root: string }[]) => {
                   if (!Array.isArray(p)) return;
                   setAllProjects(p);
                   setProjectRoots([...new Set(p.map(proj => proj.root))]);
+                })
+                .catch(() => {});
+              fetch('/api/agents').then(r => r.json())
+                .then(data => {
+                  setAvailableAgents((data.agents || []).filter((a: any) => a.enabled));
+                  setDefaultAgentId(data.defaultAgent || 'claude');
                 })
                 .catch(() => {});
             }}
@@ -796,8 +810,19 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       {showNewTabModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowNewTabModal(false); setExpandedRoot(null); }}>
           <div className="bg-[var(--term-bg)] border border-[var(--term-border)] rounded-lg shadow-xl w-[350px] max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-4 py-3 border-b border-[var(--term-border)]">
+            <div className="px-4 py-3 border-b border-[var(--term-border)] flex items-center gap-2">
               <h3 className="text-sm font-semibold text-white">New Tab</h3>
+              {availableAgents.length > 1 && (
+                <select
+                  value={selectedAgent || defaultAgentId}
+                  onChange={e => setSelectedAgent(e.target.value)}
+                  className="ml-auto bg-[var(--term-bg)] border border-[var(--term-border)] rounded px-2 py-0.5 text-[10px] text-gray-300"
+                >
+                  {availableAgents.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}{a.id === defaultAgentId ? ' (default)' : ''}</option>
+                  ))}
+                </select>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {/* Plain terminal */}
@@ -805,13 +830,13 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                 onClick={() => { addTab(); setShowNewTabModal(false); setExpandedRoot(null); }}
                 className="w-full text-left px-3 py-2 rounded hover:bg-[var(--term-border)] text-[12px] text-gray-300 flex items-center gap-2"
               >
-                <span className="text-gray-500">▸</span> Terminal
+                <span className="text-gray-500">▸</span> Terminal (no agent)
               </button>
 
               {/* Project roots */}
               {projectRoots.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-[var(--term-border)]">
-                  <div className="px-3 py-1 text-[9px] text-gray-500 uppercase">Claude in Project</div>
+                  <div className="px-3 py-1 text-[9px] text-gray-500 uppercase">Agent in Project</div>
                   {projectRoots.map(root => {
                     const rootName = root.split('/').pop() || root;
                     const isExpanded = expandedRoot === root;
@@ -833,20 +858,37 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                                 key={p.path}
                                 onClick={async () => {
                                   setShowNewTabModal(false); setExpandedRoot(null);
-                                  // Pre-check sessions before creating tab
-                                  let hasSession = false;
+                                  const agentId = selectedAgent || defaultAgentId;
+                                  // Build agent command
+                                  let cmd: string;
                                   try {
-                                    const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
-                                    const sData = await sRes.json();
-                                    hasSession = Array.isArray(sData) ? sData.length > 0 : (Array.isArray(sData.sessions) && sData.sessions.length > 0);
-                                  } catch {}
-                                  const skipFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
-                                  const resumeFlag = hasSession ? ' -c' : '';
+                                    const res = await fetch('/api/agents');
+                                    const data = await res.json();
+                                    const agentCfg = (data.agents || []).find((a: any) => a.id === agentId);
+                                    const agentPath = agentCfg?.path || agentId;
+
+                                    if (agentId === 'claude') {
+                                      // Claude: check sessions for -c flag
+                                      let hasSession = false;
+                                      try {
+                                        const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
+                                        const sData = await sRes.json();
+                                        hasSession = Array.isArray(sData) ? sData.length > 0 : false;
+                                      } catch {}
+                                      const skipFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
+                                      const resumeFlag = hasSession ? ' -c' : '';
+                                      cmd = `cd "${p.path}" && ${agentPath}${resumeFlag}${skipFlag}\n`;
+                                    } else {
+                                      cmd = `cd "${p.path}" && ${agentPath}\n`;
+                                    }
+                                  } catch {
+                                    cmd = `cd "${p.path}" && claude\n`;
+                                  }
                                   const tree = makeTerminal(undefined, p.path);
                                   const paneId = firstTerminalId(tree);
-                                  pendingCommands.set(paneId, `cd "${p.path}" && claude${resumeFlag}${skipFlag}\n`);
+                                  pendingCommands.set(paneId, cmd);
                                   const tabNum = tabs.length + 1;
-                                  const newTab: TabState = { id: nextId++, label: p.name || `Terminal ${tabNum}`, tree, ratios: {}, activeId: paneId, projectPath: p.path };
+                                  const newTab: TabState = { id: nextId++, label: p.name || `Terminal ${tabNum}`, tree, ratios: {}, activeId: paneId, projectPath: p.path, agent: agentId };
                                   setTabs(prev => [...prev, newTab]);
                                   setActiveTabId(newTab.id);
                                 }}
