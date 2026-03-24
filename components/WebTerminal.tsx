@@ -220,7 +220,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
   const [allProjects, setAllProjects] = useState<{ name: string; path: string; root: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [expandedRoot, setExpandedRoot] = useState<string | null>(null);
-  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string; detected?: boolean }[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string>('');
   const [defaultAgentId, setDefaultAgentId] = useState('claude');
 
@@ -972,7 +972,7 @@ export default WebTerminal;
 // ─── Agent shortcut buttons (inline with project name) ──────
 
 function AgentButtons({ agents, defaultAgentId, onSelect }: {
-  agents: { id: string; name: string }[];
+  agents: { id: string; name: string; detected?: boolean }[];
   defaultAgentId: string;
   onSelect: (agent: { id: string; name: string }) => void;
 }) {
@@ -982,12 +982,14 @@ function AgentButtons({ agents, defaultAgentId, onSelect }: {
   const getAbbr = (id: string) =>
     id === 'claude' ? 'C' : id === 'codex' ? 'X' : id === 'aider' ? 'A' : id.charAt(0).toUpperCase();
 
-  const btnClass = (id: string) =>
-    `w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold ${
+  const btnClass = (id: string, detected?: boolean) => {
+    if (detected === false) return 'w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold bg-gray-800/50 text-gray-600 cursor-not-allowed';
+    return `w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold ${
       id === defaultAgentId
-        ? 'bg-[var(--accent)]/30 text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white'
-        : 'bg-gray-700/50 text-gray-400 hover:bg-gray-600 hover:text-white'
+        ? 'bg-green-500/30 text-green-400 hover:bg-green-500 hover:text-white'
+        : 'bg-gray-700/50 text-gray-300 hover:bg-gray-600 hover:text-white'
     }`;
+  };
 
   const inline = agents.slice(0, MAX_INLINE);
   const overflow = agents.slice(MAX_INLINE);
@@ -995,7 +997,12 @@ function AgentButtons({ agents, defaultAgentId, onSelect }: {
   return (
     <div className="flex items-center gap-0.5 ml-auto shrink-0 relative">
       {inline.map(a => (
-        <button key={a.id} title={`Open with ${a.name}`} onClick={() => onSelect(a)} className={btnClass(a.id)}>
+        <button
+          key={a.id}
+          title={a.detected === false ? `${a.name} (not installed)` : `Open with ${a.name}`}
+          onClick={() => { if (a.detected !== false) onSelect(a); }}
+          className={btnClass(a.id, a.detected)}
+        >
           {getAbbr(a.id)}
         </button>
       ))}
@@ -1013,11 +1020,11 @@ function AgentButtons({ agents, defaultAgentId, onSelect }: {
                 {overflow.map(a => (
                   <button
                     key={a.id}
-                    onClick={() => { setShowMore(false); onSelect(a); }}
-                    className="w-full text-left px-3 py-1 text-[10px] text-gray-300 hover:bg-[var(--term-border)] flex items-center gap-2"
+                    onClick={() => { if (a.detected !== false) { setShowMore(false); onSelect(a); } }}
+                    className={`w-full text-left px-3 py-1 text-[10px] flex items-center gap-2 ${a.detected === false ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-[var(--term-border)]'}`}
                   >
-                    <span className={btnClass(a.id) + ' w-4 h-4 text-[8px]'}>{getAbbr(a.id)}</span>
-                    {a.name}
+                    <span className={btnClass(a.id, a.detected) + ' w-4 h-4 text-[8px]'}>{getAbbr(a.id)}</span>
+                    {a.name} {a.detected === false ? '(not installed)' : ''}
                   </button>
                 ))}
               </div>
