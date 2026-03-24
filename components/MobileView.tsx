@@ -124,76 +124,64 @@ export default function MobileView() {
       if (!reader) throw new Error('No reader');
 
       const decoder = new TextDecoder();
-      let sseBuffer = '';
-      let statusText = ''; // current activity status
 
       // Add empty assistant message to fill in
       setMessages(prev => [...prev, { role: 'assistant', content: '...', timestamp: new Date().toISOString() }]);
-
-      const updateAssistant = (content: string) => {
-        setMessages(prev => {
-          const updated = [...prev];
-          updated[updated.length - 1] = { role: 'assistant', content, timestamp: new Date().toISOString() };
-          return updated;
-        });
-      };
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        sseBuffer += decoder.decode(value, { stream: true });
-        const sseLines = sseBuffer.split('\n');
-        sseBuffer = sseLines.pop() || '';
-
-        for (const line of sseLines) {
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split('\n')) {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6));
-
-            if (data.type === 'assistant' && data.message?.content) {
-              // Assistant message with text/tool_use blocks
-              for (const block of data.message.content) {
-                if (block.type === 'text' && block.text) {
-                  assistantText = block.text;
-                  updateAssistant(assistantText);
-                } else if (block.type === 'tool_use') {
-                  statusText = `Using ${block.name}...`;
-                  updateAssistant(assistantText || statusText);
-                  if (debugLevelRef.current !== 'off') {
-                    const input = typeof block.input === 'string' ? block.input : JSON.stringify(block.input || {});
-                    setDebug(d => [...d.slice(-50), `🔧 ${block.name}: ${input.slice(0, 80)}`]);
-                  }
-                }
-              }
-            } else if (data.type === 'tool_result' || (data.type === 'user' && data.message?.content)) {
-              // Tool result
+            if (data.type === 'chunk') {
+              assistantText += data.text;
               if (debugLevelRef.current === 'verbose') {
-                const content = data.message?.content;
-                const text = Array.isArray(content) ? content.map((b: any) => typeof b.content === 'string' ? b.content : '').join('').slice(0, 100) : '';
-                if (text) setDebug(d => [...d.slice(-50), `📋 result: ${text}`]);
+                // Show content preview in verbose mode
+                const preview = data.text.replace(/\n/g, '↵').slice(0, 80);
+                setDebug(d => [...d.slice(-50), `chunk: ${preview}`]);
               }
-            } else if (data.type === 'result') {
-              // Final result
-              assistantText = typeof data.result === 'string' ? data.result : JSON.stringify(data.result || '');
-              updateAssistant(assistantText);
-              if (debugLevelRef.current !== 'off') {
-                const cost = data.total_cost_usd ? ` ($${data.total_cost_usd.toFixed(4)})` : '';
-                setDebug(d => [...d.slice(-50), `✅ done${cost}`]);
-              }
-            } else if (data.type === 'system' && data.subtype === 'init') {
-              if (debugLevelRef.current !== 'off') setDebug(d => [...d.slice(-50), `model: ${data.model || 'unknown'}`]);
             } else if (data.type === 'stderr') {
-              if (debugLevelRef.current !== 'off') setDebug(d => [...d.slice(-50), `stderr: ${data.text.trim().slice(0, 80)}`]);
+              if (debugLevelRef.current !== 'off') {
+                setDebug(d => [...d.slice(-50), `stderr: ${data.text.trim().slice(0, 100)}`]);
+              }
             } else if (data.type === 'error') {
               assistantText = `Error: ${data.message}`;
-              updateAssistant(assistantText);
+              setDebug(d => [...d.slice(-50), `ERROR: ${data.message}`]);
             } else if (data.type === 'done') {
-              if (debugLevelRef.current !== 'off') setDebug(d => [...d.slice(-50), `exit: ${data.code}`]);
+              if (debugLevelRef.current !== 'off') setDebug(d => [...d.slice(-50), `done: exit ${data.code}`]);
             }
           } catch {}
         }
+
+        // Update assistant message with latest text
+        if (assistantText) {
+          let displayText = assistantText;
+          try {
+            const parsed = JSON.parse(assistantText);
+            if (parsed.result) displayText = parsed.result;
+          } catch {}
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: 'assistant', content: displayText, timestamp: new Date().toISOString() };
+            return updated;
+          });
+        }
       }
+
+      // Final parse
+      try {
+        const parsed = JSON.parse(assistantText);
+        const finalText = parsed.result || assistantText;
+        setMessages(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: 'assistant', content: finalText, timestamp: new Date().toISOString() };
+          return updated;
+        });
+      } catch {}
 
       // After first message, future ones should use -c
       setHasSession(true);
