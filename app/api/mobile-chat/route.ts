@@ -5,7 +5,6 @@ import { loadSettings } from '@/lib/settings';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-// POST /api/mobile-chat — send a message to claude and stream response
 export async function POST(req: Request) {
   const { message, projectPath, resume } = await req.json() as {
     message: string;
@@ -21,7 +20,7 @@ export async function POST(req: Request) {
   const claudePath = settings.claudePath || 'claude';
   const projectName = projectPath.split('/').pop() || projectPath;
 
-  const args = ['-p', '--dangerously-skip-permissions', '--output-format', 'json'];
+  const args = ['-p', '--dangerously-skip-permissions', '--output-format', 'stream-json'];
   if (resume) args.push('-c');
 
   const child = spawn(claudePath, args, {
@@ -35,17 +34,28 @@ export async function POST(req: Request) {
 
   const encoder = new TextEncoder();
   let closed = false;
-  let fullOutput = '';
+  let stdoutBuffer = '';
 
   const stream = new ReadableStream({
     start(controller) {
       child.stdout.on('data', (chunk: Buffer) => {
         if (closed) return;
-        const text = chunk.toString();
-        fullOutput += text;
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`));
-        } catch {}
+        stdoutBuffer += chunk.toString();
+
+        // Parse complete JSON lines
+        const lines = stdoutBuffer.split('\n');
+        stdoutBuffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const obj = JSON.parse(line);
+            // Forward parsed stream-json event to client
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+          } catch {
+            // Not valid JSON, skip
+          }
+        }
       });
 
       child.stderr.on('data', (chunk: Buffer) => {
@@ -60,24 +70,27 @@ export async function POST(req: Request) {
       child.on('exit', (code) => {
         if (closed) return;
         closed = true;
-
-        // Record usage from the JSON output
-        try {
-          const parsed = JSON.parse(fullOutput);
-          if (parsed.session_id) {
-            const { recordUsage } = require('@/lib/usage-scanner');
-            recordUsage({
-              sessionId: parsed.session_id,
-              source: 'mobile',
-              projectPath,
-              projectName,
-              model: parsed.model || 'unknown',
-              inputTokens: parsed.usage?.input_tokens || parsed.total_input_tokens || 0,
-              outputTokens: parsed.usage?.output_tokens || parsed.total_output_tokens || 0,
-            });
-          }
-        } catch {}
-
+        // Flush remaining buffer
+        if (stdoutBuffer.trim()) {
+          try {
+            const obj = JSON.parse(stdoutBuffer);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+            // Record usage from result
+            if (obj.type === 'result' && obj.session_id) {
+              try {
+                const { recordUsage } = require('@/lib/usage-scanner');
+                recordUsage({
+                  sessionId: obj.session_id,
+                  source: 'mobile',
+                  projectPath, projectName,
+                  model: obj.model || 'unknown',
+                  inputTokens: obj.total_input_tokens || 0,
+                  outputTokens: obj.total_output_tokens || 0,
+                });
+              } catch {}
+            }
+          } catch {}
+        }
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', code })}\n\n`));
           controller.close();
