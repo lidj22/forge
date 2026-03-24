@@ -332,9 +332,18 @@ function executeTask(task: Task): Promise<void> {
         cwd: task.projectPath,
         env,
       });
+      // Strip terminal control codes from PTY output for clean logging
+      const stripAnsi = (s: string) => s
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')   // CSI sequences
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences
+        .replace(/\x1b[()][0-9A-B]/g, '')           // charset
+        .replace(/\x1b[=>]/g, '')                    // keypad
+        .replace(/\r/g, '')                          // carriage return
+        .replace(/\x07/g, '');                       // bell
+
       // Create a child-like interface for pty
       child = {
-        stdout: { on: (evt: string, cb: Function) => { if (evt === 'data') ptyProcess.onData((data: string) => cb(Buffer.from(data))); } },
+        stdout: { on: (evt: string, cb: Function) => { if (evt === 'data') ptyProcess.onData((data: string) => cb(Buffer.from(stripAnsi(data)))); } },
         stderr: { on: (_evt: string, _cb: Function) => {} }, // pty combines stdout+stderr
         on: (evt: string, cb: Function) => { if (evt === 'exit') ptyProcess.onExit(({ exitCode }: any) => cb(exitCode, null)); if (evt === 'error') {} },
         kill: (sig: string) => ptyProcess.kill(sig),
