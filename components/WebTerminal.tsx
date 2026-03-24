@@ -810,19 +810,8 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       {showNewTabModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowNewTabModal(false); setExpandedRoot(null); }}>
           <div className="bg-[var(--term-bg)] border border-[var(--term-border)] rounded-lg shadow-xl w-[350px] max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="px-4 py-3 border-b border-[var(--term-border)] flex items-center gap-2">
+            <div className="px-4 py-3 border-b border-[var(--term-border)]">
               <h3 className="text-sm font-semibold text-white">New Tab</h3>
-              {availableAgents.length > 1 && (
-                <select
-                  value={selectedAgent || defaultAgentId}
-                  onChange={e => setSelectedAgent(e.target.value)}
-                  className="ml-auto bg-[var(--term-bg)] border border-[var(--term-border)] rounded px-2 py-0.5 text-[10px] text-gray-300"
-                >
-                  {availableAgents.map(a => (
-                    <option key={a.id} value={a.id}>{a.name}{a.id === defaultAgentId ? ' (default)' : ''}</option>
-                  ))}
-                </select>
-              )}
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               {/* Plain terminal */}
@@ -854,49 +843,56 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                         {isExpanded && (
                           <div className="ml-4">
                             {rootProjects.map(p => (
-                              <button
-                                key={p.path}
-                                onClick={async () => {
-                                  setShowNewTabModal(false); setExpandedRoot(null);
-                                  const agentId = selectedAgent || defaultAgentId;
-                                  // Build agent command
-                                  let cmd: string;
-                                  try {
-                                    const res = await fetch('/api/agents');
-                                    const data = await res.json();
-                                    const agentCfg = (data.agents || []).find((a: any) => a.id === agentId);
-                                    const agentPath = agentCfg?.path || agentId;
-
-                                    if (agentId === 'claude') {
-                                      // Claude: check sessions for -c flag
-                                      let hasSession = false;
-                                      try {
-                                        const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
-                                        const sData = await sRes.json();
-                                        hasSession = Array.isArray(sData) ? sData.length > 0 : false;
-                                      } catch {}
-                                      const skipFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
-                                      const resumeFlag = hasSession ? ' -c' : '';
-                                      cmd = `cd "${p.path}" && ${agentPath}${resumeFlag}${skipFlag}\n`;
-                                    } else {
-                                      cmd = `cd "${p.path}" && ${agentPath}\n`;
-                                    }
-                                  } catch {
-                                    cmd = `cd "${p.path}" && claude\n`;
-                                  }
-                                  const tree = makeTerminal(undefined, p.path);
-                                  const paneId = firstTerminalId(tree);
-                                  pendingCommands.set(paneId, cmd);
-                                  const tabNum = tabs.length + 1;
-                                  const newTab: TabState = { id: nextId++, label: p.name || `Terminal ${tabNum}`, tree, ratios: {}, activeId: paneId, projectPath: p.path, agent: agentId };
-                                  setTabs(prev => [...prev, newTab]);
-                                  setActiveTabId(newTab.id);
-                                }}
-                                className="w-full text-left px-3 py-1.5 rounded hover:bg-[var(--term-border)] text-[11px] text-gray-300 flex items-center gap-2 truncate"
-                                title={p.path}
-                              >
-                                <span className="text-gray-600 text-[10px]">↳</span> {p.name}
-                              </button>
+                              <div key={p.path} className="flex items-center gap-1 px-3 py-1.5 rounded hover:bg-[var(--term-border)]/50 text-[11px]" title={p.path}>
+                                <span className="text-gray-600 text-[10px]">↳</span>
+                                <span className="text-gray-300 truncate">{p.name}</span>
+                                <div className="flex items-center gap-0.5 ml-auto shrink-0">
+                                  {availableAgents.map(a => {
+                                    const abbr = a.id === 'claude' ? 'C' : a.id === 'codex' ? 'X' : a.id === 'aider' ? 'A' : a.id.charAt(0).toUpperCase();
+                                    return (
+                                      <button
+                                        key={a.id}
+                                        title={`Open with ${a.name}`}
+                                        onClick={async () => {
+                                          setShowNewTabModal(false); setExpandedRoot(null);
+                                          let cmd: string;
+                                          try {
+                                            if (a.id === 'claude') {
+                                              let hasSession = false;
+                                              try {
+                                                const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
+                                                const sData = await sRes.json();
+                                                hasSession = Array.isArray(sData) ? sData.length > 0 : false;
+                                              } catch {}
+                                              const sf = skipPermissions ? ' --dangerously-skip-permissions' : '';
+                                              const rf = hasSession ? ' -c' : '';
+                                              cmd = `cd "${p.path}" && claude${rf}${sf}\n`;
+                                            } else {
+                                              const agentRes = await fetch('/api/agents');
+                                              const agentData = await agentRes.json();
+                                              const cfg = (agentData.agents || []).find((ag: any) => ag.id === a.id);
+                                              cmd = `cd "${p.path}" && ${cfg?.path || a.id}\n`;
+                                            }
+                                          } catch {
+                                            cmd = `cd "${p.path}" && ${a.id}\n`;
+                                          }
+                                          const tree = makeTerminal(undefined, p.path);
+                                          const paneId = firstTerminalId(tree);
+                                          pendingCommands.set(paneId, cmd);
+                                          const newTab: TabState = { id: nextId++, label: p.name || 'Terminal', tree, ratios: {}, activeId: paneId, projectPath: p.path, agent: a.id };
+                                          setTabs(prev => [...prev, newTab]);
+                                          setActiveTabId(newTab.id);
+                                        }}
+                                        className={`w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold ${
+                                          a.id === defaultAgentId
+                                            ? 'bg-[var(--accent)]/30 text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white'
+                                            : 'bg-gray-700/50 text-gray-400 hover:bg-gray-600 hover:text-white'
+                                        }`}
+                                      >{abbr}</button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             ))}
                             {rootProjects.length === 0 && (
                               <div className="px-3 py-1.5 text-[10px] text-gray-600">No projects</div>
