@@ -757,13 +757,17 @@ async function handleNewTask(chatId: number, input: string) {
     return;
   }
 
+  // Use @agent if specified, else telegram default, else global default
+  const settings = loadSettings();
+  const resolvedAgent = agentId || settings.telegramAgent || undefined;
+
   const task = createTask({
     projectName: project.name,
     projectPath: project.path,
     prompt,
     conversationId: sessionId,
     scheduledAt,
-    agent: agentId,
+    agent: resolvedAgent,
   });
 
   let statusLine = 'Status: queued';

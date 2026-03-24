@@ -24,10 +24,18 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
   const wsRef = useRef<WebSocket | null>(null);
   const docRootRef = useRef(docRoot);
   const skipPermRef = useRef(false);
+  const agentCmdRef = useRef('claude');
 
   useEffect(() => {
     fetch('/api/settings').then(r => r.json())
       .then((s: any) => { if (s.skipPermissions) skipPermRef.current = true; })
+      .catch(() => {});
+    fetch('/api/agents').then(r => r.json())
+      .then(data => {
+        const defaultId = data.defaultAgent || 'claude';
+        const agent = (data.agents || []).find((a: any) => a.id === defaultId);
+        if (agent?.path) agentCmdRef.current = agent.path;
+      })
       .catch(() => {});
   }, []);
   docRootRef.current = docRoot;
@@ -89,7 +97,7 @@ export default function DocTerminal({ docRoot }: { docRoot: string }) {
               setTimeout(() => {
                 if (socket.readyState === WebSocket.OPEN) {
                   const sf = skipPermRef.current ? ' --dangerously-skip-permissions' : '';
-                  socket.send(JSON.stringify({ type: 'input', data: `cd "${docRootRef.current}" && claude -c${sf}\n` }));
+                  socket.send(JSON.stringify({ type: 'input', data: `cd "${docRootRef.current}" && ${agentCmdRef.current} -c${sf}\n` }));
                 }
               }, 300);
             }

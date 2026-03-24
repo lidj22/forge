@@ -490,6 +490,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
             )}
           </div>
+          <TelegramAgentSelect settings={settings} setSettings={setSettings} />
         </div>
 
 
@@ -1132,6 +1133,36 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Telegram Agent Selector ──────────────────────────────
+
+function TelegramAgentSelect({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.json())
+      .then(data => setAgents((data.agents || []).filter((a: any) => a.enabled)))
+      .catch(() => {});
+  }, []);
+
+  if (agents.length <= 1) return null;
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <span className="text-[9px] text-[var(--text-secondary)]">Default Agent:</span>
+      <select
+        value={settings.telegramAgent || ''}
+        onChange={e => setSettings({ ...settings, telegramAgent: e.target.value })}
+        className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[10px] text-[var(--text-primary)]"
+      >
+        <option value="">Global default ({settings.defaultAgent || 'claude'})</option>
+        {agents.map(a => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+      <span className="text-[8px] text-[var(--text-secondary)]">Used for /task without @agent</span>
     </div>
   );
 }
