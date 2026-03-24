@@ -320,8 +320,10 @@ function executeTask(task: Task): Promise<void> {
     const child = spawn(spawnOpts.cmd, spawnOpts.args, {
       cwd: task.projectPath,
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+    // Close stdin for non-interactive task execution
+    child.stdin?.end();
 
     let buffer = '';
     let resultText = '';
