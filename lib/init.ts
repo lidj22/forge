@@ -45,18 +45,25 @@ function migrateSecrets() {
   }
 }
 
-/** Auto-detect claude binary path if not configured */
-function autoDetectClaude() {
+/** Auto-detect agent binaries */
+function autoDetectAgents() {
   try {
     const settings = loadSettings();
-    if (settings.claudePath) return; // already configured
-    const { execSync } = require('node:child_process');
-    const path = execSync('which claude', { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-    if (path) {
-      settings.claudePath = path;
-      saveSettings(settings);
-      console.log(`[init] Auto-detected claude: ${path}`);
+    // Backward compat: detect claude if not configured
+    if (!settings.claudePath) {
+      const { execSync } = require('node:child_process');
+      try {
+        const path = execSync('which claude', { encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        if (path) {
+          settings.claudePath = path;
+          saveSettings(settings);
+          console.log(`[init] Auto-detected claude: ${path}`);
+        }
+      } catch {}
     }
+    // Detect all agents
+    const { autoDetectAgents: detect } = require('./agents');
+    detect();
   } catch {}
 }
 
@@ -80,7 +87,7 @@ export function ensureInitialized() {
   } catch {}
 
   // Auto-detect claude path if not configured
-  autoDetectClaude();
+  autoDetectAgents();
 
   // Sync help docs + CLAUDE.md to data dir on startup
   try {

@@ -27,6 +27,8 @@ export interface Settings {
   displayName: string;                  // User display name (shown in header)
   displayEmail: string;                 // User email (for session/future integrations)
   favoriteProjects: string[];           // Favorite project paths (shown at top of sidebar)
+  defaultAgent: string;                  // Default agent ID (e.g., 'claude', 'codex', 'aider')
+  agents: Record<string, { path?: string; name?: string; enabled?: boolean; flags?: string[] }>; // Per-agent config
 }
 
 const defaults: Settings = {
@@ -49,6 +51,8 @@ const defaults: Settings = {
   displayName: 'Forge',
   displayEmail: '',
   favoriteProjects: [],
+  defaultAgent: 'claude',
+  agents: {},
 };
 
 /** Load settings with secrets decrypted (for internal use) */

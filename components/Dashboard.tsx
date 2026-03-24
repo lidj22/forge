@@ -332,7 +332,7 @@ export default function Dashboard({ user }: { user: any }) {
               </button>
             ))}
             <span className="w-[2px] h-4 bg-[var(--text-secondary)]/30 mx-1.5" />
-            {/* Skills */}
+            {/* Marketplace */}
             <button
               onClick={() => setViewMode('skills')}
               className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
@@ -341,7 +341,7 @@ export default function Dashboard({ user }: { user: any }) {
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              Skills
+              Marketplace
             </button>
           </div>
 
