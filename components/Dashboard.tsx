@@ -343,17 +343,6 @@ export default function Dashboard({ user }: { user: any }) {
             >
               Skills
             </button>
-            {/* Usage */}
-            <button
-              onClick={() => setViewMode('usage')}
-              className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
-                viewMode === 'usage'
-                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm'
-                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              Usage
-            </button>
           </div>
 
           {viewMode === 'tasks' && (
@@ -421,6 +410,14 @@ export default function Dashboard({ user }: { user: any }) {
               </>
             )}
           </div>
+          <button
+            onClick={() => setViewMode('usage')}
+            className={`text-[10px] px-2 py-0.5 border rounded transition-colors ${
+              viewMode === 'usage'
+                ? 'border-[var(--accent)] text-[var(--accent)]'
+                : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-secondary)]'
+            }`}
+          >Usage</button>
           <TunnelToggle />
           {onlineCount.total > 0 && (
             <span className="text-[10px] text-[var(--text-secondary)] flex items-center gap-1" title={`${onlineCount.total} online${onlineCount.remote > 0 ? `, ${onlineCount.remote} remote` : ''}`}>
