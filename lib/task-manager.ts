@@ -292,13 +292,14 @@ function executeTask(task: Task): Promise<void> {
     const adapter = getAgent(agentId);
 
     const model = taskModelOverrides.get(task.id) || settings.taskModel;
+    const supportsModel = adapter.config.capabilities?.supportsModel;
     const spawnOpts = adapter.buildTaskSpawn({
       projectPath: task.projectPath,
       prompt: task.prompt,
-      model: model && model !== 'default' ? model : undefined,
+      model: supportsModel && model && model !== 'default' ? model : undefined,
       conversationId: task.conversationId || undefined,
       skipPermissions: true,
-      outputFormat: adapter.config.capabilities?.supportsStreamJson ? 'stream-json' : 'json',
+      outputFormat: adapter.config.capabilities?.supportsStreamJson ? 'stream-json' : undefined,
     });
 
     const env = { ...process.env, ...(spawnOpts.env || {}) };
@@ -307,7 +308,11 @@ function executeTask(task: Task): Promise<void> {
     updateTaskStatus(task.id, 'running');
     db().prepare('UPDATE tasks SET started_at = datetime(\'now\') WHERE id = ?').run(task.id);
 
-    console.log(`[task] ${task.projectName} [${agentId}/${model || 'default'}]: "${task.prompt.slice(0, 60)}..."`);
+    const agentName = adapter.config.name || agentId;
+    console.log(`[task] ${task.projectName} [${agentName}${supportsModel && model ? '/' + model : ''}]: "${task.prompt.slice(0, 60)}..."`);
+
+    // Log agent info as first entry
+    appendLog(task.id, { type: 'system', subtype: 'init', content: `Agent: ${agentName}${supportsModel && model && model !== 'default' ? ` | Model: ${model}` : ''}`, timestamp: new Date().toISOString() });
 
     const child = spawn(spawnOpts.cmd, spawnOpts.args, {
       cwd: task.projectPath,
