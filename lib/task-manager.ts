@@ -347,34 +347,33 @@ function executeTask(task: Task): Promise<void> {
       const PTY_IDLE_MS = 15000; // 15s idle = done
 
       // Create a child-like interface for pty
-      const exitCallbacks: Function[] = [];
+      let exitCb: Function | null = null;
+
+      ptyProcess.onData((data: string) => {
+        const clean = stripAnsi(data);
+        ptyBytes += clean.length;
+        if (dataCallback) dataCallback(Buffer.from(clean));
+        // Reset idle timer
+        if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
+        if (ptyBytes > 500) {
+          ptyIdleTimer = setTimeout(() => {
+            console.log(`[task] PTY idle timeout — killing process (${ptyBytes} bytes received)`);
+            try { ptyProcess.kill(); } catch {}
+          }, PTY_IDLE_MS);
+        }
+      });
+
+      ptyProcess.onExit(({ exitCode }: any) => {
+        if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
+        if (exitCb) exitCb(exitCode, null);
+      });
+
+      let dataCallback: Function | null = null;
       child = {
-        stdout: { on: (evt: string, cb: Function) => {
-          if (evt === 'data') ptyProcess.onData((data: string) => {
-            const clean = stripAnsi(data);
-            ptyBytes += clean.length;
-            cb(Buffer.from(clean));
-            // Reset idle timer
-            if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
-            if (ptyBytes > 500) {
-              ptyIdleTimer = setTimeout(() => {
-                console.log(`[task] PTY idle timeout — killing process (${ptyBytes} bytes received)`);
-                try { ptyProcess.kill(); } catch {}
-              }, PTY_IDLE_MS);
-            }
-          });
-        }},
+        stdout: { on: (evt: string, cb: Function) => { if (evt === 'data') dataCallback = cb; } },
         stderr: { on: (_evt: string, _cb: Function) => {} },
-        on: (evt: string, cb: Function) => {
-          if (evt === 'exit') {
-            exitCallbacks.push(cb);
-            ptyProcess.onExit(({ exitCode }: any) => {
-              if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
-              for (const fn of exitCallbacks) fn(exitCode, null);
-            });
-          }
-        },
-        kill: (sig: string) => { if (ptyIdleTimer) clearTimeout(ptyIdleTimer); ptyProcess.kill(sig); },
+        on: (evt: string, cb: Function) => { if (evt === 'exit') exitCb = cb; if (evt === 'error') {} },
+        kill: (sig: string) => { if (ptyIdleTimer) clearTimeout(ptyIdleTimer); try { ptyProcess.kill(sig); } catch {} },
         stdin: null,
         pid: ptyProcess.pid,
       };
