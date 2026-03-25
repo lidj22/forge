@@ -268,6 +268,7 @@ function ConversationMessageBubble({ msg, colors, agentDef, isLeft, onViewTask }
 }
 
 const ConversationGraphView = lazy(() => import('./ConversationGraphView'));
+const ConversationTerminalView = lazy(() => import('./ConversationTerminalView'));
 
 function ConversationView({ pipeline, onViewTask }: { pipeline: Pipeline; onViewTask?: (taskId: string) => void }) {
   const conv = pipeline.conversation!;
@@ -275,7 +276,7 @@ function ConversationView({ pipeline, onViewTask }: { pipeline: Pipeline; onView
   const [injectText, setInjectText] = useState('');
   const [injectTarget, setInjectTarget] = useState(config.agents[0]?.id || '');
   const [injecting, setInjecting] = useState(false);
-  const [viewMode, setViewMode] = useState<'graph' | 'chat'>('graph');
+  const [viewMode, setViewMode] = useState<'terminal' | 'graph' | 'chat'>('terminal');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Assign stable colors per agent
@@ -313,14 +314,13 @@ function ConversationView({ pipeline, onViewTask }: { pipeline: Pipeline; onView
           <div className="flex items-center gap-2 ml-auto">
             {/* View mode toggle */}
             <div className="flex border border-[var(--border)] rounded overflow-hidden">
-              <button
-                onClick={() => setViewMode('graph')}
-                className={`text-[8px] px-2 py-0.5 ${viewMode === 'graph' ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-              >Graph</button>
-              <button
-                onClick={() => setViewMode('chat')}
-                className={`text-[8px] px-2 py-0.5 ${viewMode === 'chat' ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-              >Chat</button>
+              {(['terminal', 'graph', 'chat'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`text-[8px] px-2 py-0.5 capitalize ${viewMode === mode ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                >{mode}</button>
+              ))}
             </div>
             {config.agents.map(a => {
               const colors = agentColorMap[a.id];
@@ -338,8 +338,14 @@ function ConversationView({ pipeline, onViewTask }: { pipeline: Pipeline; onView
         )}
       </div>
 
-      {/* Graph or Chat view */}
-      {viewMode === 'graph' ? (
+      {/* Terminal / Graph / Chat view */}
+      {viewMode === 'terminal' ? (
+        <div className="flex-1 min-h-0">
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-xs text-[var(--text-secondary)]">Loading...</div>}>
+            <ConversationTerminalView pipeline={pipeline} onViewTask={onViewTask} />
+          </Suspense>
+        </div>
+      ) : viewMode === 'graph' ? (
         <div className="flex-1 min-h-0">
           <Suspense fallback={<div className="flex items-center justify-center h-full text-xs text-[var(--text-secondary)]">Loading graph...</div>}>
             <ConversationGraphView pipeline={pipeline} />

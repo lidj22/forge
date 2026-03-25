@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import type { TaskLogEntry } from '@/src/types';
 
-const ConversationGraphView = lazy(() => import('./ConversationGraphView'));
+const ConversationTerminalView = lazy(() => import('./ConversationTerminalView'));
 
 // ─── Task stream hook ─────────────────────────────────────
 
@@ -89,9 +89,9 @@ export default function InlinePipelineView({ pipeline, onRefresh }: { pipeline: 
   return (
     <div className="bg-[var(--bg-tertiary)]/50">
       {isConversation ? (
-        <div style={{ height: 420 }}>
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-[9px] text-[var(--text-secondary)]">Loading graph...</div>}>
-            <ConversationGraphView pipeline={pipeline} />
+        <div style={{ height: 450 }}>
+          <Suspense fallback={<div className="flex items-center justify-center h-full text-[9px] text-[var(--text-secondary)]">Loading...</div>}>
+            <ConversationTerminalView pipeline={pipeline} />
           </Suspense>
         </div>
       ) : (
