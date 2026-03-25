@@ -62,15 +62,18 @@ const nodeTypes = { pipeline: PipelineNode };
 
 // ─── Node Edit Modal ──────────────────────────────────────
 
-function NodeEditModal({ node, projects, onSave, onClose }: {
-  node: { id: string; project: string; prompt: string; outputs: { name: string; extract: string }[] };
+function NodeEditModal({ node, projects, agents, onSave, onClose }: {
+  node: { id: string; project: string; prompt: string; agent?: string; mode?: string; outputs: { name: string; extract: string }[] };
   projects: { name: string; root: string }[];
-  onSave: (data: { id: string; project: string; prompt: string; outputs: { name: string; extract: string }[] }) => void;
+  agents: { id: string; name: string }[];
+  onSave: (data: { id: string; project: string; prompt: string; agent?: string; mode?: string; outputs: { name: string; extract: string }[] }) => void;
   onClose: () => void;
 }) {
   const [id, setId] = useState(node.id);
   const [project, setProject] = useState(node.project);
   const [prompt, setPrompt] = useState(node.prompt);
+  const [agent, setAgent] = useState(node.agent || '');
+  const [mode, setMode] = useState(node.mode || 'claude');
   const [outputs, setOutputs] = useState(node.outputs);
 
   return (
@@ -104,6 +107,34 @@ function NodeEditModal({ node, projects, onSave, onClose }: {
                 </optgroup>
               ))}
             </select>
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-[10px] text-gray-400 block mb-1">Mode</label>
+              <select
+                value={mode}
+                onChange={e => setMode(e.target.value)}
+                className="w-full text-xs bg-[#12122a] border border-[#3a3a5a] rounded px-2 py-1.5 text-white"
+              >
+                <option value="claude">Agent</option>
+                <option value="shell">Shell</option>
+              </select>
+            </div>
+            {mode !== 'shell' && (
+              <div className="flex-1">
+                <label className="text-[10px] text-gray-400 block mb-1">Agent</label>
+                <select
+                  value={agent}
+                  onChange={e => setAgent(e.target.value)}
+                  className="w-full text-xs bg-[#12122a] border border-[#3a3a5a] rounded px-2 py-1.5 text-white"
+                >
+                  <option value="">Default</option>
+                  {agents.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div>
             <label className="text-[10px] text-gray-400 block mb-1">Prompt</label>
@@ -147,7 +178,7 @@ function NodeEditModal({ node, projects, onSave, onClose }: {
         <div className="px-4 py-3 border-t border-[#3a3a5a] flex gap-2 justify-end">
           <button onClick={onClose} className="text-xs px-3 py-1 text-gray-400 hover:text-white">Cancel</button>
           <button
-            onClick={() => onSave({ id, project, prompt, outputs: outputs.filter(o => o.name) })}
+            onClick={() => onSave({ id, project, prompt, agent: agent || undefined, mode, outputs: outputs.filter(o => o.name) })}
             className="text-xs px-3 py-1 bg-[var(--accent)] text-white rounded hover:opacity-90"
           >
             Save
@@ -167,8 +198,9 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
 }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<NodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [editingNode, setEditingNode] = useState<{ id: string; project: string; prompt: string; outputs: { name: string; extract: string }[] } | null>(null);
+  const [editingNode, setEditingNode] = useState<{ id: string; project: string; prompt: string; agent?: string; mode?: string; outputs: { name: string; extract: string }[] } | null>(null);
   const [workflowName, setWorkflowName] = useState('');
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string }[]>([]);
   const [workflowDesc, setWorkflowDesc] = useState('');
   const [varsProject, setVarsProject] = useState('');
   const [projects, setProjects] = useState<{ name: string; root: string }[]>([]);
@@ -177,6 +209,9 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
   useEffect(() => {
     fetch('/api/projects').then(r => r.json())
       .then((p: { name: string; root: string }[]) => { if (Array.isArray(p)) setProjects(p); })
+      .catch(() => {});
+    fetch('/api/agents').then(r => r.json())
+      .then(data => setAvailableAgents((data.agents || []).filter((a: any) => a.enabled)))
       .catch(() => {});
   }, []);
 
@@ -271,7 +306,7 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
     setEdges(eds => eds.filter(e => e.source !== id && e.target !== id));
   }, [setNodes, setEdges]);
 
-  const handleSaveNode = useCallback((data: { id: string; project: string; prompt: string; outputs: { name: string; extract: string }[] }) => {
+  const handleSaveNode = useCallback((data: { id: string; project: string; prompt: string; agent?: string; mode?: string; outputs: { name: string; extract: string }[] }) => {
     setNodes(nds => nds.map(n => {
       if (n.id === editingNode?.id) {
         return {
@@ -282,6 +317,8 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
             label: data.id,
             project: data.project,
             prompt: data.prompt,
+            agent: data.agent,
+            mode: data.mode,
             outputs: data.outputs,
           },
         };
@@ -315,6 +352,8 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
         project: node.data.project,
         prompt: node.data.prompt,
       };
+      if ((node.data as any).mode === 'shell') nodeDef.mode = 'shell';
+      if ((node.data as any).agent) nodeDef.agent = (node.data as any).agent;
       if (deps.length > 0) nodeDef.depends_on = deps;
       if (node.data.outputs.length > 0) nodeDef.outputs = node.data.outputs;
       workflow.nodes[node.id] = nodeDef;
@@ -392,6 +431,7 @@ export default function PipelineEditor({ onSave, onClose, initialYaml }: {
         <NodeEditModal
           node={editingNode}
           projects={projects}
+          agents={availableAgents}
           onSave={handleSaveNode}
           onClose={() => setEditingNode(null)}
         />
