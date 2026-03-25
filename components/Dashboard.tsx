@@ -714,30 +714,31 @@ export default function Dashboard({ user }: { user: any }) {
         )}
 
 
-        {/* Workspace */}
-        {viewMode === 'workspace' && (
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
-            {workspaceProject ? (
+        {/* Workspace — keep alive when switching tabs (display:none instead of unmount) */}
+        {workspaceProject && (
+          <div className={`flex-1 flex flex-col min-h-0 ${viewMode !== 'workspace' ? 'hidden' : ''}`}>
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
               <WorkspaceView
                 projectPath={workspaceProject.path}
                 projectName={workspaceProject.name}
                 onClose={() => setWorkspaceProject(null)}
               />
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ background: '#080810' }}>
-                <span className="text-3xl">🚀</span>
-                <div className="text-sm text-gray-400">Select a project to open Workspace</div>
-                <div className="flex flex-wrap gap-2 mt-2 max-w-md justify-center">
-                  {projects.map(p => (
-                    <button key={p.path} onClick={() => setWorkspaceProject({ name: p.name, path: p.path })}
-                      className="text-[10px] px-3 py-1.5 rounded border border-[#30363d] text-gray-300 hover:text-white hover:border-[var(--accent)]">
-                      {p.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </Suspense>
+            </Suspense>
+          </div>
+        )}
+        {viewMode === 'workspace' && !workspaceProject && (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3" style={{ background: '#080810' }}>
+            <span className="text-3xl">🚀</span>
+            <div className="text-sm text-gray-400">Select a project to open Workspace</div>
+            <div className="flex flex-wrap gap-2 mt-2 max-w-md justify-center">
+              {projects.map(p => (
+                <button key={p.path} onClick={() => setWorkspaceProject({ name: p.name, path: p.path })}
+                  className="text-[10px] px-3 py-1.5 rounded border border-[#30363d] text-gray-300 hover:text-white hover:border-[var(--accent)]">
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* Skills */}

@@ -68,6 +68,8 @@ const AgentPanel = memo(function AgentPanel({ agent, projectPath, colorIdx, onRe
   const containerRef = useRef<HTMLDivElement>(null);
   const c = COLORS[colorIdx % COLORS.length];
   const wsRef = useRef<WebSocket | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -75,72 +77,107 @@ const AgentPanel = memo(function AgentPanel({ agent, projectPath, colorIdx, onRe
 
     let disposed = false;
 
-    const term = new Terminal({
-      cursorBlink: true,
-      fontSize: 12,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      scrollback: 5000,
-      theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: c.accent },
-    });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(el);
-
-    const doFit = () => { try { fitAddon.fit(); } catch {} };
-    requestAnimationFrame(doFit);
-    const ro = new ResizeObserver(doFit);
-    ro.observe(el);
-
-    // Connect WebSocket
-    const ws = new WebSocket(getWsUrl());
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
-    };
-
-    ws.onmessage = (event) => {
+    // Small delay to ensure container has layout dimensions
+    const initTimer = setTimeout(() => {
       if (disposed) return;
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'data') {
-          term.write(msg.data);
-        } else if (msg.type === 'connected') {
-          // Terminal connected — start the agent CLI in the project dir
-          setTimeout(() => {
-            if (disposed || ws.readyState !== WebSocket.OPEN) return;
-            // cd to project and launch the agent interactively
-            const agentCmd = agent.agentId === 'claude' ? 'claude' :
-                             agent.agentId === 'codex' ? 'codex' :
-                             agent.agentId === 'aider' ? 'aider' :
-                             agent.agentId;
-            ws.send(JSON.stringify({ type: 'input', data: `cd "${projectPath}" && ${agentCmd}\n` }));
-          }, 300);
-        } else if (msg.type === 'error' && msg.message?.includes('no longer exists')) {
-          // Session lost — recreate
-          ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
-        }
-      } catch {}
-    };
 
-    ws.onclose = () => {
-      if (!disposed) term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
-    };
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 12,
+        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+        scrollback: 5000,
+        allowProposedApi: true,
+        theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: c.accent },
+      });
+      termRef.current = term;
 
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
-    });
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(el);
+      term.focus();
 
-    term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-    });
+      const doFit = () => {
+        try {
+          fitAddon.fit();
+          // Notify ws of new size
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          }
+        } catch {}
+      };
+      setTimeout(doFit, 100);
+      const ro = new ResizeObserver(doFit);
+      ro.observe(el);
+
+      // Connect WebSocket
+      const ws = new WebSocket(getWsUrl());
+      wsRef.current = ws;
+
+      let isNewSession = false;
+
+      ws.onopen = () => {
+        isNewSession = true;
+        ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+      };
+
+      ws.onmessage = (event) => {
+        if (disposed) return;
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'data') {
+            term.write(msg.data);
+          } else if (msg.type === 'connected') {
+            // Terminal session ready — launch agent
+            if (isNewSession) {
+              isNewSession = false;
+              const agentCmd = agent.agentId || 'claude';
+              setTimeout(() => {
+                if (disposed || ws.readyState !== WebSocket.OPEN) return;
+                ws.send(JSON.stringify({ type: 'input', data: `cd "${projectPath}" && ${agentCmd}\n` }));
+              }, 500);
+            }
+            // Force terminal redraw
+            setTimeout(() => {
+              if (disposed || ws.readyState !== WebSocket.OPEN) return;
+              ws.send(JSON.stringify({ type: 'resize', cols: term.cols - 1, rows: term.rows }));
+              setTimeout(() => {
+                if (disposed || ws.readyState !== WebSocket.OPEN) return;
+                ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+              }, 50);
+            }, 200);
+          } else if (msg.type === 'error' && msg.message?.includes('no longer exists')) {
+            isNewSession = true;
+            ws.send(JSON.stringify({ type: 'create', cols: term.cols, rows: term.rows }));
+          }
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (!disposed) term.write('\r\n\x1b[90m[disconnected]\x1b[0m\r\n');
+      };
+
+      // Forward user input to tmux
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
+      });
+
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      });
+
+      // Store cleanup refs
+      cleanupRef.current = () => {
+        disposed = true;
+        ro.disconnect();
+        ws.close();
+        term.dispose();
+      };
+    }, 50);
 
     return () => {
       disposed = true;
-      ro.disconnect();
-      ws.close();
-      term.dispose();
+      clearTimeout(initTimer);
+      cleanupRef.current?.();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -166,7 +203,8 @@ const AgentPanel = memo(function AgentPanel({ agent, projectPath, colorIdx, onRe
         <button onClick={onRemove} className="text-[8px] text-gray-600 hover:text-red-400 ml-1">✕</button>
       </div>
       {/* Terminal */}
-      <div ref={containerRef} className="flex-1 min-h-0" style={{ background: '#0d1117' }} />
+      <div ref={containerRef} className="flex-1 min-h-0" style={{ background: '#0d1117' }}
+        onClick={() => termRef.current?.focus()} />
     </div>
   );
 });
