@@ -1,7 +1,9 @@
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
-import Dashboard from '@/components/Dashboard';
+import dynamic from 'next/dynamic';
+
+const Dashboard = dynamic(() => import('@/components/Dashboard'), { ssr: false });
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ force?: string }> }) {
   const session = await auth();
