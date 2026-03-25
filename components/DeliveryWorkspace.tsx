@@ -343,6 +343,73 @@ function ApprovalPanel({ deliveryId, artifacts, onRefresh }: { deliveryId: strin
   );
 }
 
+// ─── Grid Flow Overlay (SVG arrows between 2x2 panels) ───
+
+function GridFlowOverlay({ phases }: { phases: DeliveryPhase[] }) {
+  // Layout: [analyze][implement] / [test][review]
+  // Flow: analyze→implement (right), implement→test (down-left), test→review (right)
+  // Plus: review↔implement (up), review↔test (left)
+
+  const getPhaseState = (name: string) => {
+    const p = phases.find(ph => ph.name === name);
+    return p?.status || 'pending';
+  };
+
+  const isActive = (from: string, to: string) => {
+    const fromS = getPhaseState(from);
+    const toS = getPhaseState(to);
+    return fromS === 'done' && (toS === 'running' || toS === 'waiting_human');
+  };
+
+  const isDone = (name: string) => getPhaseState(name) === 'done';
+
+  // Arrow configs relative to SVG viewBox (percentages mapped to 1000x500)
+  const arrows = [
+    // analyze → implement (horizontal, top row)
+    { id: 'a-i', x1: 480, y1: 125, x2: 520, y2: 125, active: isActive('analyze', 'implement'), done: isDone('analyze'), color: '#22c55e', label: 'req.md' },
+    // implement → test (diagonal, top-right to bottom-left)
+    { id: 'i-t', x1: 700, y1: 240, x2: 300, y2: 260, active: isActive('implement', 'test'), done: isDone('implement'), color: '#3b82f6', label: 'arch.md' },
+    // test → review (horizontal, bottom row)
+    { id: 't-r', x1: 480, y1: 375, x2: 520, y2: 375, active: isActive('test', 'review'), done: isDone('test'), color: '#a855f7', label: 'test.md' },
+    // review ↔ implement (vertical, right col) — reviewer interaction
+    { id: 'r-i', x1: 750, y1: 260, x2: 750, y2: 240, active: getPhaseState('review') === 'running', done: false, color: '#f97316', label: 'review' },
+  ];
+
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none z-10" viewBox="0 0 1000 500" preserveAspectRatio="none">
+      <defs>
+        <marker id="arrow-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#22c55e" /></marker>
+        <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3b82f6" /></marker>
+        <marker id="arrow-purple" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a855f7" /></marker>
+        <marker id="arrow-orange" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#f97316" /></marker>
+      </defs>
+      {arrows.map(a => {
+        const opacity = a.active ? 1 : a.done ? 0.5 : 0.15;
+        const colorName = a.color === '#22c55e' ? 'green' : a.color === '#3b82f6' ? 'blue' : a.color === '#a855f7' ? 'purple' : 'orange';
+        return (
+          <g key={a.id}>
+            <line
+              x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2}
+              stroke={a.color} strokeWidth={a.active ? 3 : 2}
+              strokeDasharray={a.active ? '8 4' : a.done ? '0' : '4 4'}
+              opacity={opacity}
+              markerEnd={`url(#arrow-${colorName})`}
+            >
+              {a.active && <animate attributeName="stroke-dashoffset" from="24" to="0" dur="0.8s" repeatCount="indefinite" />}
+            </line>
+            {(a.active || a.done) && (
+              <text
+                x={(a.x1 + a.x2) / 2} y={(a.y1 + a.y2) / 2 - 6}
+                fill={a.color} fontSize="10" textAnchor="middle" opacity={opacity}
+              >{a.label}</text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────
 
 export default function DeliveryWorkspace({ deliveryId, onClose }: {
@@ -415,31 +482,33 @@ export default function DeliveryWorkspace({ deliveryId, onClose }: {
           </div>
         </aside>
 
-        {/* Main: agent terminals */}
-        <main className="flex-1 flex flex-col gap-2 p-2 overflow-y-auto">
-          {/* Approval panel */}
+        {/* Main: all 4 agent terminals always visible */}
+        <main className="flex-1 flex flex-col gap-2 p-2 min-h-0 overflow-hidden">
+          {/* Approval panel overlay */}
           {needsApproval && (
             <ApprovalPanel deliveryId={deliveryId} artifacts={artifacts} onRefresh={fetchDelivery} />
           )}
 
-          {/* Agent terminal panels — show active/done phases */}
-          <div className="flex-1 grid gap-2" style={{
-            gridTemplateColumns: delivery.phases.filter(p => p.status !== 'pending').length <= 2 ? '1fr' : '1fr 1fr',
-            gridTemplateRows: 'repeat(auto-fill, minmax(200px, 1fr))',
-          }}>
-            {delivery.phases.filter(p => p.status !== 'pending').map(phase => (
-              <PhaseTerminal
-                key={phase.name}
-                phase={phase}
-                deliveryId={deliveryId}
-                artifacts={artifacts}
-              />
-            ))}
+          {/* 2x2 grid with flow overlay — all phases always shown */}
+          <div className="flex-1 relative min-h-0">
+            {/* Flow arrows overlay */}
+            <GridFlowOverlay phases={delivery.phases} />
+            {/* Agent panels */}
+            <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-2">
+              {delivery.phases.map(phase => (
+                <PhaseTerminal
+                  key={phase.name}
+                  phase={phase}
+                  deliveryId={deliveryId}
+                  artifacts={artifacts}
+                />
+              ))}
+            </div>
           </div>
 
-          {/* Status bar at bottom */}
+          {/* Status bar */}
           {delivery.status !== 'running' && (
-            <div className={`text-center py-2 rounded text-[10px] font-mono ${
+            <div className={`text-center py-1.5 rounded text-[10px] font-mono shrink-0 ${
               delivery.status === 'done' ? 'bg-green-500/5 text-green-400 border border-green-500/30' :
               delivery.status === 'failed' ? 'bg-red-500/5 text-red-400 border border-red-500/30' :
               'bg-gray-500/5 text-gray-400 border border-gray-500/30'
