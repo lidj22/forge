@@ -78,28 +78,43 @@ interface RoleNodeData {
 
 function RoleNode({ id, data }: NodeProps<Node<RoleNodeData>>) {
   const c = getColor(data.presetId);
-  return (
-    <div className="rounded-xl shadow-lg" style={{ background: c.bg, border: `2px solid ${c.border}`, minWidth: 200 }}>
-      <Handle type="target" position={Position.Top} className="!w-3 !h-3" style={{ background: c.accent }} />
+  // inputArtifacts comes from edges (resolved in parent), stored in data
+  const inputs: string[] = (data as any).inputArtifacts || [];
 
-      <div className="px-3 py-2 flex items-center gap-2" style={{ borderBottom: `1px solid ${c.border}40` }}>
+  return (
+    <div className="rounded-xl shadow-lg" style={{ background: c.bg, border: `2px solid ${c.border}`, minWidth: 220 }}>
+      {/* Input handle + input artifacts */}
+      <Handle type="target" position={Position.Top} className="!w-3 !h-3" style={{ background: c.accent }} />
+      {inputs.length > 0 && (
+        <div className="px-3 pt-1 flex flex-wrap gap-1">
+          {inputs.map((name, i) => (
+            <span key={i} className="text-[7px] px-1 py-0.5 rounded bg-white/5 text-gray-400">⬇ {name}</span>
+          ))}
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="px-3 py-1.5 flex items-center gap-2" style={{ borderBottom: `1px solid ${c.border}40` }}>
         <span className="text-sm">{data.icon}</span>
         <span className="text-[11px] font-bold text-white">{data.label}</span>
-        <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: c.accent + '30', color: c.accent }}>
-          {data.agentId}
-        </span>
-        {data.waitForHuman && <span className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">⏸</span>}
+        <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: c.accent + '30', color: c.accent }}>{data.agentId}</span>
+        {data.waitForHuman && <span className="text-[7px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400">⏸ approval</span>}
         <div className="ml-auto flex gap-1">
           <button onClick={() => data.onEdit(id)} className="text-[9px] hover:text-white" style={{ color: c.accent }}>edit</button>
           <button onClick={() => data.onDelete(id)} className="text-[9px] text-red-400 hover:text-red-300">×</button>
         </div>
       </div>
 
-      <div className="px-3 py-1.5">
+      {/* Role description */}
+      <div className="px-3 py-1">
         <div className="text-[8px] text-gray-500 line-clamp-2">{data.role.slice(0, 80)}{data.role.length > 80 ? '...' : ''}</div>
-        {data.outputArtifactName && (
-          <div className="text-[7px] mt-1" style={{ color: c.accent }}>📄 {data.outputArtifactName}</div>
-        )}
+      </div>
+
+      {/* Output artifact */}
+      <div className="px-3 pb-1.5">
+        <div className="text-[7px] px-1.5 py-0.5 rounded inline-flex items-center gap-1" style={{ background: c.accent + '15', color: c.accent, border: `1px solid ${c.accent}30` }}>
+          ⬆ {data.outputArtifactName || 'output.md'}
+        </div>
       </div>
 
       <Handle type="source" position={Position.Bottom} className="!w-3 !h-3" style={{ background: c.accent }} />
@@ -210,10 +225,11 @@ export default function DeliveryFlowEditor({ presets, agents, initialPhases, onC
       };
     });
 
-    // Auto-connect sequentially
+    // Auto-connect sequentially with artifact labels
     const initEdges: Edge[] = [];
     for (let i = 0; i < initNodes.length - 1; i++) {
       const c = getColor(initNodes[i].data.presetId);
+      const artifactName = initNodes[i].data.outputArtifactName || 'output';
       initEdges.push({
         id: `${initNodes[i].id}-${initNodes[i + 1].id}`,
         source: initNodes[i].id,
@@ -221,6 +237,10 @@ export default function DeliveryFlowEditor({ presets, agents, initialPhases, onC
         markerEnd: { type: MarkerType.ArrowClosed, color: c.accent },
         style: { stroke: c.accent, strokeWidth: 2 },
         animated: true,
+        label: `📄 ${artifactName}`,
+        labelStyle: { fill: c.accent, fontSize: 9, fontWeight: 500 },
+        labelBgStyle: { fill: '#0a0a1a', fillOpacity: 0.8 },
+        labelBgPadding: [4, 2] as [number, number],
       });
     }
 
@@ -229,9 +249,34 @@ export default function DeliveryFlowEditor({ presets, agents, initialPhases, onC
     setEdges(initEdges);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Emit changes whenever nodes/edges change
+  // Resolve input artifacts from edges and update node data
   useEffect(() => {
     if (nodes.length === 0) return;
+
+    // Build input map: nodeId → [artifact names from source nodes]
+    const inputMap = new Map<string, string[]>();
+    for (const edge of edges) {
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      if (!sourceNode) continue;
+      const existing = inputMap.get(edge.target) || [];
+      existing.push(sourceNode.data.outputArtifactName || 'output.md');
+      inputMap.set(edge.target, existing);
+    }
+
+    // Update nodes with resolved inputArtifacts
+    let changed = false;
+    const updated = nodes.map(n => {
+      const inputs = inputMap.get(n.id) || [];
+      const current = (n.data as any).inputArtifacts || [];
+      if (JSON.stringify(inputs) !== JSON.stringify(current)) {
+        changed = true;
+        return { ...n, data: { ...n.data, inputArtifacts: inputs } };
+      }
+      return n;
+    });
+    if (changed) setNodes(updated);
+
+    // Emit phases to parent
     const output = buildOutput(nodes, edges);
     onChange(output);
   }, [nodes, edges]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -239,11 +284,16 @@ export default function DeliveryFlowEditor({ presets, agents, initialPhases, onC
   const onConnect = useCallback((params: Connection) => {
     const sourceNode = nodes.find(n => n.id === params.source);
     const c = sourceNode ? getColor(sourceNode.data.presetId) : ROLE_COLORS.custom;
+    const artifactName = sourceNode?.data.outputArtifactName || 'output';
     setEdges(eds => addEdge({
       ...params,
       markerEnd: { type: MarkerType.ArrowClosed, color: c.accent },
       style: { stroke: c.accent, strokeWidth: 2 },
       animated: true,
+      label: `📄 ${artifactName}`,
+      labelStyle: { fill: c.accent, fontSize: 9, fontWeight: 500 },
+      labelBgStyle: { fill: '#0a0a1a', fillOpacity: 0.8 },
+      labelBgPadding: [4, 2] as [number, number],
     }, eds));
   }, [nodes, setEdges]);
 
@@ -298,6 +348,16 @@ export default function DeliveryFlowEditor({ presets, agents, initialPhases, onC
     setNodes(nds => nds.map(n => {
       if (n.id !== data.id) return n;
       return { ...n, data: { ...n.data, ...data } };
+    }));
+    // Update edge labels if output artifact changed
+    setEdges(eds => eds.map(e => {
+      if (e.source !== data.id) return e;
+      const c = getColor(data.presetId);
+      return {
+        ...e,
+        label: `📄 ${data.outputArtifactName || 'output'}`,
+        labelStyle: { fill: c.accent, fontSize: 9, fontWeight: 500 },
+      };
     }));
     setEditing(null);
   };
