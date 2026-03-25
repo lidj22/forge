@@ -90,6 +90,8 @@ export default function DeliveryList({ projects, onOpen }: {
             outputArtifactName: p.outputArtifactName,
             outputArtifactType: p.outputArtifactType,
             waitForHuman: p.waitForHuman,
+            requires: p.requires,
+            produces: p.produces,
           })),
         }),
       });

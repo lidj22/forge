@@ -41,7 +41,9 @@ export interface PhaseOutput {
   outputArtifactName: string;
   outputArtifactType: string;
   waitForHuman: boolean;
-  dependsOn: string[];  // phase names this depends on (from edges)
+  dependsOn: string[];
+  requires: string[];   // artifact names needed before starting
+  produces: string[];   // artifact names this phase outputs
 }
 
 // ─── Colors ──────────────────────────────────────────────
@@ -459,10 +461,17 @@ function buildOutput(nodes: Node<RoleNodeData>[], edges: Edge[]): PhaseOutput[] 
 
   return sorted.map(id => {
     const node = nodes.find(n => n.id === id)!;
-    const deps = edges.filter(e => e.target === id).map(e => {
-      const src = nodes.find(n => n.id === e.source);
-      return src?.data.presetId || e.source;
-    });
+
+    // Derive requires: artifact names from source nodes via edges
+    const requires = edges
+      .filter(e => e.target === id)
+      .map(e => {
+        const src = nodes.find(n => n.id === e.source);
+        return src?.data.outputArtifactName || 'output.md';
+      });
+
+    // Produces: this node's output artifact
+    const produces = [node.data.outputArtifactName || 'output.md'];
 
     return {
       name: node.data.presetId === 'custom' ? `custom-${id}` : node.data.presetId,
@@ -470,11 +479,13 @@ function buildOutput(nodes: Node<RoleNodeData>[], edges: Edge[]): PhaseOutput[] 
       icon: node.data.icon,
       role: node.data.role,
       agentId: node.data.agentId,
-      inputArtifactTypes: [], // derived from edges at runtime
+      inputArtifactTypes: [],
       outputArtifactName: node.data.outputArtifactName,
       outputArtifactType: 'custom',
       waitForHuman: node.data.waitForHuman,
-      dependsOn: deps,
+      dependsOn: [],
+      requires,
+      produces,
     };
   });
 }

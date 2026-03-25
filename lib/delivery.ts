@@ -46,6 +46,9 @@ export interface DeliveryPhase {
   _icon?: string;
   _outputArtifactName?: string;
   _outputArtifactType?: ArtifactType;
+  // Requires-driven scheduling
+  _requires?: string[];   // artifact names needed before this phase can start
+  _produces?: string[];   // artifact names this phase outputs (including references)
 }
 
 export interface Delivery {
@@ -284,6 +287,8 @@ export interface PhaseInput {
   outputArtifactName: string;
   outputArtifactType: ArtifactType;
   waitForHuman?: boolean;
+  requires?: string[];   // artifact names needed (auto-derived from edges)
+  produces?: string[];   // artifact names produced (derived from outputArtifactName + extras)
 }
 
 // ─── Create Delivery ──────────────────────────────────────
@@ -318,16 +323,29 @@ export function createDelivery(opts: {
       _icon: p.icon,
       _outputArtifactName: p.outputArtifactName,
       _outputArtifactType: p.outputArtifactType,
+      _requires: p.requires || [],
+      _produces: p.produces || [p.outputArtifactName],
     }));
   } else {
-    // Default 4-phase
-    phases = DEFAULT_PHASES.map(p => ({
-      ...p,
-      agentId: defaultAgentId,
-      taskIds: [],
-      outputArtifactIds: [],
-      interactions: [],
-    }));
+    // Default 4-phase with requires derived from presets
+    phases = DEFAULT_PHASES.map((p, i) => {
+      const preset = ROLE_PRESETS.find(r => r.id === p.name) || ROLE_PRESETS[i];
+      // Derive requires from inputArtifactTypes → match other presets' outputArtifactName
+      const requires: string[] = [];
+      for (const needType of p.inputArtifactTypes) {
+        const provider = ROLE_PRESETS.find(r => r.outputArtifactType === needType);
+        if (provider) requires.push(provider.outputArtifactName);
+      }
+      return {
+        ...p,
+        agentId: defaultAgentId,
+        taskIds: [],
+        outputArtifactIds: [],
+        interactions: [],
+        _requires: requires,
+        _produces: [preset?.outputArtifactName || `${p.name}-output.md`],
+      };
+    });
   }
 
   const delivery: Delivery = {
@@ -347,8 +365,8 @@ export function createDelivery(opts: {
 
   saveDelivery(delivery);
 
-  // Start the first phase
-  dispatchPhase(delivery, 0);
+  // Start all phases whose requires are already met (typically the first one)
+  scheduleReadyPhases(delivery);
 
   return delivery;
 }
@@ -419,18 +437,31 @@ function dispatchPhase(delivery: Delivery, phaseIndex: number): void {
 
   // Build standardized prompt with envelope format
   const allArtifacts = listArtifacts(delivery.id);
-  const relevantArtifacts = allArtifacts.filter(a =>
-    phase.inputArtifactTypes.includes(a.type)
-  );
-  // Also include artifacts from any upstream phase (by connection, not just type)
-  // This ensures user-connected edges pass data even with custom types
-  const upstreamPhases = delivery.phases.slice(0, phaseIndex).filter(p => p.status === 'done');
-  for (const up of upstreamPhases) {
-    for (const aid of up.outputArtifactIds) {
-      if (!relevantArtifacts.find(a => a.id === aid)) {
-        const a = allArtifacts.find(x => x.id === aid);
-        if (a) relevantArtifacts.push(a);
-      }
+  const requires = phase._requires || [];
+
+  // Collect relevant artifacts: match by requires (artifact names from edges)
+  const relevantArtifacts: Artifact[] = [];
+  const seen = new Set<string>();
+
+  // First: artifacts matching requires by name
+  for (const reqName of requires) {
+    // Find the latest artifact with this name (not request/response audit records)
+    const matches = allArtifacts
+      .filter(a => a.name === reqName && !a.name.includes('-request-') && !a.name.includes('-response-'))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (matches[0] && !seen.has(matches[0].id)) {
+      relevantArtifacts.push(matches[0]);
+      seen.add(matches[0].id);
+    }
+  }
+
+  // Fallback: also include by inputArtifactTypes (backward compat with presets)
+  for (const a of allArtifacts) {
+    if (seen.has(a.id)) continue;
+    if (a.name.includes('-request-') || a.name.includes('-response-')) continue;
+    if (phase.inputArtifactTypes.includes(a.type)) {
+      relevantArtifacts.push(a);
+      seen.add(a.id);
     }
   }
 
@@ -547,22 +578,52 @@ function setupDeliveryTaskListener(deliveryId: string, taskId: string, phaseInde
     phase.completedAt = new Date().toISOString();
     saveDelivery(delivery);
 
-    advanceToNextPhase(delivery);
+    scheduleReadyPhases(delivery);
   });
 }
 
-function advanceToNextPhase(delivery: Delivery): void {
-  const nextIndex = delivery.currentPhaseIndex + 1;
+/**
+ * Requires-driven scheduling: check all pending phases,
+ * start any whose required artifacts are now available.
+ */
+function scheduleReadyPhases(delivery: Delivery): void {
+  // Collect all produced artifact names so far
+  const allArtifacts = listArtifacts(delivery.id);
+  const producedNames = new Set(
+    allArtifacts
+      .filter(a => !a.name.includes('-request-') && !a.name.includes('-response-'))
+      .map(a => a.name)
+  );
 
-  if (nextIndex >= delivery.phases.length) {
-    // All phases complete
-    delivery.status = 'done';
-    delivery.completedAt = new Date().toISOString();
-    saveDelivery(delivery);
-    return;
+  let anyStarted = false;
+
+  for (let i = 0; i < delivery.phases.length; i++) {
+    const phase = delivery.phases[i];
+    if (phase.status !== 'pending') continue;
+
+    const requires = phase._requires || [];
+
+    // Check if all required artifacts exist
+    const satisfied = requires.length === 0 || requires.every(name => producedNames.has(name));
+
+    if (satisfied) {
+      dispatchPhase(delivery, i);
+      anyStarted = true;
+    }
   }
 
-  dispatchPhase(delivery, nextIndex);
+  // If nothing started and no phase is running/waiting, delivery is complete
+  if (!anyStarted) {
+    const allDone = delivery.phases.every(p =>
+      p.status === 'done' || p.status === 'failed' || p.status === 'skipped'
+    );
+    if (allDone) {
+      const anyFailed = delivery.phases.some(p => p.status === 'failed');
+      delivery.status = anyFailed ? 'failed' : 'done';
+      delivery.completedAt = new Date().toISOString();
+      saveDelivery(delivery);
+    }
+  }
 }
 
 // ─── Human Approval (Analyze phase) ──────────────────────
@@ -587,7 +648,7 @@ export function approveDeliveryPhase(deliveryId: string, feedback?: string): boo
   waitingPhase.completedAt = new Date().toISOString();
   saveDelivery(delivery);
 
-  advanceToNextPhase(delivery);
+  scheduleReadyPhases(delivery);
   return true;
 }
 
