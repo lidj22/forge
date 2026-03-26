@@ -1,0 +1,392 @@
+/**
+ * CLI Backend — executes agent steps by spawning CLI tools headless.
+ *
+ * Supports subscription accounts (no API key needed).
+ * Each step = one `claude -p "..."` call.
+ * Multi-step context via --resume (Claude) or prompt injection (others).
+ */
+
+import { spawn, type ChildProcess } from 'node:child_process';
+import { getAgent } from '@/lib/agents';
+import type { AgentBackend, AgentStep, StepExecutionParams, StepExecutionResult, Artifact } from '../types';
+import type { TaskLogEntry } from '@/src/types';
+
+// ─── Stream-JSON parser (reused from task-manager pattern) ──
+
+function parseStreamJson(parsed: any): TaskLogEntry[] {
+  const entries: TaskLogEntry[] = [];
+  const ts = new Date().toISOString();
+
+  if (parsed.type === 'system' && parsed.subtype === 'init') {
+    entries.push({ type: 'system', subtype: 'init', content: `Model: ${parsed.model || 'unknown'}`, timestamp: ts });
+    return entries;
+  }
+
+  if (parsed.type === 'assistant' && parsed.message?.content) {
+    for (const block of parsed.message.content) {
+      if (block.type === 'text' && block.text) {
+        entries.push({ type: 'assistant', subtype: 'text', content: block.text, timestamp: ts });
+      } else if (block.type === 'tool_use') {
+        entries.push({
+          type: 'assistant',
+          subtype: 'tool_use',
+          content: typeof block.input === 'string' ? block.input : JSON.stringify(block.input || {}),
+          tool: block.name,
+          timestamp: ts,
+        });
+      } else if (block.type === 'tool_result') {
+        entries.push({
+          type: 'assistant',
+          subtype: 'tool_result',
+          content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content || ''),
+          timestamp: ts,
+        });
+      }
+    }
+    return entries;
+  }
+
+  if (parsed.type === 'result') {
+    entries.push({
+      type: 'result',
+      subtype: parsed.subtype || 'success',
+      content: typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result || ''),
+      timestamp: ts,
+    });
+    return entries;
+  }
+
+  // Ignore rate limit events
+  if (parsed.type === 'rate_limit_event') return entries;
+
+  // Unknown type — log raw
+  entries.push({ type: 'assistant', subtype: parsed.type || 'unknown', content: JSON.stringify(parsed), timestamp: ts });
+  return entries;
+}
+
+// ─── Artifact detection from tool_use events ─────────────
+
+const WRITE_TOOL_NAMES = new Set(['Write', 'write_to_file', 'Edit', 'create_file', 'write_file']);
+
+function detectArtifacts(parsed: any): Artifact[] {
+  const artifacts: Artifact[] = [];
+  if (parsed.type !== 'assistant' || !parsed.message?.content) return artifacts;
+
+  for (const block of parsed.message.content) {
+    if (block.type === 'tool_use' && WRITE_TOOL_NAMES.has(block.name)) {
+      const path = block.input?.file_path || block.input?.path || block.input?.filename;
+      if (path) {
+        artifacts.push({ type: 'file', path, summary: `Written by ${block.name}` });
+      }
+    }
+  }
+  return artifacts;
+}
+
+// ─── CLI Backend class ───────────────────────────────────
+
+export class CliBackend implements AgentBackend {
+  private child: ChildProcess | null = null;
+  private sessionId: string | undefined;
+
+  async executeStep(params: StepExecutionParams): Promise<StepExecutionResult> {
+    const { config, step, history, projectPath, upstreamContext, onLog, abortSignal } = params;
+    const agentId = config.agentId || 'claude';
+
+    let adapter;
+    try {
+      adapter = getAgent(agentId);
+    } catch {
+      throw new Error(`Agent "${agentId}" not found or not installed`);
+    }
+
+    // Build prompt with context
+    const prompt = this.buildStepPrompt(step, history, upstreamContext);
+
+    // Use adapter to build spawn command (same as task-manager)
+    const spawnOpts = adapter.buildTaskSpawn({
+      projectPath,
+      prompt,
+      model: config.model,
+      conversationId: this.sessionId,
+      skipPermissions: true,
+      outputFormat: adapter.config.capabilities?.supportsStreamJson ? 'stream-json' : undefined,
+    });
+
+    onLog?.({
+      type: 'system',
+      subtype: 'init',
+      content: `Step "${step.label}" — ${agentId}${config.model ? `/${config.model}` : ''}${this.sessionId ? ' (resume)' : ''}`,
+      timestamp: new Date().toISOString(),
+    });
+
+    return new Promise<StepExecutionResult>((resolve, reject) => {
+      const env = { ...process.env, ...(spawnOpts.env || {}) };
+      delete env.CLAUDECODE;
+
+      // Check if agent needs TTY (same logic as task-manager)
+      // Force TTY for known interactive agents in case adapter detection missed it
+      const KNOWN_TTY_AGENTS = new Set(['codex']);
+      const needsTTY = adapter.config.capabilities?.requiresTTY || KNOWN_TTY_AGENTS.has(agentId);
+
+      if (needsTTY) {
+        this.executePTY(spawnOpts, projectPath, env, onLog, abortSignal, resolve, reject);
+        return;
+      }
+
+      this.child = spawn(spawnOpts.cmd, spawnOpts.args, {
+        cwd: projectPath,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      this.child.stdin?.end();
+
+      let buffer = '';
+      let resultText = '';
+      let sessionId = '';
+      const artifacts: Artifact[] = [];
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      // Handle abort signal
+      const onAbort = () => {
+        this.child?.kill('SIGTERM');
+      };
+      abortSignal?.addEventListener('abort', onAbort, { once: true });
+
+      this.child.stdout?.on('data', (data: Buffer) => {
+        buffer += data.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const parsed = JSON.parse(line);
+
+            // Emit log entries
+            const entries = parseStreamJson(parsed);
+            for (const entry of entries) {
+              onLog?.(entry);
+            }
+
+            // Track session ID for multi-step resume
+            if (parsed.session_id) sessionId = parsed.session_id;
+
+            // Track result
+            if (parsed.type === 'result') {
+              resultText = typeof parsed.result === 'string'
+                ? parsed.result
+                : JSON.stringify(parsed.result || '');
+              if (parsed.total_cost_usd) {
+                // Cost tracking if available
+              }
+            }
+
+            // Track usage
+            if (parsed.usage) {
+              inputTokens += parsed.usage.input_tokens || 0;
+              outputTokens += parsed.usage.output_tokens || 0;
+            }
+
+            // Detect file write artifacts
+            artifacts.push(...detectArtifacts(parsed));
+
+          } catch {
+            // Non-JSON line — emit as raw text log
+            if (line.trim()) {
+              onLog?.({
+                type: 'assistant',
+                subtype: 'text',
+                content: line,
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
+        }
+      });
+
+      this.child.stderr?.on('data', (data: Buffer) => {
+        const text = data.toString().trim();
+        if (text) {
+          onLog?.({
+            type: 'system',
+            subtype: 'error',
+            content: text,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      });
+
+      this.child.on('error', (err) => {
+        abortSignal?.removeEventListener('abort', onAbort);
+        this.child = null;
+        reject(err);
+      });
+
+      this.child.on('exit', (code) => {
+        abortSignal?.removeEventListener('abort', onAbort);
+
+        // Flush remaining buffer
+        if (buffer.trim()) {
+          try {
+            const parsed = JSON.parse(buffer);
+            const entries = parseStreamJson(parsed);
+            for (const entry of entries) onLog?.(entry);
+            if (parsed.type === 'result') {
+              resultText = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result || '');
+            }
+            if (parsed.session_id) sessionId = parsed.session_id;
+            artifacts.push(...detectArtifacts(parsed));
+          } catch {
+            if (buffer.trim()) {
+              onLog?.({ type: 'assistant', subtype: 'text', content: buffer.trim(), timestamp: new Date().toISOString() });
+            }
+          }
+        }
+
+        // Persist session ID for multi-step resume
+        this.sessionId = sessionId || this.sessionId;
+        this.child = null;
+
+        if (code === 0 || code === null) {
+          resolve({
+            response: resultText,
+            artifacts,
+            sessionId: this.sessionId,
+            inputTokens,
+            outputTokens,
+          });
+        } else if (abortSignal?.aborted) {
+          reject(new Error('Aborted'));
+        } else {
+          reject(new Error(`CLI exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  abort(): void {
+    this.child?.kill('SIGTERM');
+  }
+
+  /**
+   * Build the prompt for a step, injecting history context.
+   * If resuming (sessionId exists), the CLI already has conversation context.
+   * Otherwise, prepend a summary of prior steps.
+   */
+  /** Execute step using node-pty for agents that require a TTY (e.g., codex) */
+  private executePTY(
+    spawnOpts: { cmd: string; args: string[] },
+    projectPath: string,
+    env: Record<string, string | undefined>,
+    onLog: StepExecutionParams['onLog'],
+    abortSignal: AbortSignal | undefined,
+    resolve: (r: StepExecutionResult) => void,
+    reject: (e: Error) => void,
+  ): void {
+    try {
+      const pty = require('node-pty');
+      const stripAnsi = (s: string) => s
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+        .replace(/\x1b[()][0-9A-B]/g, '')
+        .replace(/\x1b[=>]/g, '')
+        .replace(/\r/g, '')
+        .replace(/\x07/g, '');
+
+      const ptyProcess = pty.spawn(spawnOpts.cmd, spawnOpts.args, {
+        name: 'xterm-256color',
+        cols: 120, rows: 40,
+        cwd: projectPath,
+        env,
+      });
+
+      let resultText = '';
+      let ptyBytes = 0;
+      let idleTimer: any = null;
+      const PTY_IDLE_MS = 15000;
+
+      const onAbort = () => { try { ptyProcess.kill(); } catch {} };
+      abortSignal?.addEventListener('abort', onAbort, { once: true });
+
+      // Noise filter: skip spinner fragments, partial redraws, and short garbage
+      const NOISE_PATTERNS = /^(W|Wo|Wor|Work|Worki|Workin|Working|orking|rking|king|ing|ng|g|•|[0-9]+s?|[0-9]+m [0-9]+s|›.*|─+|╭.*|│.*|╰.*|\[K|\[0m|;[0-9;m]+|\s*)$/;
+      const isNoise = (line: string) => {
+        const t = line.trim();
+        return !t || t.length < 3 || NOISE_PATTERNS.test(t) || /^[•\s]*$/.test(t);
+      };
+
+      let lineBuf = '';
+
+      ptyProcess.onData((data: string) => {
+        const clean = stripAnsi(data);
+        ptyBytes += clean.length;
+        resultText += clean;
+        if (resultText.length > 50000) resultText = resultText.slice(-25000);
+
+        // Buffer lines and only emit meaningful content
+        lineBuf += clean;
+        const lines = lineBuf.split('\n');
+        lineBuf = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!isNoise(line)) {
+            onLog?.({ type: 'assistant', subtype: 'text', content: line.trim(), timestamp: new Date().toISOString() });
+          }
+        }
+
+        // Idle timer: kill after 15s of silence (interactive agents don't exit on their own)
+        if (idleTimer) clearTimeout(idleTimer);
+        if (ptyBytes > 500) {
+          idleTimer = setTimeout(() => { try { ptyProcess.kill(); } catch {} }, PTY_IDLE_MS);
+        }
+      });
+
+      ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+        if (idleTimer) clearTimeout(idleTimer);
+        abortSignal?.removeEventListener('abort', onAbort);
+
+        // Flush remaining buffer
+        if (lineBuf.trim() && !isNoise(lineBuf)) {
+          onLog?.({ type: 'assistant', subtype: 'text', content: lineBuf.trim(), timestamp: new Date().toISOString() });
+        }
+
+        // Extract meaningful result from the full output
+        const meaningful = resultText.split('\n').filter(l => !isNoise(l)).join('\n');
+        resolve({
+          response: meaningful.slice(-2000) || resultText.slice(-500),
+          artifacts: [],
+          inputTokens: 0,
+          outputTokens: 0,
+        });
+      });
+    } catch (err: any) {
+      reject(new Error(`PTY spawn failed: ${err.message}`));
+    }
+  }
+
+  private buildStepPrompt(step: AgentStep, history: TaskLogEntry[], upstreamContext?: string): string {
+    let prompt = step.prompt;
+
+    // If no session to resume from, prepend history as text context
+    if (!this.sessionId && history.length > 0) {
+      const contextLines = history
+        .filter(m => m.type === 'assistant' || m.type === 'result')
+        .filter(m => m.subtype === 'text' || m.subtype === 'step_complete' || m.subtype === 'success')
+        .map(m => m.content)
+        .filter(Boolean);
+
+      if (contextLines.length > 0) {
+        const contextSummary = contextLines.join('\n\n');
+        prompt = `## Context from previous steps:\n${contextSummary}\n\n---\n\n## Current task:\n${prompt}`;
+      }
+    }
+
+    if (upstreamContext) {
+      prompt = `## Upstream agent output:\n${upstreamContext}\n\n---\n\n${prompt}`;
+    }
+
+    return prompt;
+  }
+}
