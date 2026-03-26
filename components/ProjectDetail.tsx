@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback, useRef, memo, lazy, Suspense }
 import { useSidebarResize } from '@/hooks/useSidebarResize';
 
 const InlinePipelineView = lazy(() => import('./InlinePipelineView'));
+const WorkspaceViewLazy = lazy(() => import('./WorkspaceView'));
+const SessionViewLazy = lazy(() => import('./SessionView'));
 
 // ─── Syntax highlighting ─────────────────────────────────
 const KEYWORDS = new Set([
@@ -74,7 +76,8 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [projectSkills, setProjectSkills] = useState<{ name: string; displayName: string; type: string; scope: string; version: string; installedVersion: string; hasUpdate: boolean; source: 'registry' | 'local' }[]>([]);
   const [showSkillsDetail, setShowSkillsDetail] = useState(false);
-  const [projectTab, setProjectTab] = useState<'code' | 'skills' | 'claudemd' | 'pipelines'>('code');
+  const [projectTab, setProjectTab] = useState<'workspace' | 'sessions' | 'code' | 'skills' | 'claudemd' | 'pipelines'>('code');
+  const wsViewRef = useRef<import('./WorkspaceView').WorkspaceViewHandle>(null);
   // Pipeline bindings state
   const [pipelineBindings, setPipelineBindings] = useState<{ id: number; workflowName: string; enabled: boolean; config: any; lastRunAt: string | null; nextRunAt: string | null }[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<{ id: string; workflowName: string; pipelineId: string; status: string; summary: string; dedupKey: string | null; createdAt: string }[]>([]);
@@ -456,6 +459,18 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
               }`}
             >Code</button>
             <button
+              onClick={() => setProjectTab('workspace')}
+              className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
+                projectTab === 'workspace' ? 'bg-[var(--accent)]/20 text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >🔨 Workspace</button>
+            <button
+              onClick={() => setProjectTab('sessions')}
+              className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
+                projectTab === 'sessions' ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >Sessions</button>
+            <button
               onClick={() => setProjectTab('skills')}
               className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
                 projectTab === 'skills' ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -509,6 +524,33 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
               <span className="text-[var(--text-secondary)] text-[9px] shrink-0 w-16 text-right">{c.date}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Workspace tab */}
+      {projectTab === 'workspace' && (
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <WorkspaceViewLazy
+              ref={wsViewRef}
+              projectPath={projectPath}
+              projectName={projectName}
+              onClose={() => setProjectTab('code')}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Sessions tab */}
+      {projectTab === 'sessions' && (
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <SessionViewLazy
+              projectName={projectName}
+              projects={[{ name: projectName, path: projectPath, language: null }]}
+              singleProject
+            />
+          </Suspense>
         </div>
       )}
 

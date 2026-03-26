@@ -308,7 +308,7 @@ export default function Dashboard({ user }: { user: any }) {
           {/* View mode toggle */}
           <div className="flex items-center bg-[var(--bg-tertiary)] rounded p-0.5">
             {/* Workspace */}
-            {(['terminal', 'projects', 'sessions'] as const).map(mode => (
+            {(['terminal', 'projects'] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
@@ -318,7 +318,7 @@ export default function Dashboard({ user }: { user: any }) {
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                {{ terminal: 'Vibe Coding', projects: 'Projects', sessions: 'Sessions' }[mode]}
+                {{ terminal: 'Vibe Coding', projects: 'Projects' }[mode]}
               </button>
             ))}
             <span className="w-[2px] h-4 bg-[var(--text-secondary)]/30 mx-1.5" />
@@ -696,18 +696,6 @@ export default function Dashboard({ user }: { user: any }) {
               )}
             </aside>
           </>
-        ) : viewMode === 'sessions' ? (
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-xs text-[var(--text-secondary)]">Loading...</div>}>
-            <SessionView
-              projects={projects}
-              onOpenInTerminal={(sessionId, projectPath) => {
-                setViewMode('terminal');
-                setTimeout(() => {
-                  terminalRef.current?.openSessionInTerminal(sessionId, projectPath);
-                }, 100);
-              }}
-            />
-          </Suspense>
         ) : null}
 
         {/* Projects */}

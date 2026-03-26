@@ -67,7 +67,7 @@ function testMarkerParsing() {
   assert(messages.length === 2, `Parsed 2 markers (got ${messages.length})`);
   assert(messages[0]?.to === 'eng-1', `First message targets Engineer`);
   assert(messages[0]?.payload.action === 'fix_request', `Action is fix_request`);
-  assert(messages[0]?.payload.content?.includes('Authentication bypass'), `Content preserved`);
+  assert(messages[0]?.payload.content?.includes('Authentication bypass') ?? false, `Content preserved`);
 
   // Test dedup — same content shouldn't send twice
   (orch as any).parseBusMarkers('qa-1', [
