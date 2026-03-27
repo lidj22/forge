@@ -847,6 +847,90 @@ function BusPanel({ busLog, agents, onClose }: {
   );
 }
 
+// ─── Terminal Launch Dialog ───────────────────────────────
+
+function TerminalLaunchDialog({ agent, workDir, sessName, projectPath, workspaceId, onLaunch, onCancel }: {
+  agent: AgentConfig; workDir?: string; sessName: string; projectPath: string; workspaceId: string;
+  onLaunch: (resumeMode: boolean, sessionId?: string) => void; onCancel: () => void;
+}) {
+  const [sessions, setSessions] = useState<{ id: string; modified: string; size: number }[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
+
+  // Fetch recent sessions
+  useEffect(() => {
+    const dir = workDir ? `${projectPath}/${workDir}`.replace(/\/+$/, '') : projectPath;
+    fetch(`/api/workspace/${workspaceId}/smith`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sessions', projectDir: dir }),
+    }).then(r => r.json()).then(d => {
+      if (d.sessions?.length) setSessions(d.sessions);
+    }).catch(() => {});
+  }, [projectPath, workDir, workspaceId]);
+
+  const formatTime = (iso: string) => {
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return d.toLocaleDateString();
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)}KB`;
+    return `${(bytes / 1048576).toFixed(1)}MB`;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}
+      onClick={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="w-80 rounded-lg border border-[#30363d] p-4 shadow-xl" style={{ background: '#0d1117' }}>
+        <div className="text-sm font-bold text-white mb-3">⌨️ {agent.label}</div>
+
+        <div className="space-y-2">
+          <button onClick={() => onLaunch(false)}
+            className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#58a6ff] hover:bg-[#161b22] transition-colors">
+            <div className="text-xs text-white font-semibold">New Session</div>
+            <div className="text-[9px] text-gray-500">Start fresh</div>
+          </button>
+
+          {sessions.length > 0 && (
+            <button onClick={() => onLaunch(true)}
+              className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#3fb950] hover:bg-[#161b22] transition-colors">
+              <div className="text-xs text-white font-semibold">Resume Latest</div>
+              <div className="text-[9px] text-gray-500">
+                {sessions[0].id.slice(0, 8)}... · {formatTime(sessions[0].modified)} · {formatSize(sessions[0].size)}
+              </div>
+            </button>
+          )}
+
+          {sessions.length > 1 && (
+            <button onClick={() => setShowSessions(!showSessions)}
+              className="w-full text-[9px] text-gray-500 hover:text-white py-1">
+              {showSessions ? '▼' : '▶'} Recent sessions ({sessions.length})
+            </button>
+          )}
+
+          {showSessions && sessions.slice(1).map(s => (
+            <button key={s.id} onClick={() => onLaunch(true, s.id)}
+              className="w-full text-left px-3 py-1.5 rounded border border-[#21262d] hover:border-[#30363d] hover:bg-[#161b22] transition-colors">
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-gray-400 font-mono">{s.id.slice(0, 8)}</span>
+                <span className="text-[8px] text-gray-600">{formatTime(s.modified)}</span>
+                <span className="text-[8px] text-gray-600">{formatSize(s.size)}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <button onClick={onCancel}
+          className="w-full mt-3 text-[9px] text-gray-500 hover:text-white">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Floating Terminal ────────────────────────────────────
 
 function getWsUrl() {
@@ -858,7 +942,7 @@ function getWsUrl() {
   return `${p}//${h}:${port + 1}`;
 }
 
-function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, workDir, preferredSessionName, existingSession, resumeMode, onSessionReady, onClose }: {
+function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, workDir, preferredSessionName, existingSession, resumeMode, resumeSessionId, onSessionReady, onClose }: {
   agentLabel: string;
   agentIcon: string;
   projectPath: string;
@@ -866,7 +950,8 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, work
   workDir?: string;
   preferredSessionName?: string;
   existingSession?: string;
-  resumeMode?: boolean;              // true = claude -c (resume latest)
+  resumeMode?: boolean;
+  resumeSessionId?: string;          // specific session ID to resume (--resume <id>)
   onSessionReady?: (name: string) => void;
   onClose: (killSession: boolean) => void;
 }) {
@@ -972,7 +1057,9 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, work
             const newCmd = `${cdCmd} && ${cli}\n`;
             const resumeCmd = `${cdCmd} && ${cli} -c\n`;
 
-            const resumeFlag = cli === 'claude' && resumeMode ? ' -c' : '';
+            const resumeFlag = cli === 'claude'
+              ? (resumeSessionId ? ` --resume ${resumeSessionId}` : resumeMode ? ' -c' : '')
+              : '';
             const cmd = `${cdCmd} && ${cli}${resumeFlag}\n`;
             setTimeout(() => {
               if (!disposed && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data: cmd }));
@@ -1313,7 +1400,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
   const [memoryTarget, setMemoryTarget] = useState<{ id: string; label: string } | null>(null);
   const [inboxTarget, setInboxTarget] = useState<{ id: string; label: string } | null>(null);
   const [showBusPanel, setShowBusPanel] = useState(false);
-  const [floatingTerminals, setFloatingTerminals] = useState<{ agentId: string; label: string; icon: string; cliId: string; workDir?: string; tmuxSession?: string; sessionName: string; resumeMode?: boolean }[]>([]);
+  const [floatingTerminals, setFloatingTerminals] = useState<{ agentId: string; label: string; icon: string; cliId: string; workDir?: string; tmuxSession?: string; sessionName: string; resumeMode?: boolean; resumeSessionId?: string }[]>([]);
   const [termLaunchDialog, setTermLaunchDialog] = useState<{ agent: AgentConfig; sessName: string; workDir?: string; sessions: string[] } | null>(null);
 
   // Expose focusAgent to parent
@@ -1456,16 +1543,8 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 return;
               }
 
-              // Fetch recent claude sessions for resume picker
-              let sessions: string[] = [];
-              try {
-                const claudeDir = `${projectPath}/${workDir || ''}`.replace(/\/+$/, '') + '/.claude/projects';
-                // List recent sessions via terminal-state or just show option
-                sessions = []; // populated below if available
-              } catch {}
-
-              // Show launch dialog
-              setTermLaunchDialog({ agent, sessName, workDir, sessions });
+              // Show launch dialog — sessions loaded async inside
+              setTermLaunchDialog({ agent, sessName, workDir, sessions: [] });
             },
           } satisfies AgentNodeData,
         };
@@ -1777,42 +1856,28 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
       )}
 
       {/* Terminal launch dialog */}
-      {termLaunchDialog && workspaceId && (() => {
-        const { agent, sessName, workDir } = termLaunchDialog;
-        const launchTerminal = async (resumeMode: boolean, sessionId?: string) => {
-          setTermLaunchDialog(null);
-          const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
-          if (res.ok) {
-            setFloatingTerminals(prev => [...prev, {
-              agentId: agent.id, label: agent.label, icon: agent.icon,
-              cliId: agent.agentId || 'claude', workDir,
-              sessionName: sessName, resumeMode,
-            }]);
-          }
-        };
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}
-            onClick={e => { if (e.target === e.currentTarget) setTermLaunchDialog(null); }}>
-            <div className="w-80 rounded-lg border border-[#30363d] p-4 shadow-xl" style={{ background: '#0d1117' }}>
-              <div className="text-sm font-bold text-white mb-3">⌨️ Open Terminal — {agent.label}</div>
-              <div className="space-y-2">
-                <button onClick={() => launchTerminal(false)}
-                  className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#58a6ff] hover:bg-[#161b22] transition-colors">
-                  <div className="text-xs text-white font-semibold">New Session</div>
-                  <div className="text-[9px] text-gray-500">Start fresh claude session</div>
-                </button>
-                <button onClick={() => launchTerminal(true)}
-                  className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#3fb950] hover:bg-[#161b22] transition-colors">
-                  <div className="text-xs text-white font-semibold">Resume Latest</div>
-                  <div className="text-[9px] text-gray-500">Continue last session (claude -c)</div>
-                </button>
-              </div>
-              <button onClick={() => setTermLaunchDialog(null)}
-                className="w-full mt-3 text-[9px] text-gray-500 hover:text-white">Cancel</button>
-            </div>
-          </div>
-        );
-      })()}
+      {termLaunchDialog && workspaceId && (
+        <TerminalLaunchDialog
+          agent={termLaunchDialog.agent}
+          workDir={termLaunchDialog.workDir}
+          sessName={termLaunchDialog.sessName}
+          projectPath={projectPath}
+          workspaceId={workspaceId}
+          onLaunch={async (resumeMode, sessionId) => {
+            const { agent, sessName, workDir } = termLaunchDialog;
+            setTermLaunchDialog(null);
+            const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
+            if (res.ok) {
+              setFloatingTerminals(prev => [...prev, {
+                agentId: agent.id, label: agent.label, icon: agent.icon,
+                cliId: agent.agentId || 'claude', workDir,
+                sessionName: sessName, resumeMode, resumeSessionId: sessionId,
+              }]);
+            }
+          }}
+          onCancel={() => setTermLaunchDialog(null)}
+        />
+      )}
 
       {/* Floating terminals for manual agents */}
       {floatingTerminals.map(ft => (
@@ -1826,6 +1891,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           preferredSessionName={ft.sessionName}
           existingSession={ft.tmuxSession}
           resumeMode={ft.resumeMode}
+          resumeSessionId={ft.resumeSessionId}
           onSessionReady={(name) => {
             if (workspaceId) {
               wsApi(workspaceId, 'set_tmux_session', { agentId: ft.agentId, sessionName: name });

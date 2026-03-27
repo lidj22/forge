@@ -558,6 +558,31 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
       return json(res, { ok: true });
     }
 
+    case 'sessions': {
+      // List recent claude sessions for a project path (for resume picker)
+      const { projectDir } = body;
+      if (!projectDir) return jsonError(res, 'projectDir required');
+      try {
+        const { readdirSync, statSync } = require('node:fs');
+        const { join, sep } = require('node:path');
+        const { homedir } = require('node:os');
+        const encoded = projectDir.replace(/\//g, '-');
+        const sessDir = join(homedir(), '.claude', 'projects', encoded);
+        const files = readdirSync(sessDir)
+          .filter((f: string) => f.endsWith('.jsonl'))
+          .map((f: string) => {
+            const fp = join(sessDir, f);
+            const st = statSync(fp);
+            return { id: f.replace('.jsonl', ''), modified: st.mtime.toISOString(), size: st.size };
+          })
+          .sort((a: any, b: any) => new Date(b.modified).getTime() - new Date(a.modified).getTime())
+          .slice(0, 5);
+        return json(res, { sessions: files });
+      } catch {
+        return json(res, { sessions: [] });
+      }
+    }
+
     case 'status': {
       const snapshot = orch.getSnapshot();
       const states = orch.getAllAgentStates();
