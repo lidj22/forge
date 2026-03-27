@@ -90,7 +90,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     // Validate workDir is within project (no ../ escape)
     if (config.workDir) {
-      const resolved = require('node:path').resolve(this.projectPath, config.workDir);
+      const resolved = resolve(this.projectPath, config.workDir);
       if (!resolved.startsWith(this.projectPath)) {
         return `Work directory "${config.workDir}" is outside the project. Must be a subdirectory.`;
       }
