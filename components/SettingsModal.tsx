@@ -1069,9 +1069,12 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
   const defaultAgent = settings.defaultAgent || 'claude';
 
   const saveAgentConfig = (updated: AgentEntry[]) => {
-    const agentsCfg: Record<string, any> = {};
+    // Start with existing config to preserve profile fields (base/env/model/type/provider/apiKey)
+    const agentsCfg: Record<string, any> = { ...(settings.agents || {}) };
     for (const a of updated) {
+      const existing = agentsCfg[a.id] || {};
       agentsCfg[a.id] = {
+        ...existing, // preserve profile-specific fields
         name: a.name,
         path: a.path,
         enabled: a.enabled,
