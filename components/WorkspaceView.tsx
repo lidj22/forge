@@ -964,7 +964,10 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, work
             const knownClis = ['claude', 'codex', 'aider'];
             const rawCli = agentCliId || 'claude';
             const cli = knownClis.includes(rawCli) ? rawCli : 'claude';
-            const resumeFlag = cli === 'claude' ? ' -c' : '';
+            // Only use -c (resume) if there's an existing session to resume
+            // First launch has no session — -c would fail
+            const hasExistingSession = !!existingSession;
+            const resumeFlag = cli === 'claude' && hasExistingSession ? ' -c' : '';
             const cmd = `mkdir -p "${targetDir}" && cd "${targetDir}" && ${cli}${resumeFlag}\n`;
             setTimeout(() => {
               if (!disposed && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data: cmd }));
