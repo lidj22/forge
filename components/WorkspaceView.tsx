@@ -959,7 +959,11 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, work
               return;
             }
             const targetDir = workDir ? `${projectPath}/${workDir}` : projectPath;
-            const cli = agentCliId || 'claude';
+            // For profiles (e.g., 'forti-k2'), the actual CLI is the base agent (claude/codex/aider)
+            // Profile env/model is applied to .claude/settings.json by open_terminal API
+            const knownClis = ['claude', 'codex', 'aider'];
+            const rawCli = agentCliId || 'claude';
+            const cli = knownClis.includes(rawCli) ? rawCli : 'claude';
             const resumeFlag = cli === 'claude' ? ' -c' : '';
             const cmd = `mkdir -p "${targetDir}" && cd "${targetDir}" && ${cli}${resumeFlag}\n`;
             setTimeout(() => {

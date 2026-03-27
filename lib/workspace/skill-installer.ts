@@ -104,6 +104,54 @@ function ensureForgePermissions(projectPath: string): void {
 }
 
 /**
+ * Apply agent profile config to project's .claude/settings.json.
+ * Sets env vars and model from the profile so interactive claude uses the right config.
+ */
+export function applyProfileToProject(
+  projectPath: string,
+  profile: { env?: Record<string, string>; model?: string },
+): void {
+  if (!profile.env && !profile.model) return;
+
+  const settingsFile = join(projectPath, '.claude', 'settings.json');
+  try {
+    let settings: any = {};
+    if (existsSync(settingsFile)) {
+      settings = JSON.parse(readFileSync(settingsFile, 'utf-8'));
+    }
+
+    let changed = false;
+
+    // Set env vars from profile
+    if (profile.env && Object.keys(profile.env).length > 0) {
+      if (!settings.env) settings.env = {};
+      for (const [key, value] of Object.entries(profile.env)) {
+        if (settings.env[key] !== value) {
+          settings.env[key] = value;
+          changed = true;
+        }
+      }
+    }
+
+    // Set model from profile
+    if (profile.model) {
+      if (settings.model !== profile.model) {
+        settings.model = profile.model;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      mkdirSync(join(projectPath, '.claude'), { recursive: true });
+      writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+      console.log(`[skills] Applied profile config to .claude/settings.json (model=${profile.model || 'default'}, env=${Object.keys(profile.env || {}).length} vars)`);
+    }
+  } catch (err: any) {
+    console.error('[skills] Failed to apply profile config:', err.message);
+  }
+}
+
+/**
  * Check if forge skills are already installed for this agent.
  */
 export function hasForgeSkills(projectPath: string): boolean {
