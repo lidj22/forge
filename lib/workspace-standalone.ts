@@ -500,15 +500,20 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
 
     case 'send': {
       const { to, msgAction, content } = body;
-      if (!agentId || !to || !content) {
-        return jsonError(res, 'agentId, to, msgAction, content required');
+      if (!to || !content) {
+        return jsonError(res, 'to and content required');
       }
 
       const snapshot = orch.getSnapshot();
       const target = snapshot.agents.find(a => a.label.toLowerCase() === to.toLowerCase() || a.id === to);
-      if (!target) return jsonError(res, `Agent "${to}" not found`, 404);
+      if (!target) return jsonError(res, `Agent "${to}" not found. Available: ${snapshot.agents.map(a => a.label).join(', ')}`, 404);
 
-      orch.getBus().send(agentId, target.id, 'notify', {
+      // Resolve sender: use agentId if valid, otherwise 'user'
+      const senderId = (agentId && agentId !== 'unknown')
+        ? agentId
+        : 'user';
+
+      orch.getBus().send(senderId, target.id, 'notify', {
         action: msgAction || 'agent_message',
         content,
       });
