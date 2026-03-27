@@ -86,11 +86,13 @@ export class WorkspaceOrchestrator extends EventEmitter {
   private validateOutputs(config: WorkspaceAgentConfig, excludeId?: string): string | null {
     if (config.type === 'input') return null;
 
-    const normalize = (p: string) => p.replace(/^\.\//, '').replace(/\/$/, '') || '.';
+    const normalize = (p: string) => p.replace(/^\.?\//, '').replace(/\/$/, '') || '.';
 
     // Validate workDir is within project (no ../ escape)
     if (config.workDir) {
-      const resolved = resolve(this.projectPath, config.workDir);
+      // Strip leading / — workDir is always relative to project root
+      const relativeDir = config.workDir.replace(/^\//, '');
+      const resolved = resolve(this.projectPath, relativeDir);
       if (!resolved.startsWith(this.projectPath)) {
         return `Work directory "${config.workDir}" is outside the project. Must be a subdirectory.`;
       }
