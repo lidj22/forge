@@ -1364,6 +1364,24 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
                   {a.id !== 'claude' && (
                     <button onClick={() => removeAgent(a.id)} className="text-[9px] text-red-400 hover:underline">Remove Agent</button>
                   )}
+
+                  {/* ── Profiles linked to this agent ── */}
+                  <div className="mt-3 pt-2 border-t border-[var(--border)]">
+                    <div className="text-[9px] text-[var(--text-secondary)] font-semibold mb-1">Profiles (model/env overrides)</div>
+                    {Object.entries(settings.agents || {}).filter(([, cfg]: [string, any]) => cfg.base === a.id).map(([pid, cfg]: [string, any]) => (
+                      <ProfileRow key={pid} id={pid} cfg={cfg} inputClass={inputClass}
+                        onUpdate={(updated) => setSettings({ ...settings, agents: { ...settings.agents, [pid]: updated } })}
+                        onDelete={() => {
+                          const updated = { ...settings.agents };
+                          delete updated[pid];
+                          setSettings({ ...settings, agents: updated });
+                        }}
+                      />
+                    ))}
+                    <AddProfileForm type="cli" baseAgents={[a]} onAdd={(pid, cfg) => {
+                      setSettings({ ...settings, agents: { ...settings.agents, [pid]: { ...cfg, base: a.id } } });
+                    }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -1400,15 +1418,13 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
         </div>
       )}
 
-      {/* ── Profiles Section ── */}
+      {/* ── API Profiles Section ── */}
       <div className="mt-4 pt-3 border-t border-[var(--border)]">
         <div className="flex items-center gap-2 mb-2">
-          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">Agent Profiles</label>
-          <span className="text-[8px] text-[var(--text-secondary)]">CLI profiles with model override or API profiles</span>
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">API Profiles</label>
+          <span className="text-[8px] text-[var(--text-secondary)]">Direct API access (no CLI needed)</span>
         </div>
-
-        {/* Existing profiles — click to expand/edit */}
-        {Object.entries(settings.agents || {}).filter(([, cfg]: [string, any]) => cfg.base || cfg.type === 'api').map(([id, cfg]: [string, any]) => (
+        {Object.entries(settings.agents || {}).filter(([, cfg]: [string, any]) => cfg.type === 'api').map(([id, cfg]: [string, any]) => (
           <ProfileRow key={id} id={id} cfg={cfg} inputClass={inputClass}
             onUpdate={(updated) => setSettings({ ...settings, agents: { ...settings.agents, [id]: updated } })}
             onDelete={() => {
@@ -1418,10 +1434,6 @@ function AgentsSection({ settings, setSettings }: { settings: any; setSettings: 
             }}
           />
         ))}
-
-        <AddProfileForm type="cli" baseAgents={agents.filter(a => !a.isProfile && a.detected)} onAdd={(id, cfg) => {
-          setSettings({ ...settings, agents: { ...settings.agents, [id]: cfg } });
-        }} />
         <AddProfileForm type="api" baseAgents={[]} onAdd={(id, cfg) => {
           setSettings({ ...settings, agents: { ...settings.agents, [id]: cfg } });
         }} />
