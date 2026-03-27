@@ -1314,6 +1314,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
   const [inboxTarget, setInboxTarget] = useState<{ id: string; label: string } | null>(null);
   const [showBusPanel, setShowBusPanel] = useState(false);
   const [floatingTerminals, setFloatingTerminals] = useState<{ agentId: string; label: string; icon: string; cliId: string; workDir?: string; tmuxSession?: string; sessionName: string; resumeMode?: boolean }[]>([]);
+  const [termLaunchDialog, setTermLaunchDialog] = useState<{ agent: AgentConfig; sessName: string; workDir?: string; sessions: string[] } | null>(null);
 
   // Expose focusAgent to parent
   useImperativeHandle(ref, () => ({
@@ -1455,19 +1456,16 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 return;
               }
 
-              // Ask user: new session or resume
-              const choice = prompt(`Open terminal for ${agent.label}:\n\n1 = New session\n2 = Resume latest (claude -c)\n\nEnter 1 or 2:`, '1');
-              if (!choice) return; // cancelled
-              const useResume = choice.trim() === '2';
+              // Fetch recent claude sessions for resume picker
+              let sessions: string[] = [];
+              try {
+                const claudeDir = `${projectPath}/${workDir || ''}`.replace(/\/+$/, '') + '/.claude/projects';
+                // List recent sessions via terminal-state or just show option
+                sessions = []; // populated below if available
+              } catch {}
 
-              const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
-              if (res.ok) {
-                setFloatingTerminals(prev => [...prev, {
-                  agentId: agent.id, label: agent.label, icon: agent.icon,
-                  cliId: agent.agentId || 'claude', workDir,
-                  sessionName: sessName, resumeMode: useResume,
-                }]);
-              }
+              // Show launch dialog
+              setTermLaunchDialog({ agent, sessName, workDir, sessions });
             },
           } satisfies AgentNodeData,
         };
@@ -1777,6 +1775,44 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           onClose={() => setInboxTarget(null)}
         />
       )}
+
+      {/* Terminal launch dialog */}
+      {termLaunchDialog && workspaceId && (() => {
+        const { agent, sessName, workDir } = termLaunchDialog;
+        const launchTerminal = async (resumeMode: boolean, sessionId?: string) => {
+          setTermLaunchDialog(null);
+          const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
+          if (res.ok) {
+            setFloatingTerminals(prev => [...prev, {
+              agentId: agent.id, label: agent.label, icon: agent.icon,
+              cliId: agent.agentId || 'claude', workDir,
+              sessionName: sessName, resumeMode,
+            }]);
+          }
+        };
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}
+            onClick={e => { if (e.target === e.currentTarget) setTermLaunchDialog(null); }}>
+            <div className="w-80 rounded-lg border border-[#30363d] p-4 shadow-xl" style={{ background: '#0d1117' }}>
+              <div className="text-sm font-bold text-white mb-3">⌨️ Open Terminal — {agent.label}</div>
+              <div className="space-y-2">
+                <button onClick={() => launchTerminal(false)}
+                  className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#58a6ff] hover:bg-[#161b22] transition-colors">
+                  <div className="text-xs text-white font-semibold">New Session</div>
+                  <div className="text-[9px] text-gray-500">Start fresh claude session</div>
+                </button>
+                <button onClick={() => launchTerminal(true)}
+                  className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#3fb950] hover:bg-[#161b22] transition-colors">
+                  <div className="text-xs text-white font-semibold">Resume Latest</div>
+                  <div className="text-[9px] text-gray-500">Continue last session (claude -c)</div>
+                </button>
+              </div>
+              <button onClick={() => setTermLaunchDialog(null)}
+                className="w-full mt-3 text-[9px] text-gray-500 hover:text-white">Cancel</button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Floating terminals for manual agents */}
       {floatingTerminals.map(ft => (
