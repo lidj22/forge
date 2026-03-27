@@ -16,17 +16,20 @@ import { resolve } from 'node:path';
 import type {
   WorkspaceAgentConfig,
   AgentState,
-  AgentStatus,
+  SmithStatus,
+  TaskStatus,
+  AgentMode,
   WorkerEvent,
   BusMessage,
   Artifact,
   WorkspaceState,
+  DaemonWakeReason,
 } from './types';
 import { AgentWorker } from './agent-worker';
 import { AgentBus } from './agent-bus';
 import { ApiBackend } from './backends/api-backend';
 import { CliBackend } from './backends/cli-backend';
-import { appendAgentLog, saveWorkspace, startAutoSave, stopAutoSave } from './persistence';
+import { appendAgentLog, saveWorkspace, saveWorkspaceSync, startAutoSave, stopAutoSave } from './persistence';
 import {
   loadMemory, saveMemory, createMemory, formatMemoryForPrompt,
   addObservation, addSessionSummary, parseStepToObservations, buildSessionSummary,
@@ -52,6 +55,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
   private agents = new Map<string, { config: WorkspaceAgentConfig; worker: AgentWorker | null; state: AgentState }>();
   private bus: AgentBus;
   private approvalQueue = new Set<string>();
+  /** Track which bus message triggered the current execution per agent — acked on done, failed on error */
+  private processingMessage = new Map<string, BusMessage>();
+  private daemonActive = false;
   private createdAt = Date.now();
 
   constructor(workspaceId: string, projectPath: string, projectName: string) {
@@ -121,7 +127,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
     }
 
     const state: AgentState = {
-      status: 'idle',
+      smithStatus: 'down',
+      mode: 'auto',
+      taskStatus: 'idle',
       history: [],
       artifacts: [],
     };
@@ -155,18 +163,18 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
     const conflict = this.validateOutputs(config, id);
     if (conflict) throw new Error(conflict);
-    if (entry.worker && entry.state.status === 'running') {
+    if (entry.worker && entry.state.taskStatus === 'running') {
       entry.worker.stop();
     }
     entry.config = config;
     // Reset status but keep history/artifacts (don't wipe logs)
-    entry.state.status = 'idle';
+    entry.state.taskStatus = 'idle';
     entry.state.error = undefined;
     entry.worker = null;
     this.saveNow();
     this.emitAgentsChanged();
     // Push status update so frontend reflects the reset
-    this.emit('event', { type: 'status', agentId: id, status: 'idle' } satisfies WorkerEvent);
+    this.emit('event', { type: 'task_status', agentId: id, taskStatus: 'idle' } satisfies WorkerEvent);
   }
 
   getAgentState(id: string): Readonly<AgentState> | undefined {
@@ -191,7 +199,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const entry = this.agents.get(agentId);
     if (!entry || entry.config.type !== 'input') return;
 
-    const isUpdate = entry.state.status === 'done';
+    const isUpdate = entry.state.taskStatus === 'done';
 
     // Append to entries (incremental, not overwrite)
     if (!entry.config.entries) entry.config.entries = [];
@@ -203,21 +211,27 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Also set content to latest for backward compat
     entry.config.content = content;
 
-    entry.state.status = 'done';
+    entry.state.taskStatus = 'done';
     entry.state.completedAt = Date.now();
     entry.state.artifacts = [{ type: 'text', summary: content.slice(0, 200) }];
 
-    this.emit('event', { type: 'status', agentId, status: 'done' } satisfies WorkerEvent);
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'done' } satisfies WorkerEvent);
     this.emit('event', { type: 'done', agentId, summary: 'Input provided' } satisfies WorkerEvent);
     this.emitAgentsChanged(); // push updated entries to frontend
     this.bus.notifyTaskComplete(agentId, [], content.slice(0, 200));
 
-    // If re-submitting, reset downstream agents to idle so they can be re-triggered
-    if (isUpdate) {
-      this.resetDownstream(agentId);
+    // Send input_updated messages to downstream agents via bus
+    // routeMessageToAgent handles auto-execution for active smiths
+    for (const [id, downstream] of this.agents) {
+      if (downstream.config.type === 'input') continue;
+      if (!downstream.config.dependsOn.includes(agentId)) continue;
+      this.bus.send(agentId, id, 'notify', {
+        action: 'input_updated',
+        content: content.slice(0, 500),
+      });
+      console.log(`[bus] Input → ${downstream.config.label}: input_updated`);
     }
 
-    this.triggerDownstream(agentId);
     this.saveNow();
   }
 
@@ -235,8 +249,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
         console.log(`[workspace] Killed tmux session ${entry.state.tmuxSession}`);
       } catch {} // session might already be dead
     }
-    entry.state = { status: 'idle', history: [], artifacts: [] };
-    this.emit('event', { type: 'status', agentId, status: 'idle' } satisfies WorkerEvent);
+    entry.state = { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', history: [], artifacts: [] };
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'idle' } satisfies WorkerEvent);
     this.emitAgentsChanged();
     this.saveNow();
   }
@@ -249,12 +263,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
     for (const [id, entry] of this.agents) {
       if (id === agentId) continue;
       if (!entry.config.dependsOn.includes(agentId)) continue;
-      if (entry.state.status === 'idle') continue;
+      if (entry.state.taskStatus === 'idle') continue;
       console.log(`[workspace] Resetting ${entry.config.label} (${id}) to idle (upstream ${agentId} changed)`);
       if (entry.worker) entry.worker.stop();
       entry.worker = null;
-      entry.state = { status: 'idle', history: [], artifacts: [] };
-      this.emit('event', { type: 'status', agentId: id, status: 'idle' } satisfies WorkerEvent);
+      entry.state = { smithStatus: entry.state.smithStatus, mode: entry.state.mode, taskStatus: 'idle', history: [], artifacts: [], cliSessionId: entry.state.cliSessionId };
+      this.emit('event', { type: 'task_status', agentId: id, taskStatus: 'idle' } satisfies WorkerEvent);
       this.resetDownstream(id, visited);
     }
   }
@@ -264,16 +278,32 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const entry = this.agents.get(agentId);
     if (!entry) throw new Error(`Agent "${agentId}" not found`);
     if (entry.config.type === 'input') return;
-    if (entry.state.status === 'running') throw new Error(`Agent "${entry.config.label}" is already running`);
+    if (entry.state.taskStatus === 'running') throw new Error(`Agent "${entry.config.label}" is already running`);
     for (const depId of entry.config.dependsOn) {
       const dep = this.agents.get(depId);
       if (!dep) throw new Error(`Dependency "${depId}" not found (deleted?). Edit the agent to fix.`);
-      if (dep.state.status !== 'done') throw new Error(`Dependency "${dep.config.label}" not completed yet`);
+      if (dep.state.taskStatus !== 'done') {
+        const hint = dep.state.taskStatus === 'idle' ? ' (never executed — run it first)'
+          : dep.state.taskStatus === 'failed' ? ' (failed — retry it first)'
+          : dep.state.taskStatus === 'running' ? ' (still running — wait for it to finish)'
+          : '';
+        throw new Error(`Dependency "${dep.config.label}" not completed yet${hint}`);
+      }
     }
   }
 
-  /** Run a specific agent. Checks dependencies first. userInput is for root agents (no dependencies). */
-  async runAgent(agentId: string, userInput?: string): Promise<void> {
+  /** Run a specific agent. Requires daemon mode. force=true bypasses status checks (for retry). */
+  async runAgent(agentId: string, userInput?: string, force = false): Promise<void> {
+    if (!this.daemonActive) {
+      throw new Error('Start daemon first before running agents');
+    }
+    const label = this.agents.get(agentId)?.config.label || agentId;
+    console.log(`[workspace] runAgent(${label}, force=${force})`, new Error().stack?.split('\n').slice(2, 5).join(' <- '));
+    return this.runAgentDaemon(agentId, userInput, force);
+  }
+
+  /** @deprecated Use runAgent (which now delegates to daemon mode) */
+  private async runAgentLegacy(agentId: string, userInput?: string): Promise<void> {
     const entry = this.agents.get(agentId);
     if (!entry) throw new Error(`Agent "${agentId}" not found`);
 
@@ -283,24 +313,24 @@ export class WorkspaceOrchestrator extends EventEmitter {
       return;
     }
 
-    if (entry.state.status === 'running') return;
+    if (entry.state.taskStatus === 'running') return;
 
-    // Allow re-running done/failed/interrupted/waiting_approval agents — reset them first
+    // Allow re-running done/failed/idle(was interrupted)/waiting_approval agents — reset them first
     let resumeFromCheckpoint = false;
-    if (entry.state.status === 'done' || entry.state.status === 'failed' || entry.state.status === 'interrupted' || entry.state.status === 'waiting_approval') {
+    if (entry.state.taskStatus === 'done' || entry.state.taskStatus === 'failed' || entry.state.taskStatus === 'idle' || this.approvalQueue.has(agentId)) {
       this.approvalQueue.delete(agentId);
-      console.log(`[workspace] Re-running ${entry.config.label} (was ${entry.state.status})`);
-      // For failed/interrupted: keep lastCheckpoint for resume
-      resumeFromCheckpoint = (entry.state.status === 'failed' || entry.state.status === 'interrupted')
+      console.log(`[workspace] Re-running ${entry.config.label} (was taskStatus=${entry.state.taskStatus})`);
+      // For failed: keep lastCheckpoint for resume
+      resumeFromCheckpoint = (entry.state.taskStatus === 'failed')
         && entry.state.lastCheckpoint !== undefined;
       if (entry.worker) entry.worker.stop();
       entry.worker = null;
       if (!resumeFromCheckpoint) {
-        entry.state = { status: 'idle', history: [], artifacts: [] };
+        entry.state = { smithStatus: entry.state.smithStatus, mode: entry.state.mode, taskStatus: 'idle', history: [], artifacts: [], cliSessionId: entry.state.cliSessionId };
       } else {
-        entry.state.status = 'idle';
+        entry.state.taskStatus = 'idle';
         entry.state.error = undefined;
-        entry.state.runMode = undefined;
+        entry.state.mode = 'auto';
       }
     }
 
@@ -309,7 +339,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Check if all dependencies are done
     for (const depId of config.dependsOn) {
       const dep = this.agents.get(depId);
-      if (!dep || dep.state.status !== 'done') {
+      if (!dep || dep.state.taskStatus !== 'done') {
         throw new Error(`Dependency "${dep?.config.label || depId}" not completed yet`);
       }
     }
@@ -362,7 +392,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       this.emit('event', event);
 
       // Update liveness
-      if (event.type === 'status') {
+      if (event.type === 'task_status' || event.type === 'smith_status') {
         this.updateAgentLiveness(agentId);
       }
 
@@ -400,7 +430,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         this.bus.notifyTaskComplete(agentId, files, event.summary);
 
         // Trigger idle downstream agents (first run)
-        this.triggerDownstream(agentId);
+        this.broadcastCompletion(agentId);
 
         // Notify done downstream agents to re-validate (they already ran but upstream changed)
         this.notifyDownstreamForRevalidation(agentId, files);
@@ -430,8 +460,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         timestamp: new Date(msg.timestamp).toISOString(),
       });
       // Mark as delivered + ACK so sender knows it was received
-      this.bus.markDelivered(msg.id);
-      this.bus.ack(agentId, msg.from, msg.id);
+      msg.status = 'done';
     }
 
     // Start from checkpoint if recovering from failure
@@ -444,18 +473,366 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Execute (non-blocking — fire and forget, events handle the rest)
     worker.execute(startStep, upstreamContext).catch(err => {
       // Only set failed if worker didn't already handle it (avoid duplicate error events)
-      if (entry.state.status !== 'failed') {
-        entry.state.status = 'failed';
+      if (entry.state.taskStatus !== 'failed') {
+        entry.state.taskStatus = 'failed';
         entry.state.error = err?.message || String(err);
         this.emit('event', { type: 'error', agentId, error: entry.state.error! } satisfies WorkerEvent);
       }
     });
   }
 
-  /** Run all agents that have no unmet dependencies */
+  /** Run all agents — starts daemon if not active, then runs all ready agents */
   async runAll(): Promise<void> {
-    const ready = this.getReadyAgents();
-    await Promise.all(ready.map(id => this.runAgent(id)));
+    if (!this.daemonActive) {
+      return this.startDaemon();
+    }
+    const ready = this.getDaemonReadyAgents();
+    await Promise.all(ready.map(id => this.runAgentDaemon(id)));
+  }
+
+  /** Run a single agent in daemon mode. force=true resets failed/interrupted agents. */
+  async runAgentDaemon(agentId: string, userInput?: string, force = false): Promise<void> {
+    const entry = this.agents.get(agentId);
+    if (!entry) throw new Error(`Agent "${agentId}" not found`);
+
+    if (entry.config.type === 'input') {
+      if (userInput) this.completeInput(agentId, userInput);
+      return;
+    }
+
+    if (entry.state.taskStatus === 'running' && !force) return;
+    // Already has a daemon worker running → skip (unless force retry)
+    if (entry.worker && entry.state.smithStatus === 'active' && !force) return;
+
+    // Already done → enter daemon listening directly (don't re-run steps)
+    if (entry.state.taskStatus === 'done' && !force) {
+      return this.enterDaemonListening(agentId);
+    }
+
+    if (!force) {
+      // Failed → leave as-is, user must retry explicitly
+      if (entry.state.taskStatus === 'failed') return;
+      // waiting_approval → leave as-is
+      if (this.approvalQueue.has(agentId)) return;
+    }
+
+    // Reset state for fresh start — preserve smithStatus and mode
+    if (entry.state.taskStatus !== 'idle') {
+      this.approvalQueue.delete(agentId);
+      if (entry.worker) entry.worker.stop();
+      entry.worker = null;
+      entry.state = {
+        smithStatus: entry.state.smithStatus,
+        mode: entry.state.mode,
+        taskStatus: 'idle',
+        history: [],
+        artifacts: [],
+        cliSessionId: entry.state.cliSessionId, // preserve session for --resume
+      };
+    }
+
+    // Ensure smith is active when daemon starts this agent
+    if (this.daemonActive && entry.state.smithStatus !== 'active') {
+      entry.state.smithStatus = 'active';
+      this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active', mode: entry.state.mode } satisfies WorkerEvent);
+    }
+
+    const { config } = entry;
+
+    // Check dependencies
+    for (const depId of config.dependsOn) {
+      const dep = this.agents.get(depId);
+      if (!dep) throw new Error(`Dependency "${depId}" not found`);
+      if (force) {
+        // Manual trigger: only require upstream smith to be active (online)
+        if (dep.config.type !== 'input' && dep.state.smithStatus !== 'active') {
+          throw new Error(`Dependency "${dep.config.label}" smith is not active — start daemon first`);
+        }
+      } else {
+        // Auto trigger: require upstream task completed
+        if (dep.state.taskStatus !== 'done') {
+          throw new Error(`Dependency "${dep.config.label}" not completed yet`);
+        }
+      }
+    }
+
+    let upstreamContext = this.buildUpstreamContext(config);
+    if (userInput) {
+      const prefix = '## Additional Instructions:\n' + userInput;
+      upstreamContext = upstreamContext ? prefix + '\n\n---\n\n' + upstreamContext : prefix;
+    }
+
+    const backend = this.createBackend(config, agentId);
+    const memory = loadMemory(this.workspaceId, agentId);
+    const memoryContext = formatMemoryForPrompt(memory);
+    const peerAgentIds = Array.from(this.agents.keys()).filter(id => id !== agentId);
+
+    const worker = new AgentWorker({
+      config, backend,
+      projectPath: this.projectPath,
+      peerAgentIds,
+      memoryContext: memoryContext || undefined,
+      onBusSend: (to, content) => {
+        this.bus.send(agentId, to, 'notify', { action: 'agent_message', content });
+      },
+      onBusRequest: async (to, question) => {
+        const response = await this.bus.request(agentId, to, { action: 'question', content: question });
+        return response.payload.content || '(no response)';
+      },
+      onMemoryUpdate: (stepResults) => {
+        try {
+          const observations = stepResults.flatMap((r, i) =>
+            parseStepToObservations(config.steps[i]?.label || `Step ${i}`, r, entry.state.artifacts)
+          );
+          for (const obs of observations) addObservation(this.workspaceId, agentId, config.label, config.role, obs);
+          const stepLabels = config.steps.map(s => s.label);
+          const summary = buildSessionSummary(stepLabels, stepResults, entry.state.artifacts);
+          addSessionSummary(this.workspaceId, agentId, summary);
+        } catch {}
+      },
+    });
+
+    entry.worker = worker;
+
+    // Forward events (same as runAgent)
+    worker.on('event', (event: WorkerEvent) => {
+      if (event.type === 'task_status') {
+        entry.state.taskStatus = event.taskStatus;
+        entry.state.error = event.error;
+        if (event.taskStatus === 'running') entry.state.startedAt = Date.now();
+        // Sync daemon state from worker
+        const workerState = worker.getState();
+        entry.state.daemonIteration = workerState.daemonIteration;
+      }
+      if (event.type === 'smith_status') {
+        entry.state.smithStatus = event.smithStatus;
+        entry.state.mode = event.mode;
+      }
+      if (event.type === 'log') {
+        appendAgentLog(this.workspaceId, agentId, event.entry).catch(() => {});
+      }
+      this.emit('event', event);
+      if (event.type === 'task_status' || event.type === 'smith_status') {
+        this.updateAgentLiveness(agentId);
+      }
+      if (event.type === 'step' && event.stepIndex >= 0) {
+        const step = config.steps[event.stepIndex];
+        if (step) this.bus.notifyStepComplete(agentId, step.label);
+      }
+      if (event.type === 'done') {
+        // ACK the message that triggered this execution
+        const triggerMsg = this.processingMessage.get(agentId);
+        if (triggerMsg) {
+          triggerMsg.status = 'done';
+          this.processingMessage.delete(agentId);
+          console.log(`[bus] ${config.label}: acked trigger message (${triggerMsg.payload.action})`);
+        }
+        const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
+        this.parseBusMarkers(agentId, entry.state.history);
+        this.bus.notifyTaskComplete(agentId, files, event.summary);
+        this.broadcastCompletion(agentId);
+        this.emitWorkspaceStatus();
+
+        // Check for pending messages queued while this agent was running
+        const pendingMsgs = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
+        if (pendingMsgs.length > 0 && entry.worker?.isListening()) {
+          const nextMsg = pendingMsgs[0];
+          const fromLabel = this.agents.get(nextMsg.from)?.config.label || nextMsg.from;
+          console.log(`[bus] ${config.label}: processing queued message from ${fromLabel} (${nextMsg.payload.action})`);
+          this.processingMessage.set(agentId, nextMsg);
+          entry.worker.wake({
+            type: nextMsg.payload.action === 'input_updated' ? 'input_changed' : 'upstream_changed',
+            ...(nextMsg.payload.action === 'input_updated'
+              ? { content: nextMsg.payload.content || '' }
+              : { agentId: nextMsg.from, files: nextMsg.payload.files || [] }),
+          } as any);
+        }
+      }
+      if (event.type === 'error') {
+        // Mark trigger message as failed so user can retry
+        const triggerMsg = this.processingMessage.get(agentId);
+        if (triggerMsg) {
+          triggerMsg.status = 'failed';
+          this.processingMessage.delete(agentId);
+          console.log(`[bus] ${config.label}: trigger message failed (${triggerMsg.payload.action})`);
+        }
+        this.bus.notifyError(agentId, event.error);
+        this.emitWorkspaceStatus();
+      }
+    });
+
+    // Inject pending messages
+    const pendingMsgs = this.bus.getPendingMessagesFor(agentId)
+      .filter(m => m.from !== agentId);
+    for (const msg of pendingMsgs) {
+      const fromLabel = this.agents.get(msg.from)?.config.label || msg.from;
+      worker.injectMessage({
+        type: 'system', subtype: 'bus_message',
+        content: `[From ${fromLabel}]: ${msg.payload.content || msg.payload.action}`,
+        timestamp: new Date(msg.timestamp).toISOString(),
+      });
+      msg.status = 'done';
+    }
+
+    this.emitWorkspaceStatus();
+
+    // Execute in daemon mode (non-blocking)
+    worker.executeDaemon(0, upstreamContext).catch(err => {
+      if (entry.state.taskStatus !== 'failed') {
+        entry.state.taskStatus = 'failed';
+        entry.state.error = err?.message || String(err);
+        this.emit('event', { type: 'error', agentId, error: entry.state.error! } satisfies WorkerEvent);
+      }
+    });
+  }
+
+  /** Start all agents in daemon mode */
+  async startDaemon(): Promise<void> {
+    if (this.daemonActive) return; // guard against double-start
+    this.daemonActive = true;
+    console.log(`[workspace] Starting daemon mode...`);
+
+    // Set all non-input agents to active (smith online)
+    for (const [id, entry] of this.agents) {
+      if (entry.config.type === 'input') continue;
+      entry.state.smithStatus = 'active';
+      entry.state.mode = 'auto';
+      this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active', mode: 'auto' } satisfies WorkerEvent);
+      this.updateAgentLiveness(id);
+    }
+
+    // For agents with all deps done: start their daemon worker (enters listening loop)
+    // Pending bus messages will be injected on worker startup — no need to re-broadcast
+    const ready = this.getDaemonReadyAgents();
+    console.log(`[workspace] ${ready.length} agents ready to start daemon workers`);
+    await Promise.all(ready.map(id => this.runAgentDaemon(id)));
+
+    this.emitAgentsChanged();
+  }
+
+  /** Get agents that can start in daemon mode (idle, done — with deps met) */
+  private getDaemonReadyAgents(): string[] {
+    const ready: string[] = [];
+    for (const [id, entry] of this.agents) {
+      if (entry.config.type === 'input') continue;
+      if (entry.state.taskStatus === 'running' || entry.state.smithStatus === 'active') {
+        console.log(`[daemon]   ${entry.config.label}: already smithStatus=${entry.state.smithStatus} taskStatus=${entry.state.taskStatus}`);
+        continue;
+      }
+      const allDepsDone = entry.config.dependsOn.every(depId => {
+        const dep = this.agents.get(depId);
+        return dep && (dep.state.taskStatus === 'done');
+      });
+      if (allDepsDone) {
+        console.log(`[daemon]   ${entry.config.label}: ready (taskStatus=${entry.state.taskStatus})`);
+        ready.push(id);
+      } else {
+        const unmet = entry.config.dependsOn.filter(d => {
+          const dep = this.agents.get(d);
+          return !dep || (dep.state.taskStatus !== 'done');
+        }).map(d => this.agents.get(d)?.config.label || d);
+        console.log(`[daemon]   ${entry.config.label}: not ready — deps unmet: ${unmet.join(', ')} (taskStatus=${entry.state.taskStatus})`);
+      }
+    }
+    return ready;
+  }
+
+  /** Put a done agent into daemon listening mode without re-running steps */
+  private enterDaemonListening(agentId: string): void {
+    const entry = this.agents.get(agentId);
+    if (!entry) return;
+
+    const { config } = entry;
+    const backend = this.createBackend(config, agentId);
+    const peerAgentIds = Array.from(this.agents.keys()).filter(id => id !== agentId);
+
+    const worker = new AgentWorker({
+      config, backend,
+      projectPath: this.projectPath,
+      peerAgentIds,
+      onBusSend: (to, content) => {
+        this.bus.send(agentId, to, 'notify', { action: 'agent_message', content });
+      },
+      onBusRequest: async (to, question) => {
+        const response = await this.bus.request(agentId, to, { action: 'question', content: question });
+        return response.payload.content || '(no response)';
+      },
+    });
+
+    entry.worker = worker;
+
+    // Forward events (same handler as runAgentDaemon)
+    worker.on('event', (event: WorkerEvent) => {
+      if (event.type === 'task_status') {
+        entry.state.taskStatus = event.taskStatus;
+        entry.state.error = event.error;
+        const workerState = worker.getState();
+        entry.state.daemonIteration = workerState.daemonIteration;
+      }
+      if (event.type === 'smith_status') {
+        entry.state.smithStatus = event.smithStatus;
+        entry.state.mode = event.mode;
+      }
+      if (event.type === 'log') {
+        appendAgentLog(this.workspaceId, agentId, event.entry).catch(() => {});
+      }
+      this.emit('event', event);
+      if (event.type === 'task_status' || event.type === 'smith_status') {
+        this.updateAgentLiveness(agentId);
+      }
+      if (event.type === 'done') {
+        const triggerMsg = this.processingMessage.get(agentId);
+        if (triggerMsg) { triggerMsg.status = 'done'; this.processingMessage.delete(agentId); }
+        const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
+        this.parseBusMarkers(agentId, entry.state.history);
+        this.bus.notifyTaskComplete(agentId, files, event.summary);
+        this.broadcastCompletion(agentId);
+        this.emitWorkspaceStatus();
+      }
+      if (event.type === 'error') {
+        this.bus.notifyError(agentId, event.error);
+      }
+    });
+
+    // Inject pending messages
+    const pendingMsgs = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId);
+    for (const msg of pendingMsgs) {
+      const fromLabel = this.agents.get(msg.from)?.config.label || msg.from;
+      worker.injectMessage({
+        type: 'system', subtype: 'bus_message',
+        content: `[From ${fromLabel}]: ${msg.payload.content || msg.payload.action}`,
+        timestamp: new Date(msg.timestamp).toISOString(),
+      });
+      msg.status = 'done';
+    }
+
+    console.log(`[workspace] Agent "${config.label}" entering daemon listening (was done, skipping steps)`);
+
+    // executeDaemon with skipSteps=true → goes directly to listening loop
+    worker.executeDaemon(0, undefined, true).catch(err => {
+      console.error(`[workspace] enterDaemonListening error for ${config.label}:`, err.message);
+    });
+  }
+
+  /** Stop all agents (exit daemon mode) */
+  stopDaemon(): void {
+    this.daemonActive = false;
+    for (const [id, entry] of this.agents) {
+      if (entry.worker) entry.worker.stop();
+      if (entry.config.type !== 'input') {
+        entry.state.smithStatus = 'down';
+        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'down', mode: entry.state.mode } satisfies WorkerEvent);
+      }
+    }
+    // Mark all pending messages as failed — smiths are going down
+    this.bus.markAllPendingAsFailed();
+    this.emitAgentsChanged();
+    console.log('[workspace] Daemon mode stopped');
+  }
+
+  /** Check if daemon mode is active */
+  isDaemonActive(): boolean {
+    return this.daemonActive;
   }
 
   /** Pause a running agent */
@@ -479,9 +856,15 @@ export class WorkspaceOrchestrator extends EventEmitter {
   /** Retry a failed agent from its last checkpoint */
   async retryAgent(agentId: string): Promise<void> {
     const entry = this.agents.get(agentId);
-    if (!entry) return;
-    if (entry.state.status !== 'failed' && entry.state.status !== 'interrupted') return;
-    await this.runAgent(agentId);
+    if (!entry) throw new Error(`Agent "${agentId}" not found`);
+    if (entry.state.taskStatus === 'running') {
+      throw new Error(`Agent "${entry.config.label}" is already running`);
+    }
+    if (entry.state.taskStatus !== 'failed') {
+      throw new Error(`Agent "${entry.config.label}" is ${entry.state.taskStatus}, not failed`);
+    }
+    // force=true: skip dep taskStatus check, only require upstream smith active
+    await this.runAgent(agentId, undefined, true);
   }
 
   /** Send a message to a running agent (human intervention) */
@@ -536,14 +919,37 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
     if (entry.worker) entry.worker.stop();
     entry.worker = null;
-    entry.state.runMode = 'manual';
+    entry.state.mode = 'manual';
     entry.state.tmuxSession = undefined; // clear stale session — new one will be saved via setTmuxSession
-    entry.state.status = 'running';
+    entry.state.smithStatus = 'active';
+    entry.state.taskStatus = 'running';
     entry.state.startedAt = Date.now();
-    this.emit('event', { type: 'status', agentId, status: 'running' } satisfies WorkerEvent);
+    entry.state.error = undefined;
+    this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active', mode: 'manual' } satisfies WorkerEvent);
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'running' } satisfies WorkerEvent);
     this.emitAgentsChanged();
     this.saveNow();
     console.log(`[workspace] Agent "${entry.config.label}" switched to manual mode`);
+  }
+
+  /** Re-enter daemon mode for an agent after manual terminal is closed */
+  restartAgentDaemon(agentId: string): void {
+    if (!this.daemonActive) return;
+    const entry = this.agents.get(agentId);
+    if (!entry || entry.config.type === 'input') return;
+    if (entry.worker) return; // already has a worker
+
+    // Reset to idle so runAgentDaemon can pick it up
+    entry.state.mode = 'auto';
+    entry.state.smithStatus = 'down';
+    entry.state.taskStatus = 'idle';
+    entry.state.error = undefined;
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'idle' } satisfies WorkerEvent);
+    this.emit('event', { type: 'smith_status', agentId, smithStatus: 'down', mode: 'auto' } satisfies WorkerEvent);
+
+    this.runAgentDaemon(agentId).catch(err => {
+      console.error(`[workspace] Failed to restart daemon for ${entry.config.label}:`, err.message);
+    });
   }
 
   /** Complete a manual agent — called by forge-done skill from terminal */
@@ -551,14 +957,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const entry = this.agents.get(agentId);
     if (!entry) return;
 
-    entry.state.status = 'done';
-    entry.state.runMode = undefined; // clear manual mode
+    entry.state.taskStatus = 'done';
+    entry.state.mode = 'auto'; // clear manual mode
     entry.state.completedAt = Date.now();
     entry.state.artifacts = changedFiles.map(f => ({ type: 'file' as const, path: f }));
 
     console.log(`[workspace] Manual agent "${entry.config.label}" marked done. ${changedFiles.length} files changed.`);
 
-    this.emit('event', { type: 'status', agentId, status: 'done' } satisfies WorkerEvent);
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'done' } satisfies WorkerEvent);
     this.emit('event', { type: 'done', agentId, summary: `Manual: ${changedFiles.length} files changed` } satisfies WorkerEvent);
     this.emitAgentsChanged();
 
@@ -577,7 +983,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
     }
 
-    this.triggerDownstream(agentId);
+    if (this.daemonActive) {
+      this.broadcastCompletion(agentId);
+    }
     this.notifyDownstreamForRevalidation(agentId, changedFiles);
     this.emitWorkspaceStatus();
     this.checkWorkspaceComplete();
@@ -589,8 +997,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.approvalQueue.delete(agentId);
     const entry = this.agents.get(agentId);
     if (entry) {
-      entry.state.status = 'idle';
-      this.emit('event', { type: 'status', agentId, status: 'idle' } satisfies WorkerEvent);
+      entry.state.taskStatus = 'idle';
+      this.emit('event', { type: 'task_status', agentId, taskStatus: 'idle' } satisfies WorkerEvent);
     }
   }
 
@@ -626,11 +1034,13 @@ export class WorkspaceOrchestrator extends EventEmitter {
     agents: WorkspaceAgentConfig[];
     agentStates: Record<string, AgentState>;
     busLog: BusMessage[];
+    daemonActive: boolean;
   } {
     return {
       agents: Array.from(this.agents.values()).map(e => e.config),
       agentStates: this.getAllAgentStates(),
       busLog: [...this.bus.getLog()],
+      daemonActive: this.daemonActive,
     };
   }
 
@@ -642,18 +1052,43 @@ export class WorkspaceOrchestrator extends EventEmitter {
     busOutbox?: Record<string, BusMessage[]>;
   }): void {
     this.agents.clear();
+    this.daemonActive = false; // Reset daemon — user must click Start Daemon again after restart
     for (const config of data.agents) {
-      const state = data.agentStates[config.id] || { status: 'idle' as const, history: [], artifacts: [] };
-      // Mark interrupted agents as recoverable
-      if (state.status === 'running') {
-        state.status = 'interrupted';
+      const state = data.agentStates[config.id] || { smithStatus: 'down' as const, mode: 'auto' as const, taskStatus: 'idle' as const, history: [], artifacts: [] };
+
+      // Migrate old format if loading from pre-two-layer state
+      if ('status' in state && !('smithStatus' in state)) {
+        const oldStatus = (state as any).status;
+        (state as any).smithStatus = 'down';
+        (state as any).mode = (state as any).runMode || 'auto';
+        (state as any).taskStatus = (oldStatus === 'running' || oldStatus === 'listening') ? 'idle' :
+                       (oldStatus === 'interrupted') ? 'idle' :
+                       (oldStatus === 'waiting_approval') ? 'idle' :
+                       (oldStatus === 'paused') ? 'idle' :
+                       oldStatus;
+        delete (state as any).status;
+        delete (state as any).runMode;
+        delete (state as any).daemonMode;
       }
+
+      // Mark running agents as failed (interrupted by restart)
+      if (state.taskStatus === 'running') {
+        state.taskStatus = 'failed';
+        state.error = 'Interrupted by restart';
+      }
+      // Smith is down after restart (no daemon loop running)
+      state.smithStatus = 'down';
+      state.daemonIteration = undefined;
       this.agents.set(config.id, { config, worker: null, state });
     }
     this.bus.loadLog(data.busLog);
     if (data.busOutbox) {
       this.bus.loadOutbox(data.busOutbox);
     }
+
+    // Mark all pending messages as failed (they were lost on shutdown)
+    // Users can retry agents manually if needed
+    this.bus.markAllPendingAsFailed();
 
     // Initialize liveness for all loaded agents so bus delivery works
     for (const [agentId] of this.agents) {
@@ -664,8 +1099,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
   /** Stop all agents, save final state, and clean up */
   shutdown(): void {
     stopAutoSave(this.workspaceId);
-    // Final save before shutdown
-    saveWorkspace(this.getFullState()).catch(() => {});
+    // Sync save — must complete before process exits
+    try { saveWorkspaceSync(this.getFullState()); } catch (err) {
+      console.error(`[workspace] Failed to save on shutdown:`, err);
+    }
     for (const [, entry] of this.agents) {
       entry.worker?.stop();
     }
@@ -703,7 +1140,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     for (const depId of config.dependsOn) {
       const dep = this.agents.get(depId);
-      if (!dep || dep.state.status !== 'done') continue;
+      if (!dep || (dep.state.taskStatus !== 'done')) continue;
 
       const label = dep.config.label;
 
@@ -762,50 +1199,44 @@ export class WorkspaceOrchestrator extends EventEmitter {
   }
 
   /** After an agent completes, check if any downstream agents should be triggered */
-  private triggerDownstream(completedAgentId: string): void {
-    console.log(`[workspace] triggerDownstream for ${completedAgentId}. Checking ${this.agents.size} agents...`);
+  /**
+   * Broadcast completion to all downstream agents via bus messages.
+   * Replaces direct triggerDownstream — all execution is now message-driven.
+   * If no artifacts/changes, no message is sent → downstream stays idle.
+   */
+  private broadcastCompletion(completedAgentId: string): void {
+    const completed = this.agents.get(completedAgentId);
+    if (!completed) return;
+
+    const completedLabel = completed.config.label;
+    const files = completed.state.artifacts.filter(a => a.path).map(a => a.path!);
+    const summary = completed.state.history
+      .filter(h => h.subtype === 'final_summary' || h.subtype === 'step_summary')
+      .slice(-1)[0]?.content || '';
+
+    // Always broadcast — downstream decides whether to act based on message content
+    const content = files.length > 0
+      ? `${completedLabel} completed: ${files.length} files changed. ${summary.slice(0, 200)}`
+      : `${completedLabel} completed. ${summary.slice(0, 300) || 'Check upstream outputs for updates.'}`;
+
+    // Find all downstream agents that depend on this one
+    let sent = 0;
     for (const [id, entry] of this.agents) {
       if (id === completedAgentId) continue;
-      if (entry.state.status !== 'idle') {
-        console.log(`[workspace]   ${entry.config.label} (${id}): skip — status=${entry.state.status}`);
-        continue;
-      }
-      if (!entry.config.dependsOn.includes(completedAgentId)) {
-        console.log(`[workspace]   ${entry.config.label} (${id}): skip — doesn't depend on ${completedAgentId} (deps: ${entry.config.dependsOn.join(',')})`);
-        continue;
-      }
+      if (entry.config.type === 'input') continue;
+      if (!entry.config.dependsOn.includes(completedAgentId)) continue;
 
-      // Check if ALL dependencies are done
-      const allDepsDone = entry.config.dependsOn.every(depId => {
-        const dep = this.agents.get(depId);
-        return dep && dep.state.status === 'done';
+      this.bus.send(completedAgentId, id, 'notify', {
+        action: 'upstream_complete',
+        content,
+        files,
       });
+      sent++;
+      console.log(`[bus] ${completedLabel} → ${entry.config.label}: upstream_complete (${files.length} files)`);
+    }
 
-      if (!allDepsDone) continue;
-
-      // Approval gate
-      if (entry.config.requiresApproval) {
-        entry.state.status = 'waiting_approval';
-        this.approvalQueue.add(id);
-        this.emit('event', {
-          type: 'approval_required',
-          agentId: id,
-          upstreamId: completedAgentId,
-        } satisfies OrchestratorEvent);
-        this.emit('event', {
-          type: 'status',
-          agentId: id,
-          status: 'waiting_approval',
-        } satisfies WorkerEvent);
-        continue;
-      }
-
-      // Auto-trigger
-      this.runAgent(id).catch(err => {
-        entry.state.status = 'failed';
-        entry.state.error = err?.message || String(err);
-        this.emit('event', { type: 'error', agentId: id, error: entry.state.error! } satisfies WorkerEvent);
-      });
+    if (sent === 0) {
+      console.log(`[bus] ${completedLabel} completed — no downstream agents`);
     }
   }
 
@@ -817,9 +1248,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
       this.bus.setAgentStatus(agentId, 'down');
       return;
     }
-    const s = entry.state.status;
-    if (s === 'running') this.bus.setAgentStatus(agentId, 'busy');
-    else if (s === 'idle' || s === 'done' || s === 'paused') this.bus.setAgentStatus(agentId, 'alive');
+    if (entry.state.taskStatus === 'running') this.bus.setAgentStatus(agentId, 'busy');
+    else if (entry.state.smithStatus === 'active') this.bus.setAgentStatus(agentId, 'alive');
     else this.bus.setAgentStatus(agentId, 'down');
   }
 
@@ -854,10 +1284,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
       timestamp: new Date(msg.timestamp).toISOString(),
     };
 
-    // Helper: ACK + mark delivered when message is actually consumed
+    // Helper: mark message as processed when actually consumed
     const ackAndDeliver = () => {
-      this.bus.markDelivered(msg.id);
-      this.bus.ack(targetId, msg.from, msg.id);
+      msg.status = 'done';
     };
 
     // ── Input node: request user input ──
@@ -877,54 +1306,95 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // ── Store message in agent history (always) ──
     target.state.history.push(logEntry);
 
-    // ── Actionable messages → queue for user confirmation ──
-    if (action === 'fix_request' || action === 'update_request' || action === 'update_notify') {
-      // Don't auto-rerun. Set waiting_approval so user decides.
-      if (target.state.status !== 'running') {
-        // Don't ACK yet — message stays pending until agent actually runs and processes it
-        target.state.status = 'waiting_approval';
+    // ── Upstream complete / Input updated → auto-execute or manual inbox ──
+    // Trust the sender: if a message arrived, the sender completed its work.
+    // Only check THIS smith's readiness, not upstream deps.
+    if (action === 'upstream_complete' || action === 'input_updated') {
+      if (target.state.smithStatus !== 'active') {
+        console.log(`[bus] ${target.config.label}: received ${action} but smith is down — message stays pending`);
+        return;
+      }
+
+      if (target.state.mode === 'manual') {
+        ackAndDeliver();
+        console.log(`[bus] ${target.config.label}: received ${action} in manual mode — stored in inbox`);
+        return;
+      }
+
+      // If already running, queue the message — will be picked up after current task
+      if (target.state.taskStatus === 'running') {
+        console.log(`[bus] ${target.config.label}: received ${action} but already running — message queued`);
+        return;
+      }
+
+      // Approval gate
+      if (target.config.requiresApproval) {
+        ackAndDeliver();
         this.approvalQueue.add(targetId);
-        this.emit('event', {
-          type: 'approval_required',
-          agentId: targetId,
-          upstreamId: msg.from,
-        } satisfies OrchestratorEvent);
-        this.emit('event', {
-          type: 'status',
-          agentId: targetId,
-          status: 'waiting_approval',
-        } satisfies WorkerEvent);
+        this.emit('event', { type: 'approval_required', agentId: targetId, upstreamId: msg.from } satisfies OrchestratorEvent);
+        console.log(`[bus] ${target.config.label}: needs user approval before executing`);
+        return;
+      }
+
+      // All checks passed — track message, ACK only after execution completes
+      this.processingMessage.set(targetId, msg);
+
+      // Execute: wake if listening, or start daemon if idle
+      if (target.worker?.isListening()) {
+        console.log(`[bus] ${target.config.label}: waking (${action})`);
+        const wakeReason: DaemonWakeReason = action === 'input_updated'
+          ? { type: 'input_changed', content }
+          : { type: 'upstream_changed', agentId: msg.from, files: msg.payload.files || [] };
+        target.worker.wake(wakeReason);
+      } else {
+        console.log(`[bus] ${target.config.label}: starting execution (${action})`);
+        this.runAgentDaemon(targetId, undefined, true).catch(err => {
+          target.state.taskStatus = 'failed';
+          target.state.error = err?.message || String(err);
+          this.emit('event', { type: 'error', agentId: targetId, error: target.state.error! } satisfies WorkerEvent);
+        });
+      }
+      return;
+    }
+
+    // ── Fix/update requests → queue for user confirmation ──
+    if (action === 'fix_request' || action === 'update_request' || action === 'update_notify') {
+      if (target.state.taskStatus !== 'running') {
+        this.approvalQueue.add(targetId);
+        this.emit('event', { type: 'approval_required', agentId: targetId, upstreamId: msg.from } satisfies OrchestratorEvent);
         console.log(`[bus] ${target.config.label} needs approval to re-run (${action} from ${fromLabel})`);
       } else {
-        // Running: inject message into current execution for awareness
         ackAndDeliver();
         if (target.worker) target.worker.injectMessage(logEntry);
       }
       return;
     }
 
-    // ── Informational messages → inject if running, store only if not ──
-    if (target.worker) {
+    // ── Other messages → inject if running, wake if listening ──
+    if (target.worker?.isListening()) {
+      ackAndDeliver();
+      target.worker.wake({ type: 'bus_message', messages: [logEntry] });
+    } else if (target.worker) {
       ackAndDeliver();
       target.worker.injectMessage(logEntry);
     }
-    // If not running, message stays pending in history — will be picked up on next runAgent
   }
 
   /** Check if all agents are done and no pending work remains */
   private checkWorkspaceComplete(): void {
     let allDone = true;
-    for (const [, entry] of this.agents) {
-      const s = entry.worker?.getState().status ?? entry.state.status;
-      if (s === 'running' || s === 'paused' || s === 'waiting_approval') {
+    for (const [id, entry] of this.agents) {
+      const ws = entry.worker?.getState();
+      const taskSt = ws?.taskStatus ?? entry.state.taskStatus;
+      if (taskSt === 'running' || this.approvalQueue.has(id)) {
         allDone = false;
         break;
       }
       // idle agents with unmet deps don't block completion
-      if (s === 'idle' && entry.config.dependsOn.length > 0) {
+      if (taskSt === 'idle' && entry.config.dependsOn.length > 0) {
         const allDepsDone = entry.config.dependsOn.every(depId => {
           const dep = this.agents.get(depId);
-          return dep && (dep.state.status === 'done');
+          return dep && (dep.state.taskStatus === 'done');
         });
         if (allDepsDone) {
           allDone = false; // idle but ready to run = not complete
@@ -950,10 +1420,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
   private getReadyAgents(): string[] {
     const ready: string[] = [];
     for (const [id, entry] of this.agents) {
-      if (entry.state.status !== 'idle') continue;
+      if (entry.state.taskStatus !== 'idle') continue;
       const allDepsDone = entry.config.dependsOn.every(depId => {
         const dep = this.agents.get(depId);
-        return dep && dep.state.status === 'done';
+        return dep && dep.state.taskStatus === 'done';
       });
       if (allDepsDone) ready.push(id);
     }
@@ -977,7 +1447,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       if (!entry.config.dependsOn.includes(completedAgentId)) continue;
 
       // Only notify agents that already completed — they need to re-validate
-      if (entry.state.status !== 'done' && entry.state.status !== 'failed') continue;
+      if (entry.state.taskStatus !== 'done' && entry.state.taskStatus !== 'failed') continue;
 
       console.log(`[workspace] ${completedLabel} changed → ${entry.config.label} needs re-validation`);
 
@@ -989,7 +1459,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       });
 
       // Set to waiting_approval so user confirms re-run
-      entry.state.status = 'waiting_approval';
+      entry.state.taskStatus = 'idle';
       entry.state.history.push({
         type: 'system',
         subtype: 'revalidation_request',
@@ -997,7 +1467,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         timestamp: new Date().toISOString(),
       });
       this.approvalQueue.add(id);
-      this.emit('event', { type: 'status', agentId: id, status: 'waiting_approval' } satisfies WorkerEvent);
+      this.emit('event', { type: 'task_status', agentId: id, taskStatus: 'idle' } satisfies WorkerEvent);
       this.emit('event', {
         type: 'approval_required',
         agentId: id,
@@ -1050,9 +1520,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
   private emitWorkspaceStatus(): void {
     let running = 0, done = 0;
     for (const [, entry] of this.agents) {
-      const s = entry.worker?.getState().status ?? entry.state.status;
-      if (s === 'running') running++;
-      if (s === 'done') done++;
+      const ws = entry.worker?.getState();
+      const taskSt = ws?.taskStatus ?? entry.state.taskStatus;
+      if (taskSt === 'running') running++;
+      if (taskSt === 'done') done++;
     }
     this.emit('event', {
       type: 'workspace_status',

@@ -4,9 +4,12 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const FORGE_SKILLS_DIR = join(__dirname, '..', 'forge-skills');
+const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
+const _dirname = typeof __dirname !== 'undefined' ? __dirname : dirname(_filename);
+const FORGE_SKILLS_DIR = join(_dirname, '..', 'forge-skills');
 
 /**
  * Install forge workspace skills into a project.

@@ -71,7 +71,7 @@ export async function POST(req: Request) {
         dependsOn: agent.dependsOn.map((d: string) => idMap.get(d) || d),
         entries: agent.type === 'input' ? [] : undefined,
       });
-      state.agentStates[idMap.get(agent.id) || agent.id] = { status: 'idle', history: [], artifacts: [] };
+      state.agentStates[idMap.get(agent.id) || agent.id] = { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', history: [], artifacts: [] };
     }
     if (template.nodePositions) {
       for (const [oldId, pos] of Object.entries(template.nodePositions)) {
@@ -90,6 +90,10 @@ export async function DELETE(req: Request) {
   const url = new URL(req.url);
   const id = url.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+  // Unload from daemon if active
+  const daemonUrl = `http://localhost:${Number(process.env.WORKSPACE_PORT) || 8405}`;
+  try { await fetch(`${daemonUrl}/workspace/${id}/unload`, { method: 'POST' }); } catch {}
 
   deleteWorkspace(id);
   return NextResponse.json({ ok: true });

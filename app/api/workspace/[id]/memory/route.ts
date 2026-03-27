@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
-import { loadMemory, formatMemoryForDisplay, getMemoryStats } from '@/lib/workspace/smith-memory';
 
-// GET /api/workspace/{id}/memory?agentId=xxx
+const WORKSPACE_PORT = Number(process.env.WORKSPACE_PORT) || 8405;
+const DAEMON_URL = `http://localhost:${WORKSPACE_PORT}`;
+
+// Proxy to workspace daemon — Memory query
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: workspaceId } = await params;
   const url = new URL(req.url);
@@ -11,9 +13,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: 'agentId required' }, { status: 400 });
   }
 
-  const memory = loadMemory(workspaceId, agentId);
-  const stats = getMemoryStats(memory);
-  const display = formatMemoryForDisplay(memory);
-
-  return NextResponse.json({ memory, stats, display });
+  try {
+    const res = await fetch(`${DAEMON_URL}/workspace/${workspaceId}/memory?agentId=${encodeURIComponent(agentId)}`);
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch (err: any) {
+    return NextResponse.json({ error: 'Workspace daemon not available' }, { status: 503 });
+  }
 }

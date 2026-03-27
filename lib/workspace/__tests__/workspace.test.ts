@@ -101,8 +101,8 @@ async function testBusAckRetry() {
   // ACK it
   bus.ack('agent-b', 'agent-a', msg.id);
 
-  // Check the original message is acked
-  assert(msg.status === 'acked', `Message acked after ACK received`);
+  // Check the original message is done
+  assert(msg.status === 'done', `Message done after ACK received`);
 
   // Test outbox for down agents
   bus.setAgentStatus('agent-c', 'down');

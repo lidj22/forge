@@ -7,11 +7,13 @@ function run(cmd: string): string {
   } catch { return ''; }
 }
 
-function countProcess(pattern: string): { count: number; pid: string } {
+function countProcess(pattern: string): { count: number; pid: string; startedAt: string } {
   const out = run(`ps aux | grep '${pattern}' | grep -v grep | head -1`);
   const pid = out ? out.split(/\s+/)[1] || '' : '';
   const count = out ? run(`ps aux | grep '${pattern}' | grep -v grep | wc -l`).trim() : '0';
-  return { count: parseInt(count), pid };
+  // Get start time from ps
+  const startedAt = pid ? run(`ps -o lstart= -p ${pid} 2>/dev/null`).trim() : '';
+  return { count: parseInt(count), pid, startedAt };
 }
 
 export async function GET() {
@@ -19,6 +21,7 @@ export async function GET() {
   const nextjs = countProcess('next-server');
   const terminal = countProcess('terminal-standalone');
   const telegram = countProcess('telegram-standalone');
+  const workspace = countProcess('workspace-standalone');
   const tunnel = countProcess('cloudflared tunnel');
 
   // Tunnel URL
@@ -47,10 +50,11 @@ export async function GET() {
 
   return NextResponse.json({
     processes: {
-      nextjs: { running: nextjs.count > 0, pid: nextjs.pid },
-      terminal: { running: terminal.count > 0, pid: terminal.pid },
-      telegram: { running: telegram.count > 0, pid: telegram.pid },
-      tunnel: { running: tunnel.count > 0, pid: tunnel.pid, url: tunnelUrl },
+      nextjs: { running: nextjs.count > 0, pid: nextjs.pid, startedAt: nextjs.startedAt },
+      terminal: { running: terminal.count > 0, pid: terminal.pid, startedAt: terminal.startedAt },
+      telegram: { running: telegram.count > 0, pid: telegram.pid, startedAt: telegram.startedAt },
+      workspace: { running: workspace.count > 0, pid: workspace.pid, startedAt: workspace.startedAt },
+      tunnel: { running: tunnel.count > 0, pid: tunnel.pid, url: tunnelUrl, startedAt: tunnel.startedAt },
     },
     sessions,
     uptime: uptime.replace(/.*up\s+/, '').replace(/,\s+\d+ user.*/, '').trim(),

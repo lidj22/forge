@@ -47,31 +47,50 @@ export interface AgentStep {
   prompt: string;                    // instruction for this step
 }
 
-// ─── Agent State ─────────────────────────────────────────
+// ─── Agent State (Two-Layer Model) ───────────────────────
 
-export type AgentStatus =
-  | 'idle'
-  | 'running'
-  | 'paused'
-  | 'waiting_approval'
-  | 'done'
-  | 'failed'
-  | 'interrupted';
+/** Smith layer: daemon lifecycle */
+export type SmithStatus = 'down' | 'active';
+
+/** Task layer: current work execution */
+export type TaskStatus = 'idle' | 'running' | 'done' | 'failed';
+
+/** Agent execution mode */
+export type AgentMode = 'auto' | 'manual';
+
+/** @deprecated Use SmithStatus + TaskStatus instead */
+export type AgentStatus = SmithStatus | TaskStatus | 'paused' | 'waiting_approval' | 'listening' | 'interrupted';
 
 export interface AgentState {
-  status: AgentStatus;
-  runMode?: 'auto' | 'manual';      // auto = headless execution, manual = user in terminal
+  // ─── Smith layer (daemon lifecycle) ─────
+  smithStatus: SmithStatus;           // down=not started, active=listening on bus
+  mode: AgentMode;                    // auto=respond to messages, manual=user in terminal
+
+  // ─── Task layer (current work) ──────────
+  taskStatus: TaskStatus;             // idle/running/done/failed
+
+  // ─── Execution details ──────────────────
   currentStep?: number;
   history: TaskLogEntry[];
   artifacts: Artifact[];
   logFile?: string;
   lastCheckpoint?: number;
   cliSessionId?: string;
-  tmuxSession?: string;              // tmux session name for manual terminal reattach
+  tmuxSession?: string;               // tmux session name for manual terminal reattach
   startedAt?: number;
   completedAt?: number;
   error?: string;
+  daemonIteration?: number;           // how many times re-executed after initial steps
 }
+
+// ─── Daemon Wake Reason ──────────────────────────────────
+
+export type DaemonWakeReason =
+  | { type: 'abort' }
+  | { type: 'bus_message'; messages: TaskLogEntry[] }
+  | { type: 'upstream_changed'; agentId: string; files: string[] }
+  | { type: 'input_changed'; content: string }
+  | { type: 'user_message'; content: string };
 
 // ─── Artifact ────────────────────────────────────────────
 
@@ -96,7 +115,7 @@ export interface BusMessage {
   };
   timestamp: number;
   // Delivery tracking
-  status?: 'pending' | 'delivered' | 'acked' | 'failed';
+  status?: 'pending' | 'done' | 'failed';
   retries?: number;
 }
 
@@ -162,7 +181,8 @@ export interface AgentBackend {
 // ─── Worker Events ───────────────────────────────────────
 
 export type WorkerEvent =
-  | { type: 'status'; agentId: string; status: AgentStatus }
+  | { type: 'smith_status'; agentId: string; smithStatus: SmithStatus; mode: AgentMode }
+  | { type: 'task_status'; agentId: string; taskStatus: TaskStatus; error?: string }
   | { type: 'log'; agentId: string; entry: TaskLogEntry }
   | { type: 'step'; agentId: string; stepIndex: number; stepLabel: string }
   | { type: 'artifact'; agentId: string; artifact: Artifact }

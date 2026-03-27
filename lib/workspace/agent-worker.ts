@@ -12,11 +12,14 @@ import { EventEmitter } from 'node:events';
 import type {
   WorkspaceAgentConfig,
   AgentState,
-  AgentStatus,
+  TaskStatus,
+  SmithStatus,
+  AgentMode,
   AgentBackend,
   WorkerEvent,
   Artifact,
   BusMessage,
+  DaemonWakeReason,
 } from './types';
 import type { TaskLogEntry } from '@/src/types';
 
@@ -57,6 +60,10 @@ export class AgentWorker extends EventEmitter {
   private onMemoryUpdate?: (stepResults: string[]) => void;
   private stepResults: string[] = [];
 
+  // Daemon mode
+  private wakeResolve: ((reason: DaemonWakeReason) => void) | null = null;
+  private daemonRetryCount = 0;
+
   constructor(opts: AgentWorkerOptions) {
     super();
     this.config = opts.config;
@@ -70,7 +77,9 @@ export class AgentWorker extends EventEmitter {
     this.memoryContext = opts.memoryContext;
     this.onMemoryUpdate = opts.onMemoryUpdate;
     this.state = {
-      status: 'idle',
+      smithStatus: 'down',
+      mode: 'auto',
+      taskStatus: 'idle',
       history: [],
       artifacts: [],
     };
@@ -85,7 +94,7 @@ export class AgentWorker extends EventEmitter {
   async execute(startStep = 0, upstreamContext?: string): Promise<void> {
     const { steps } = this.config;
     if (steps.length === 0) {
-      this.setStatus('done');
+      this.setTaskStatus('done');
       this.emitEvent({ type: 'done', agentId: this.config.id, summary: 'No steps defined' });
       return;
     }
@@ -99,9 +108,8 @@ export class AgentWorker extends EventEmitter {
 
     this.stepResults = [];
     this.abortController = new AbortController();
-    this.setStatus('running');
+    this.setTaskStatus('running');
     this.state.startedAt = Date.now();
-    this.state.error = undefined;
 
     for (let i = startStep; i < steps.length; i++) {
       // Check pause
@@ -109,7 +117,8 @@ export class AgentWorker extends EventEmitter {
 
       // Check abort
       if (this.abortController.signal.aborted) {
-        this.setStatus('interrupted');
+        console.log(`[worker] ${this.config.label}: abort detected before step ${i} (signal already aborted)`);
+        this.setTaskStatus('failed', 'Interrupted');
         return;
       }
 
@@ -177,15 +186,21 @@ export class AgentWorker extends EventEmitter {
         this.state.lastCheckpoint = i;
 
       } catch (err: any) {
-        this.state.error = err?.message || String(err);
-        this.setStatus('failed');
+        const msg = err?.message || String(err);
+        // Aborted = graceful stop (SIGTERM/SIGINT), not an error
+        if (msg === 'Aborted' || this.abortController?.signal.aborted) {
+          console.log(`[worker] ${this.config.label}: step catch — msg="${msg}", aborted=${this.abortController?.signal.aborted}`);
+          this.setTaskStatus('failed', 'Interrupted');
+          return;
+        }
+        this.setTaskStatus('failed', msg);
         this.emitEvent({ type: 'error', agentId: this.config.id, error: this.state.error! });
         return;
       }
     }
 
     // All steps done
-    this.setStatus('done');
+    this.setTaskStatus('done');
     this.state.completedAt = Date.now();
 
     // Trigger memory update (orchestrator handles the actual LLM call)
@@ -206,32 +221,40 @@ export class AgentWorker extends EventEmitter {
     this.emitEvent({ type: 'done', agentId: this.config.id, summary });
   }
 
-  /** Stop execution (abort current step) */
+  /** Stop execution (abort current step and daemon loop) */
   stop(): void {
+    console.log(`[worker] stop() called for ${this.config.label} (task=${this.state.taskStatus}, smith=${this.state.smithStatus})`, new Error().stack?.split('\n').slice(1, 4).join(' <- '));
     this.abortController?.abort();
     this.backend.abort();
-    if (this.state.status === 'running' || this.state.status === 'paused') {
-      this.setStatus('interrupted');
+    this.setSmithStatus('down');
+    // Don't change taskStatus — keep done/failed/idle as-is
+    // Only change running → done (graceful stop of an in-progress task)
+    if (this.state.taskStatus === 'running') {
+      this.setTaskStatus('failed', 'Interrupted');
     }
     // If paused, release the pause wait
     if (this.pauseResolve) {
       this.pauseResolve();
       this.pauseResolve = null;
     }
+    // If in daemon wait, wake with abort
+    if (this.wakeResolve) {
+      this.wakeResolve({ type: 'abort' });
+      this.wakeResolve = null;
+    }
   }
 
   /** Pause after current step completes */
   pause(): void {
-    if (this.state.status !== 'running') return;
+    if (this.state.taskStatus !== 'running') return;
     this.paused = true;
-    this.setStatus('paused');
+    // Paused is a sub-state of running, no separate taskStatus
   }
 
   /** Resume from paused state */
   resume(): void {
-    if (this.state.status !== 'paused') return;
+    if (!this.paused) return;
     this.paused = false;
-    this.setStatus('running');
     if (this.pauseResolve) {
       this.pauseResolve();
       this.pauseResolve = null;
@@ -246,6 +269,191 @@ export class AgentWorker extends EventEmitter {
     this.pendingMessages.push(entry);
   }
 
+  // ─── Daemon Mode ──────────────────────────────────────
+
+  /**
+   * Execute steps then enter daemon loop — agent stays alive waiting for events.
+   * Errors do NOT kill the daemon; agent retries with backoff.
+   */
+  async executeDaemon(startStep = 0, upstreamContext?: string, skipSteps = false): Promise<void> {
+    if (!skipSteps) {
+      // Run initial steps
+      await this.execute(startStep, upstreamContext);
+
+      // If aborted, don't enter daemon loop
+      if (this.abortController?.signal.aborted) return;
+    } else {
+      // Skip steps — just prepare for daemon loop
+      this.abortController = new AbortController();
+    }
+
+    // Enter daemon mode: smith = active, task keeps its status (done/failed/idle)
+    this.state.daemonIteration = 0;
+    this.daemonRetryCount = 0;
+    this.setSmithStatus('active');
+
+    this.emitEvent({
+      type: 'log', agentId: this.config.id,
+      entry: { type: 'system', subtype: 'daemon', content: `[Smith] Active — listening for messages`, timestamp: new Date().toISOString() },
+    });
+
+    // Daemon loop — wait for messages, execute, repeat
+    while (!this.abortController?.signal.aborted) {
+      const reason = await this.waitForWake();
+
+      if (reason.type === 'abort') break;
+
+      this.state.daemonIteration = (this.state.daemonIteration || 0) + 1;
+      this.daemonRetryCount = 0;
+
+      try {
+        await this.executeDaemonStep(reason);
+        this.setTaskStatus('done');
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+
+        // Aborted = graceful stop, exit daemon loop
+        if (msg === 'Aborted' || this.abortController?.signal.aborted) break;
+
+        // Real errors: set failed, backoff, then return to idle
+        this.setTaskStatus('failed', msg);
+        this.emitEvent({ type: 'error', agentId: this.config.id, error: msg });
+        this.emitEvent({
+          type: 'log', agentId: this.config.id,
+          entry: { type: 'system', subtype: 'daemon', content: `[Smith] Error: ${msg}. Waiting for next event.`, timestamp: new Date().toISOString() },
+        });
+
+        const backoffMs = Math.min(5000 * Math.pow(2, this.daemonRetryCount++), 60_000);
+        await this.sleep(backoffMs);
+
+        if (this.abortController?.signal.aborted) break;
+        // Keep failed status — next wake event will set running again
+      }
+    }
+
+    // Exiting daemon loop
+    this.setSmithStatus('down');
+  }
+
+  /** Wake the daemon from listening state */
+  wake(reason: DaemonWakeReason): void {
+    if (this.wakeResolve) {
+      this.wakeResolve(reason);
+      this.wakeResolve = null;
+    }
+  }
+
+  /** Check if smith is active and idle (ready to receive messages) */
+  isListening(): boolean {
+    return this.state.smithStatus === 'active' && this.state.taskStatus !== 'running';
+  }
+
+  private waitForWake(): Promise<DaemonWakeReason> {
+    return new Promise<DaemonWakeReason>((resolve) => {
+      this.wakeResolve = resolve;
+      // Also resolve on abort
+      const onAbort = () => resolve({ type: 'abort' });
+      this.abortController?.signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  private async executeDaemonStep(reason: DaemonWakeReason): Promise<void> {
+    if (reason.type === 'abort') return;
+
+    this.setTaskStatus('running');
+
+    // Build prompt based on wake reason
+    let prompt: string;
+    switch (reason.type) {
+      case 'bus_message':
+        prompt = `You received new messages from other agents:\n${reason.messages.map(m => m.content).join('\n')}\n\nReact accordingly — update your work, respond, or take action as needed.`;
+        break;
+      case 'upstream_changed':
+        prompt = `Your upstream dependency (agent ${reason.agentId}) has produced new output: ${reason.files.join(', ')}.\n\nRe-analyze and update your work based on the new upstream output.`;
+        break;
+      case 'input_changed':
+        prompt = `New requirements have been provided:\n${reason.content}\n\nUpdate your work based on these new requirements.`;
+        break;
+      case 'user_message':
+        prompt = `User message: ${reason.content}\n\nRespond and take action as needed.`;
+        break;
+    }
+
+    // Consume any pending bus messages
+    const contextMessages = [...this.pendingMessages];
+    this.pendingMessages = [];
+
+    for (const msg of contextMessages) {
+      this.state.history.push(msg);
+    }
+
+    // Execute using the last step definition as template (or first if no steps)
+    const stepTemplate = this.config.steps[this.config.steps.length - 1] || this.config.steps[0];
+    if (!stepTemplate) {
+      // No steps defined — just log
+      this.state.history.push({
+        type: 'system', subtype: 'daemon',
+        content: `[Daemon] Wake: ${reason.type} — no steps defined to execute`,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const step = {
+      ...stepTemplate,
+      id: `daemon-${this.state.daemonIteration}`,
+      label: `Daemon iteration ${this.state.daemonIteration}`,
+      prompt,
+    };
+
+    this.emitEvent({ type: 'step', agentId: this.config.id, stepIndex: -1, stepLabel: step.label });
+
+    const result = await this.backend.executeStep({
+      config: this.config,
+      step,
+      stepIndex: -1,
+      history: this.state.history,
+      projectPath: this.projectPath,
+      onBusSend: this.busCallbacks.onBusSend,
+      onBusRequest: this.busCallbacks.onBusRequest,
+      peerAgentIds: this.busCallbacks.peerAgentIds,
+      abortSignal: this.abortController?.signal,
+      onLog: (entry) => {
+        this.state.history.push(entry);
+        this.emitEvent({ type: 'log', agentId: this.config.id, entry });
+      },
+    });
+
+    // Validate result
+    const failureCheck = detectStepFailure(result.response);
+    if (failureCheck) {
+      throw new Error(failureCheck);
+    }
+
+    // Record result
+    this.state.history.push({
+      type: 'result', subtype: 'daemon_step',
+      content: result.response,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Collect artifacts
+    for (const artifact of result.artifacts) {
+      this.state.artifacts.push(artifact);
+      this.emitEvent({ type: 'artifact', agentId: this.config.id, artifact });
+    }
+
+    const stepSummary = summarizeStepResult(step.label, result.response, result.artifacts);
+    this.emitEvent({
+      type: 'log', agentId: this.config.id,
+      entry: { type: 'system', subtype: 'step_summary', content: stepSummary, timestamp: new Date().toISOString() },
+    });
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   /** Get current state snapshot (immutable copy) */
   getState(): Readonly<AgentState> {
     return { ...this.state };
@@ -258,9 +466,16 @@ export class AgentWorker extends EventEmitter {
 
   // ─── Private ─────────────────────────────────────────
 
-  private setStatus(status: AgentStatus): void {
-    this.state.status = status;
-    this.emitEvent({ type: 'status', agentId: this.config.id, status });
+  private setTaskStatus(taskStatus: TaskStatus, error?: string): void {
+    this.state.taskStatus = taskStatus;
+    this.state.error = error;
+    this.emitEvent({ type: 'task_status', agentId: this.config.id, taskStatus, error });
+  }
+
+  private setSmithStatus(smithStatus: SmithStatus, mode?: AgentMode): void {
+    this.state.smithStatus = smithStatus;
+    if (mode) this.state.mode = mode;
+    this.emitEvent({ type: 'smith_status', agentId: this.config.id, smithStatus, mode: this.state.mode });
   }
 
   private emitEvent(event: WorkerEvent): void {

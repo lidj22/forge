@@ -155,6 +155,7 @@ export function ensureInitialized() {
   startTelegramBot(); // registers task event listener only
   startTerminalProcess();
   startTelegramProcess(); // spawns telegram-standalone
+  startWorkspaceProcess(); // spawns workspace-standalone
 
   const settings = loadSettings();
   if (settings.tunnelAutoStart) {
@@ -220,4 +221,39 @@ function startTerminalProcess() {
     console.log('[terminal] Started standalone server (pid:', terminalChild.pid, ')');
   });
   tester.listen(termPort);
+}
+
+let workspaceChild: ReturnType<typeof spawn> | null = null;
+
+function startWorkspaceProcess() {
+  if (workspaceChild) return;
+
+  const wsPort = Number(process.env.WORKSPACE_PORT) || 8405;
+
+  const net = require('node:net');
+  const tester = net.createServer();
+  tester.once('error', () => {
+    // Port in use — kill stale process and retry after 2s
+    console.log(`[workspace] Port ${wsPort} in use, killing stale process...`);
+    try { require('node:child_process').execSync(`lsof -ti:${wsPort} | xargs kill -9 2>/dev/null`, { timeout: 3000 }); } catch {}
+    setTimeout(() => {
+      if (!workspaceChild) launchWorkspaceDaemon();
+    }, 2000);
+  });
+  tester.once('listening', () => {
+    tester.close();
+    launchWorkspaceDaemon();
+  });
+  tester.listen(wsPort);
+}
+
+function launchWorkspaceDaemon() {
+  const script = join(process.cwd(), 'lib', 'workspace-standalone.ts');
+  workspaceChild = spawn('npx', ['tsx', script], {
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env },
+    detached: false,
+  });
+  workspaceChild.on('exit', () => { workspaceChild = null; });
+  console.log('[workspace] Started daemon (pid:', workspaceChild.pid, ')');
 }

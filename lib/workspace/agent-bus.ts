@@ -69,8 +69,8 @@ export class AgentBus extends EventEmitter {
       return msg;
     }
 
-    // Start ACK timer for non-ack messages
-    this.startAckTimer(msg);
+    // No ACK timer — in same-process architecture, messages are handled synchronously
+    // Status is managed directly by orchestrator (pending → acked/failed)
 
     // Check if this resolves a pending request
     if (type === 'response' && payload.replyTo) {
@@ -114,7 +114,7 @@ export class AgentBus extends EventEmitter {
       from: agentId, to: '_system', type: 'notify',
       payload: { action: 'task_complete', content: summary, files },
       timestamp: Date.now(),
-      status: 'delivered',
+      status: 'done',
     });
     this.emit('message', this.log[this.log.length - 1]);
   }
@@ -125,7 +125,7 @@ export class AgentBus extends EventEmitter {
       from: agentId, to: '_system', type: 'notify',
       payload: { action: 'step_complete', content: `Step "${stepLabel}" completed`, files },
       timestamp: Date.now(),
-      status: 'delivered',
+      status: 'done',
     });
     this.emit('message', this.log[this.log.length - 1]);
   }
@@ -136,7 +136,7 @@ export class AgentBus extends EventEmitter {
       from: agentId, to: '_system', type: 'notify',
       payload: { action: 'error', content: error },
       timestamp: Date.now(),
-      status: 'delivered',
+      status: 'done',
     });
     this.emit('message', this.log[this.log.length - 1]);
   }
@@ -151,19 +151,19 @@ export class AgentBus extends EventEmitter {
     if (pending) {
       clearTimeout(pending.timer);
       this.pendingAcks.delete(originalId);
-      pending.msg.status = 'acked';
+      pending.msg.status = 'done';
     }
   }
 
   private startAckTimer(msg: BusMessage): void {
     const timer = setTimeout(() => {
-      this.retryMessage(msg);
+      this.retryAckTimeout(msg);
     }, ACK_TIMEOUT_MS);
 
     this.pendingAcks.set(msg.id, { timer, msg, retries: 0 });
   }
 
-  private retryMessage(msg: BusMessage): void {
+  private retryAckTimeout(msg: BusMessage): void {
     const pending = this.pendingAcks.get(msg.id);
     if (!pending) return;
 
@@ -192,7 +192,7 @@ export class AgentBus extends EventEmitter {
 
     // Reset timer
     pending.timer = setTimeout(() => {
-      this.retryMessage(msg);
+      this.retryAckTimeout(msg);
     }, ACK_TIMEOUT_MS);
   }
 
@@ -216,7 +216,6 @@ export class AgentBus extends EventEmitter {
       // Remove from seen set so handleBusMessage won't dedup it
       this.unsee(msg.id);
       this.emit('message', msg);
-      this.startAckTimer(msg);
     }
   }
 
@@ -243,13 +242,41 @@ export class AgentBus extends EventEmitter {
   markDelivered(messageId: string): void {
     const msg = this.log.find(m => m.id === messageId);
     if (msg && msg.status === 'pending') {
-      msg.status = 'delivered';
+      msg.status = 'done';
     }
   }
 
   /** Get undelivered messages for an agent (pending status only, excludes ACKs) */
   getPendingMessagesFor(agentId: string): BusMessage[] {
     return this.log.filter(m => m.to === agentId && m.status === 'pending' && m.type !== 'ack');
+  }
+
+  /** Retry a failed message by ID — mark as pending and re-emit for delivery */
+  /** Retry/re-run a message — set back to pending and re-deliver */
+  retryMessage(messageId: string): BusMessage | null {
+    const msg = this.log.find(m => m.id === messageId);
+    if (!msg || msg.status === 'pending') return null; // already pending, skip
+    const prevStatus = msg.status;
+    msg.status = 'pending';
+    msg.retries = 0;
+    // Remove from seen set so handleBusMessage won't dedup
+    this.unsee(messageId);
+    // Re-emit for delivery
+    this.emit('message', msg);
+    console.log(`[bus] ${prevStatus === 'done' ? 'Re-running' : 'Retrying'} message ${msg.payload.action} from ${msg.from} to ${msg.to}`);
+    return msg;
+  }
+
+  /** Mark all pending (non-ack) messages as failed — called on restart/reload */
+  markAllPendingAsFailed(): void {
+    let count = 0;
+    for (const msg of this.log) {
+      if (msg.status === 'pending' && msg.type !== 'ack') {
+        msg.status = 'failed';
+        count++;
+      }
+    }
+    if (count > 0) console.log(`[bus] Marked ${count} pending messages as failed (restart cleanup)`);
   }
 
   // ─── Query ─────────────────────────────────────────────

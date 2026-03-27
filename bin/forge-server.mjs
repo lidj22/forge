@@ -64,6 +64,7 @@ const resetPassword = process.argv.includes('--reset-password');
 
 const webPort = parseInt(getArg('--port')) || 8403;
 const terminalPort = parseInt(getArg('--terminal-port')) || (webPort + 1);
+const workspacePort = parseInt(getArg('--workspace-port')) || (webPort + 2);
 const DATA_DIR = getArg('--dir')?.replace(/^~/, homedir()) || join(homedir(), '.forge', 'data');
 
 const PID_FILE = join(DATA_DIR, 'forge.pid');
@@ -124,6 +125,7 @@ if (existsSync(envFile)) {
 // Set env vars for Next.js and terminal server
 process.env.PORT = String(webPort);
 process.env.TERMINAL_PORT = String(terminalPort);
+process.env.WORKSPACE_PORT = String(workspacePort);
 process.env.FORGE_DATA_DIR = DATA_DIR;
 
 // ── Password setup (first run or --reset-password) ──
@@ -255,7 +257,7 @@ function cleanupOrphans() {
     }
     // Kill standalone processes: our instance's + orphans without any tag
     try {
-      const out = execSync(`ps aux | grep -E 'telegram-standalone|terminal-standalone' | grep -v grep`, {
+      const out = execSync(`ps aux | grep -E 'telegram-standalone|terminal-standalone|workspace-standalone' | grep -v grep`, {
         encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
       for (const line of out.split('\n').filter(Boolean)) {
@@ -297,6 +299,16 @@ function startServices() {
   });
   services.push(telegramChild);
   console.log(`[forge] Telegram bot started (pid: ${telegramChild.pid})`);
+
+  // Workspace daemon
+  const workspaceScript = join(ROOT, 'lib', 'workspace-standalone.ts');
+  const workspaceChild = spawn('npx', ['tsx', workspaceScript, instanceTag], {
+    cwd: ROOT,
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: { ...process.env },
+  });
+  services.push(workspaceChild);
+  console.log(`[forge] Workspace daemon started (pid: ${workspaceChild.pid})`);
 
   // Track all child PIDs for clean shutdown
   const childPids = services.map(c => c.pid).filter(Boolean);

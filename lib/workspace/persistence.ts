@@ -9,8 +9,8 @@
  *       history.json         — conversation history snapshot
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { writeFile, appendFile, mkdir } from 'node:fs/promises';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, rmSync, renameSync } from 'node:fs';
+import { writeFile, appendFile, mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { WorkspaceState, AgentState, BusMessage, WorkspaceAgentConfig } from './types';
@@ -58,8 +58,11 @@ export async function saveWorkspace(state: WorkspaceState): Promise<void> {
     updatedAt: Date.now(),
   };
 
-  // Async write — doesn't block event loop
-  await writeFile(stateFile(state.id), JSON.stringify(stateToSave, null, 2), 'utf-8');
+  // Atomic write — write to temp file, then rename (prevents 0-byte on crash)
+  const target = stateFile(state.id);
+  const tmp = target + '.tmp';
+  await writeFile(tmp, JSON.stringify(stateToSave, null, 2), 'utf-8');
+  await rename(tmp, target);
 
   // Save per-agent history in parallel
   await Promise.all(
@@ -73,6 +76,37 @@ async function saveAgentHistory(workspaceId: string, agentId: string, state: Age
   const dir = agentDir(workspaceId, agentId);
   await mkdir(dir, { recursive: true });
   await writeFile(agentHistoryFile(workspaceId, agentId), JSON.stringify(state.history, null, 2), 'utf-8');
+}
+
+/** Synchronous save — used during shutdown to ensure data is written before process exits */
+export function saveWorkspaceSync(state: WorkspaceState): void {
+  const dir = workspaceDir(state.id);
+  mkdirSync(dir, { recursive: true });
+
+  const stateToSave: WorkspaceState = {
+    ...state,
+    agentStates: Object.fromEntries(
+      Object.entries(state.agentStates).map(([id, s]) => [id, {
+        ...s,
+        history: [],
+        logFile: agentLogFile(state.id, id),
+      }])
+    ),
+    updatedAt: Date.now(),
+  };
+
+  // Atomic: write temp → rename
+  const target = stateFile(state.id);
+  const tmp = target + '.tmp';
+  writeFileSync(tmp, JSON.stringify(stateToSave, null, 2), 'utf-8');
+  renameSync(tmp, target);
+
+  // Save per-agent history
+  for (const [agentId, agentState] of Object.entries(state.agentStates)) {
+    const adir = agentDir(state.id, agentId);
+    mkdirSync(adir, { recursive: true });
+    writeFileSync(agentHistoryFile(state.id, agentId), JSON.stringify(agentState.history, null, 2), 'utf-8');
+  }
 }
 
 // ─── Append Log ──────────────────────────────────────────
@@ -92,6 +126,10 @@ export function loadWorkspace(workspaceId: string): WorkspaceState | null {
 
   try {
     const raw = readFileSync(file, 'utf-8');
+    if (!raw || raw.trim().length === 0) {
+      console.error(`[persistence] Empty state file for workspace ${workspaceId}`);
+      return null;
+    }
     const state: WorkspaceState = JSON.parse(raw);
 
     // Restore per-agent history
@@ -105,9 +143,23 @@ export function loadWorkspace(workspaceId: string): WorkspaceState | null {
         }
       }
 
-      // Mark running agents as interrupted (they were killed on shutdown)
-      if (agentState.status === 'running') {
-        agentState.status = 'interrupted';
+      // Migrate old status field to new two-layer model
+      if ('status' in agentState && !('smithStatus' in agentState)) {
+        const oldStatus = (agentState as any).status;
+        (agentState as any).smithStatus = 'down';
+        (agentState as any).mode = (agentState as any).runMode || 'auto';
+        (agentState as any).taskStatus = (oldStatus === 'running' || oldStatus === 'listening') ? 'idle' :
+                       (oldStatus === 'interrupted') ? 'idle' :
+                       (oldStatus === 'waiting_approval') ? 'idle' :
+                       (oldStatus === 'paused') ? 'idle' :
+                       oldStatus;
+        delete (agentState as any).status;
+        delete (agentState as any).runMode;
+        delete (agentState as any).daemonMode;
+      }
+      // Mark running agents as idle (they were killed on shutdown)
+      if (agentState.taskStatus === 'running') {
+        agentState.taskStatus = 'idle';
       }
     }
 

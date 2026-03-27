@@ -160,22 +160,29 @@ export class CliBackend implements AgentBackend {
       };
       abortSignal?.addEventListener('abort', onAbort, { once: true });
 
-      // Real-time fatal error detection — shared across all CLI agents
+      // Fatal error detection pattern — only used for stderr (stdout is structured JSON)
       const FATAL_PATTERN = /usage limit|rate limit|hit your.*limit|upgrade to (plus|pro|max)|exceeded.*monthly|you've been rate limited|api key.*invalid|insufficient.*quota|billing.*not.*active/i;
       let fatalDetected = false;
 
       this.child.stdout?.on('data', (data: Buffer) => {
         const raw = data.toString();
-        // Check for fatal errors in raw output before parsing
+        // Fatal detection on stdout — only on non-JSON lines (skip tool results, user messages)
+        // JSON lines start with { and contain structured data from claude CLI
         if (!fatalDetected && FATAL_PATTERN.test(raw)) {
-          fatalDetected = true;
-          const errorLine = raw.split('\n').find(l => FATAL_PATTERN.test(l))?.trim() || 'Agent hit limit';
-          console.log(`[cli-backend] Fatal error detected: ${errorLine.slice(0, 100)}`);
-          onLog?.({ type: 'system', subtype: 'error', content: errorLine.slice(0, 200), timestamp: new Date().toISOString() });
-          this.child?.kill('SIGTERM');
-          return;
+          // Check each line individually — only flag if it's NOT inside a JSON payload
+          const nonJsonLines = raw.split('\n').filter(l => {
+            const trimmed = l.trim();
+            return trimmed && !trimmed.startsWith('{') && !trimmed.startsWith('"') && !trimmed.includes('tool_use_id');
+          });
+          const fatalLine = nonJsonLines.find(l => FATAL_PATTERN.test(l));
+          if (fatalLine) {
+            fatalDetected = true;
+            console.log(`[cli-backend] Fatal error detected: ${fatalLine.trim().slice(0, 100)}`);
+            onLog?.({ type: 'system', subtype: 'error', content: fatalLine.trim().slice(0, 200), timestamp: new Date().toISOString() });
+            this.child?.kill('SIGTERM');
+            return;
+          }
         }
-
         buffer += raw;
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
@@ -291,7 +298,8 @@ export class CliBackend implements AgentBackend {
             inputTokens,
             outputTokens,
           });
-        } else if (abortSignal?.aborted) {
+        } else if (abortSignal?.aborted || code === 143 || code === 130) {
+          // 143=SIGTERM, 130=SIGINT — normal shutdown, not an error
           reject(new Error('Aborted'));
         } else {
           reject(new Error(`CLI exited with code ${code}`));

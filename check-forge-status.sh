@@ -32,6 +32,15 @@ else
   echo "  ○ Telegram        stopped"
 fi
 
+# Workspace Daemon
+count=$(ps aux | grep 'workspace-standalone' | grep -v grep | grep -v 'npm exec' | grep -v 'cli.mjs' | wc -l | tr -d ' ')
+pid=$(ps aux | grep 'workspace-standalone' | grep -v grep | grep -v 'npm exec' | grep -v 'cli.mjs' | awk '{print $2}' | head -1)
+if [ "$count" -gt 0 ]; then
+  echo "  ● Workspace       running (pid: $pid)"
+else
+  echo "  ○ Workspace       stopped"
+fi
+
 # Cloudflare Tunnel
 count=$(ps aux | grep 'cloudflared tunnel' | grep -v grep | wc -l | tr -d ' ')
 pid=$(ps aux | grep 'cloudflared tunnel' | grep -v grep | awk '{print $2}' | head -1)

@@ -25,11 +25,14 @@ interface AgentConfig {
 }
 
 interface AgentState {
-  status: string; currentStep?: number;
-  runMode?: 'auto' | 'manual';
+  smithStatus: 'down' | 'active';
+  mode: 'auto' | 'manual';
+  taskStatus: 'idle' | 'running' | 'done' | 'failed';
+  currentStep?: number;
   tmuxSession?: string;
   artifacts: { type: string; path?: string; summary?: string }[];
   error?: string; lastCheckpoint?: number;
+  daemonIteration?: number;
 }
 
 // ─── Constants ───────────────────────────────────────────
@@ -43,14 +46,18 @@ const COLORS = [
   { border: '#06b6d4', bg: '#0a1a1a', accent: '#22d3ee' },
 ];
 
-const STATUS_MAP: Record<string, { label: string; color: string; glow?: boolean }> = {
+// Smith status colors
+const SMITH_STATUS: Record<string, { label: string; color: string; glow?: boolean }> = {
+  down: { label: 'down', color: '#30363d' },
+  active: { label: 'active', color: '#3fb950', glow: true },
+};
+
+// Task status colors
+const TASK_STATUS: Record<string, { label: string; color: string; glow?: boolean }> = {
   idle: { label: 'idle', color: '#30363d' },
   running: { label: 'running', color: '#3fb950', glow: true },
-  paused: { label: 'paused', color: '#d29922' },
-  waiting_approval: { label: 'waiting', color: '#d29922', glow: true },
   done: { label: 'done', color: '#58a6ff' },
   failed: { label: 'failed', color: '#f85149' },
-  interrupted: { label: 'interrupted', color: '#8b949e' },
 };
 
 const PRESET_AGENTS: Omit<AgentConfig, 'id'>[] = [
@@ -115,6 +122,7 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
   const [states, setStates] = useState<Record<string, AgentState>>({});
   const [logPreview, setLogPreview] = useState<Record<string, string[]>>({});
   const [busLog, setBusLog] = useState<any[]>([]);
+  const [daemonActive, setDaemonActive] = useState(false);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
@@ -131,19 +139,28 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
           setAgents(event.agents || []);
           setStates(event.agentStates || {});
           setBusLog(event.busLog || []);
+          if (event.daemonActive !== undefined) setDaemonActive(event.daemonActive);
           return;
         }
 
-        if (event.type === 'status') {
+        if (event.type === 'task_status') {
           setStates(prev => ({
             ...prev,
             [event.agentId]: {
               ...prev[event.agentId],
-              // Clear runMode when going back to idle (kill terminal → auto mode)
-              ...(event.status === 'idle' ? { runMode: undefined } : {}),
-              status: event.status,
-              // Clear error when status changes to non-error state
-              ...(event.status !== 'failed' ? { error: undefined } : {}),
+              taskStatus: event.taskStatus,
+              error: event.error,
+            },
+          }));
+        }
+
+        if (event.type === 'smith_status') {
+          setStates(prev => ({
+            ...prev,
+            [event.agentId]: {
+              ...prev[event.agentId],
+              smithStatus: event.smithStatus,
+              mode: event.mode,
             },
           }));
         }
@@ -174,7 +191,7 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
         if (event.type === 'error') {
           setStates(prev => ({
             ...prev,
-            [event.agentId]: { ...prev[event.agentId], status: 'failed', error: event.error },
+            [event.agentId]: { ...prev[event.agentId], taskStatus: 'failed', error: event.error },
           }));
         }
 
@@ -184,7 +201,16 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
 
         // Server pushed updated agents list + states (after add/remove/update/reset)
         if (event.type === 'agents_changed') {
-          setAgents(event.agents || []);
+          const newAgents = event.agents || [];
+          setAgents(prev => {
+            // Guard: don't accept a smaller agents list unless it was an explicit removal
+            // (removal shrinks by exactly 1, not more)
+            if (newAgents.length > 0 && newAgents.length < prev.length - 1) {
+              console.warn(`[sse] agents_changed: ignoring shrink from ${prev.length} to ${newAgents.length}`);
+              return prev;
+            }
+            return newAgents;
+          });
           if (event.agentStates) setStates(event.agentStates);
         }
 
@@ -198,7 +224,7 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
     return () => es.close();
   }, [workspaceId]);
 
-  return { agents, states, logPreview, busLog, setAgents };
+  return { agents, states, logPreview, busLog, setAgents, daemonActive, setDaemonActive };
 }
 
 // ─── Agent Config Modal ──────────────────────────────────
@@ -441,6 +467,42 @@ function RunPromptDialog({ agentLabel, onRun, onCancel }: {
 
 // ─── Log Panel (overlay) ─────────────────────────────────
 
+/** Format log content: handle \n, truncate long text, detect JSON */
+function LogContent({ content }: { content: string }) {
+  if (!content) return null;
+  const MAX_LINES = 30;
+  const MAX_CHARS = 3000;
+
+  let text = content;
+
+  // Try to parse JSON and extract readable content
+  if (text.startsWith('{') || text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text);
+      // Tool result with content field
+      if (parsed.content) text = String(parsed.content);
+      else text = JSON.stringify(parsed, null, 2);
+    } catch {
+      // Not valid JSON, keep as-is
+    }
+  }
+
+  // Truncate
+  const lines = text.split('\n');
+  const truncatedLines = lines.length > MAX_LINES;
+  const truncatedChars = text.length > MAX_CHARS;
+  if (truncatedLines) text = lines.slice(0, MAX_LINES).join('\n');
+  if (truncatedChars) text = text.slice(0, MAX_CHARS);
+  const truncated = truncatedLines || truncatedChars;
+
+  return (
+    <span className="break-all">
+      <pre className="whitespace-pre-wrap text-[10px] leading-relaxed inline">{text}</pre>
+      {truncated && <span className="text-gray-600 text-[9px]"> ...({lines.length} lines)</span>}
+    </span>
+  );
+}
+
 function LogPanel({ agentId, agentLabel, workspaceId, onClose }: {
   agentId: string; agentLabel: string; workspaceId: string; onClose: () => void;
 }) {
@@ -509,7 +571,7 @@ function LogPanel({ agentId, agentLabel, workspaceId, onClose }: {
                   <>
                     <span className="text-[8px] text-gray-600 shrink-0 w-16">{entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : ''}</span>
                     {entry.tool && <span className="text-yellow-500 shrink-0">[{entry.tool}]</span>}
-                    <span className="break-all">{entry.content}</span>
+                    <LogContent content={entry.content} />
                   </>
                 )}
               </div>
@@ -612,8 +674,8 @@ function MemoryPanel({ agentId, agentLabel, workspaceId, onClose }: {
 
 // ─── Agent Inbox/Outbox Panel ────────────────────────────
 
-function InboxPanel({ agentId, agentLabel, busLog, agents, onClose }: {
-  agentId: string; agentLabel: string; busLog: any[]; agents: AgentConfig[]; onClose: () => void;
+function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose }: {
+  agentId: string; agentLabel: string; busLog: any[]; agents: AgentConfig[]; workspaceId: string; onClose: () => void;
 }) {
   const labelMap = new Map(agents.map(a => [a.id, `${a.icon} ${a.label}`]));
   const getLabel = (id: string) => labelMap.get(id) || id;
@@ -662,10 +724,14 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, onClose }: {
                   msg.payload?.action === 'question' ? 'bg-yellow-500/20 text-yellow-400' :
                   'bg-gray-500/20 text-gray-400'
                 }`}>{msg.payload?.action}</span>
-                {msg.status && msg.status !== 'delivered' && (
-                  <span className={`text-[7px] ${msg.status === 'acked' ? 'text-green-500' : msg.status === 'failed' ? 'text-red-500' : 'text-yellow-500'}`}>
-                    {msg.status}
-                  </span>
+                <span className={`text-[7px] ${msg.status === 'done' ? 'text-green-500' : msg.status === 'failed' ? 'text-red-500' : 'text-yellow-500'}`}>
+                  {msg.status || 'pending'}
+                </span>
+                {msg.status !== 'pending' && msg.type !== 'ack' && (
+                  <button onClick={() => wsApi(workspaceId, 'retry_message', { messageId: msg.id })}
+                    className="text-[7px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 ml-1">
+                    {msg.status === 'done' ? '↻ Re-run' : '↻ Retry'}
+                  </button>
                 )}
               </div>
               <div className="text-gray-300">{msg.payload?.content || ''}</div>
@@ -712,9 +778,9 @@ function BusPanel({ busLog, agents, onClose }: {
                 'bg-blue-500/20 text-blue-400'
               }`}>{msg.payload?.action}</span>
               <span className="text-gray-400 truncate flex-1">{msg.payload?.content || ''}</span>
-              {msg.status && msg.status !== 'delivered' && (
+              {msg.status && msg.status !== 'done' && (
                 <span className={`text-[7px] px-1 rounded ${
-                  msg.status === 'acked' ? 'text-green-500' : msg.status === 'failed' ? 'text-red-500' : 'text-yellow-500'
+                  msg.status === 'done' ? 'text-green-500' : msg.status === 'failed' ? 'text-red-500' : 'text-yellow-500'
                 }`}>{msg.status}</span>
               )}
             </div>
@@ -968,7 +1034,7 @@ interface InputNodeData {
 
 function InputFlowNode({ data }: NodeProps<Node<InputNodeData>>) {
   const { config, state, onSubmit, onEdit, onRemove } = data;
-  const isDone = state?.status === 'done';
+  const isDone = state?.taskStatus === 'done';
   const [text, setText] = useState('');
   const entries = config.entries || [];
 
@@ -1052,15 +1118,19 @@ interface AgentNodeData {
 function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
   const { config, state, colorIdx, previewLines, onRun, onPause, onStop, onRetry, onEdit, onRemove, onMessage, onApprove, onShowLog, onShowMemory, onShowInbox, onOpenTerminal } = data;
   const c = COLORS[colorIdx % COLORS.length];
-  const status = state?.status || 'idle';
-  const statusInfo = STATUS_MAP[status] || STATUS_MAP.idle;
+  const smithStatus = state?.smithStatus || 'down';
+  const taskStatus = state?.taskStatus || 'idle';
+  const mode = state?.mode || 'auto';
+  const smithInfo = SMITH_STATUS[smithStatus] || SMITH_STATUS.down;
+  const taskInfo = TASK_STATUS[taskStatus] || TASK_STATUS.idle;
   const currentStep = state?.currentStep;
   const step = currentStep !== undefined ? config.steps[currentStep] : undefined;
+  const isApprovalPending = taskStatus === 'idle' && smithStatus === 'active'; // approximation, actual check would use approvalQueue
 
   return (
     <div className="w-52 flex flex-col rounded-lg select-none"
-      style={{ border: `1px solid ${c.border}${status === 'running' ? '90' : '40'}`, background: c.bg,
-        boxShadow: statusInfo.glow ? `0 0 12px ${statusInfo.color}25` : 'none' }}>
+      style={{ border: `1px solid ${c.border}${taskStatus === 'running' ? '90' : '40'}`, background: c.bg,
+        boxShadow: taskInfo.glow ? `0 0 12px ${taskInfo.color}25` : smithInfo.glow ? `0 0 8px ${smithInfo.color}15` : 'none' }}>
       <Handle type="target" position={Position.Left} style={{ background: c.accent, width: 8, height: 8, border: 'none' }} />
       <Handle type="source" position={Position.Right} style={{ background: c.accent, width: 8, height: 8, border: 'none' }} />
 
@@ -1071,24 +1141,22 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
           <div className="text-xs font-semibold text-white truncate">{config.label}</div>
           <div className="text-[8px]" style={{ color: c.accent }}>{config.backend === 'api' ? config.provider || 'api' : config.agentId || 'cli'}</div>
         </div>
-        {/* Status badge */}
-        <div className="flex items-center gap-1">
-          {state?.runMode === 'manual' ? (
-            <>
-              <div className="w-2 h-2 rounded-full bg-green-400" style={{ boxShadow: '0 0 6px #4ade80' }} />
-              <span className="text-[7px] text-green-400">⌨️ manual</span>
-            </>
-          ) : (
-            <>
-              <div className="w-2 h-2 rounded-full" style={{ background: statusInfo.color, boxShadow: statusInfo.glow ? `0 0 6px ${statusInfo.color}` : 'none' }} />
-              <span className="text-[7px]" style={{ color: statusInfo.color }}>{statusInfo.label}</span>
-            </>
-          )}
+        {/* Dual status badge: smith + task */}
+        <div className="flex flex-col items-end gap-0.5">
+          <div className="flex items-center gap-1">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ background: smithInfo.color, boxShadow: smithInfo.glow ? `0 0 4px ${smithInfo.color}` : 'none' }} />
+            <span className="text-[7px]" style={{ color: smithInfo.color }}>{smithInfo.label}</span>
+            {mode === 'manual' && <span className="text-[7px] text-green-400">⌨️</span>}
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-1.5 h-1.5 rounded-full" style={{ background: taskInfo.color, boxShadow: taskInfo.glow ? `0 0 4px ${taskInfo.color}` : 'none' }} />
+            <span className="text-[7px]" style={{ color: taskInfo.color }}>{taskInfo.label}</span>
+          </div>
         </div>
       </div>
 
       {/* Current step */}
-      {step && status === 'running' && (
+      {step && taskStatus === 'running' && (
         <div className="px-3 pb-1 text-[8px] text-yellow-400/80" style={{ borderTop: `1px solid ${c.border}15` }}>
           Step {(currentStep || 0) + 1}/{config.steps.length}: {step.label}
         </div>
@@ -1113,34 +1181,14 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
 
       {/* Actions */}
       <div className="flex items-center gap-1 px-2 py-1.5" style={{ borderTop: `1px solid ${c.border}15` }}>
-        {(status === 'idle' || status === 'done') && (
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onRun(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30">
-            {status === 'done' ? '↻ Re-run' : '▶ Run'}
-          </button>
-        )}
-        {status === 'running' && <>
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onPause(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30">⏸</button>
+        {taskStatus === 'running' && (
           <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onStop(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">■</button>
-        </>}
-        {status === 'paused' && (
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onRun(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30">▶ Resume</button>
+            className="text-[9px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">■ Stop</button>
         )}
-        {status === 'waiting_approval' && (
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onApprove(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-yellow-600/20 text-yellow-400 hover:bg-yellow-600/30 animate-pulse">✓ Approve</button>
-        )}
-        {(status === 'failed' || status === 'interrupted') && (
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onRetry(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-400 hover:bg-orange-600/30">↻ Retry</button>
-        )}
-        {/* Message button — always visible except when idle */}
-        {status !== 'idle' && (
+        {/* Message button — send instructions to agent */}
+        {smithStatus === 'active' && taskStatus !== 'running' && (
           <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onMessage(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30">💬</button>
+            className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30">💬 Message</button>
         )}
         <div className="flex-1" />
         <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onOpenTerminal(); }}
@@ -1211,7 +1259,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
   }, [projectPath, projectName]);
 
   // SSE stream — server is the single source of truth
-  const { agents, states, logPreview, busLog } = useWorkspaceStream(workspaceId, (event) => {
+  const { agents, states, logPreview, busLog, daemonActive: daemonActiveFromStream, setDaemonActive: setDaemonActiveFromStream } = useWorkspaceStream(workspaceId, (event) => {
     if (event.type === 'user_input_request') {
       setUserInputRequest(event);
     }
@@ -1223,7 +1271,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
     if (autoOpenDone.current || agents.length === 0 || Object.keys(states).length === 0) return;
     autoOpenDone.current = true;
     const manualAgents = agents.filter(a =>
-      a.type !== 'input' && states[a.id]?.runMode === 'manual' && states[a.id]?.tmuxSession
+      a.type !== 'input' && states[a.id]?.mode === 'manual' && states[a.id]?.tmuxSession
     );
     if (manualAgents.length > 0) {
       const safeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
@@ -1259,7 +1307,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
             type: 'input' as const,
             data: {
               config: agent,
-              state: states[agent.id] || { status: 'idle', artifacts: [] },
+              state: states[agent.id] || { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', artifacts: [] },
               onSubmit: (content: string) => {
                 // Optimistic update
                 wsApi(workspaceId!, 'complete_input', { agentId: agent.id, content });
@@ -1279,16 +1327,11 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           type: 'agent' as const,
           data: {
             config: agent,
-            state: states[agent.id] || { status: 'idle', artifacts: [] },
+            state: states[agent.id] || { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', artifacts: [] },
             colorIdx: i,
             previewLines: logPreview[agent.id] || [],
             onRun: () => {
-              const s = states[agent.id]?.status;
-              if (s === 'paused') {
-                wsApi(workspaceId!, 'resume', { agentId: agent.id });
-              } else {
-                wsApi(workspaceId!, 'run', { agentId: agent.id });
-              }
+              wsApi(workspaceId!, 'run', { agentId: agent.id });
             },
             onPause: () => wsApi(workspaceId!, 'pause', { agentId: agent.id }),
             onStop: () => wsApi(workspaceId!, 'stop', { agentId: agent.id }),
@@ -1320,7 +1363,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 ? agent.workDir : undefined;
 
               // If already manual with a tmux session, just reopen (attach)
-              if (agentState?.runMode === 'manual' && existingTmux) {
+              if (agentState?.mode === 'manual' && existingTmux) {
                 setFloatingTerminals(prev => [...prev, {
                   agentId: agent.id, label: agent.label, icon: agent.icon,
                   cliId: agent.agentId || 'claude', workDir,
@@ -1352,10 +1395,10 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
       for (const depId of agent.dependsOn) {
         const depState = states[depId];
         const targetState = states[agent.id];
-        const depStatus = depState?.status || 'idle';
-        const targetStatus = targetState?.status || 'idle';
-        const isFlowing = depStatus === 'running' || targetStatus === 'running';
-        const isCompleted = depStatus === 'done';
+        const depTask = depState?.taskStatus || 'idle';
+        const targetTask = targetState?.taskStatus || 'idle';
+        const isFlowing = depTask === 'running' || targetTask === 'running';
+        const isCompleted = depTask === 'done';
         const color = isFlowing ? '#58a6ff70' : isCompleted ? '#58a6ff40' : '#30363d60';
 
         // Find last bus message between these two agents
@@ -1462,6 +1505,16 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
   };
 
   const handleRunAll = () => { if (workspaceId) wsApi(workspaceId, 'run_all'); };
+  const handleStartDaemon = async () => {
+    if (!workspaceId) return;
+    const result = await wsApi(workspaceId, 'start_daemon');
+    if (result.ok) setDaemonActiveFromStream(true);
+  };
+  const handleStopDaemon = async () => {
+    if (!workspaceId) return;
+    const result = await wsApi(workspaceId, 'stop_daemon');
+    if (result.ok) setDaemonActiveFromStream(false);
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0" style={{ background: '#080810' }}>
@@ -1470,11 +1523,28 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
         <button onClick={onClose} className="text-gray-400 hover:text-white text-sm">←</button>
         <span className="text-xs font-bold text-white">Workspace</span>
         <span className="text-[9px] text-gray-500">{projectName}</span>
-        {agents.length > 0 && (
-          <button onClick={handleRunAll}
-            className="text-[8px] px-2 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30 ml-2">
-            ▶ Run All
-          </button>
+        {agents.length > 0 && !daemonActiveFromStream && (
+          <>
+            <button onClick={handleRunAll}
+              className="text-[8px] px-2 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30 ml-2">
+              ▶ Run All
+            </button>
+            <button onClick={handleStartDaemon}
+              className="text-[8px] px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30">
+              ⚡ Start Daemon
+            </button>
+          </>
+        )}
+        {daemonActiveFromStream && (
+          <>
+            <span className="text-[8px] px-2 py-0.5 rounded bg-green-600/30 text-green-400 ml-2 animate-pulse">
+              ● Daemon Active
+            </span>
+            <button onClick={handleStopDaemon}
+              className="text-[8px] px-2 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">
+              ■ Stop
+            </button>
+          </>
         )}
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => setShowBusPanel(true)}
@@ -1610,12 +1680,13 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
       )}
 
       {/* Inbox panel */}
-      {inboxTarget && (
+      {inboxTarget && workspaceId && (
         <InboxPanel
           agentId={inboxTarget.id}
           agentLabel={inboxTarget.label}
           busLog={busLog}
           agents={agents}
+          workspaceId={workspaceId}
           onClose={() => setInboxTarget(null)}
         />
       )}
