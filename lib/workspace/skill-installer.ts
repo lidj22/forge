@@ -1,10 +1,11 @@
 /**
- * Forge Skills Auto-Installer — installs forge skills into project's .claude/skills/
- * when a workspace is created or agent switches to manual mode.
+ * Forge Skills Auto-Installer — installs forge skills into user's ~/.claude/skills/
+ * so they are available across all projects and sessions.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
@@ -12,8 +13,9 @@ const _dirname = typeof __dirname !== 'undefined' ? __dirname : dirname(_filenam
 const FORGE_SKILLS_DIR = join(_dirname, '..', 'forge-skills');
 
 /**
- * Install forge workspace skills into a project.
- * Replaces template variables with actual workspace/agent IDs.
+ * Install forge workspace skills into user's ~/.claude/skills/.
+ * Skills use env vars ($FORGE_PORT, $FORGE_WORKSPACE_ID, $FORGE_AGENT_ID)
+ * so they work across all projects without per-project configuration.
  */
 export function installForgeSkills(
   projectPath: string,
@@ -21,7 +23,7 @@ export function installForgeSkills(
   agentId: string,
   forgePort = 8403,
 ): { installed: string[] } {
-  const skillsDir = join(projectPath, '.claude', 'skills');
+  const skillsDir = join(homedir(), '.claude', 'skills');
   mkdirSync(skillsDir, { recursive: true });
 
   const installed: string[] = [];
@@ -29,7 +31,6 @@ export function installForgeSkills(
   // Read all skill templates
   let sourceDir = FORGE_SKILLS_DIR;
   if (!existsSync(sourceDir)) {
-    // Fallback: try relative to cwd
     sourceDir = join(process.cwd(), 'lib', 'forge-skills');
   }
   if (!existsSync(sourceDir)) return { installed };
@@ -37,21 +38,19 @@ export function installForgeSkills(
   const files = readdirSync(sourceDir).filter(f => f.endsWith('.md'));
 
   for (const file of files) {
-    const template = readFileSync(join(sourceDir, file), 'utf-8');
-
-    // Replace template variables
-    const content = template
-      .replace(/\{\{FORGE_PORT\}\}/g, String(forgePort))
-      .replace(/\{\{WORKSPACE_ID\}\}/g, workspaceId)
-      .replace(/\{\{AGENT_ID\}\}/g, agentId);
-
+    const content = readFileSync(join(sourceDir, file), 'utf-8');
     const targetFile = join(skillsDir, file);
     writeFileSync(targetFile, content, 'utf-8');
     installed.push(file);
   }
 
-  // Ensure .claude/settings.json allows forge curl commands
-  ensureForgePermissions(projectPath);
+  // Ensure settings allow forge curl commands (check both global and project)
+  ensureForgePermissions(join(homedir(), '.claude'));
+  // Also fix project-level deny rules that might block forge curl
+  const projectClaudeDir = join(projectPath, '.claude');
+  if (existsSync(join(projectClaudeDir, 'settings.json'))) {
+    ensureForgePermissions(projectClaudeDir);
+  }
 
   return { installed };
 }
@@ -108,16 +107,15 @@ function ensureForgePermissions(projectPath: string): void {
  * Check if forge skills are already installed for this agent.
  */
 export function hasForgeSkills(projectPath: string): boolean {
-  const skillsDir = join(projectPath, '.claude', 'skills');
-  if (!existsSync(skillsDir)) return false;
-  return existsSync(join(skillsDir, 'forge-workspace-sync.md'));
+  const globalDir = join(homedir(), '.claude', 'skills');
+  return existsSync(join(globalDir, 'forge-workspace-sync.md'));
 }
 
 /**
  * Remove forge skills from a project.
  */
 export function removeForgeSkills(projectPath: string): void {
-  const skillsDir = join(projectPath, '.claude', 'skills');
+  const skillsDir = join(homedir(), '.claude', 'skills');
   if (!existsSync(skillsDir)) return;
 
   const forgeFiles = readdirSync(skillsDir).filter(f => f.startsWith('forge-'));
