@@ -125,6 +125,7 @@ if (existsSync(envFile)) {
 process.env.PORT = String(webPort);
 process.env.TERMINAL_PORT = String(terminalPort);
 process.env.FORGE_DATA_DIR = DATA_DIR;
+process.env.NEXT_TELEMETRY_DISABLED = '1';
 
 // ── Password setup (first run or --reset-password) ──
 if (!isStop) {
