@@ -259,7 +259,7 @@ function AgentConfigModal({ initial, mode, existingAgents, onConfirm, onCancel }
       setAvailableAgents(list);
     }).catch(() => {});
   }, []);
-  const [workDirVal, setWorkDirVal] = useState(initial.workDir || './');
+  const [workDirVal, setWorkDirVal] = useState(initial.workDir || '');
   const [outputs, setOutputs] = useState((initial.outputs || []).join(', '));
   const [selectedDeps, setSelectedDeps] = useState<Set<string>>(new Set(initial.dependsOn || []));
   const [stepsText, setStepsText] = useState(
@@ -408,7 +408,7 @@ function AgentConfigModal({ initial, mode, existingAgents, onConfirm, onCancel }
           <div className="flex gap-2">
             <div className="flex flex-col gap-1 w-28">
               <label className="text-[9px] text-gray-500 uppercase">Work Dir</label>
-              <input value={workDirVal} onChange={e => setWorkDirVal(e.target.value)} placeholder="./"
+              <input value={workDirVal} onChange={e => setWorkDirVal(e.target.value)} placeholder={label ? `${label.toLowerCase().replace(/\s+/g, '-')}/` : 'engineer/'}
                 className="text-xs bg-[#161b22] border border-[#30363d] rounded px-2 py-1 text-white focus:outline-none focus:border-[#58a6ff]" />
             </div>
             <div className="flex flex-col gap-1 flex-1">
@@ -433,7 +433,7 @@ function AgentConfigModal({ initial, mode, existingAgents, onConfirm, onCancel }
             onConfirm({
               label: label.trim(), icon: icon.trim() || '🤖', role: role.trim(),
               backend, agentId, dependsOn: Array.from(selectedDeps),
-              workDir: workDirVal.trim() || './',
+              workDir: workDirVal.trim() || label.trim().toLowerCase().replace(/\s+/g, '-') + '/',
               outputs: outputs.split(',').map(s => s.trim()).filter(Boolean),
               steps: parseSteps(),
             });

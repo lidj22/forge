@@ -86,7 +86,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
   private validateOutputs(config: WorkspaceAgentConfig, excludeId?: string): string | null {
     if (config.type === 'input') return null;
 
-    const normalize = (p: string) => p.replace(/\/$/, '') || '.';
+    const normalize = (p: string) => p.replace(/^\.\//, '').replace(/\/$/, '') || '.';
 
     // Validate workDir is within project (no ../ escape)
     if (config.workDir) {
