@@ -21,6 +21,7 @@ export interface AgentEntry {
   provider?: string;             // API provider (e.g., 'anthropic', 'google')
   model?: string;                // model override (for both CLI and API profiles)
   apiKey?: string;               // per-profile API key (encrypted)
+  env?: Record<string, string>;  // environment variables injected when spawning CLI
 }
 
 export interface ProviderEntry {

@@ -77,6 +77,7 @@ export function listAgents(): AgentConfig[] {
           backendType: 'cli',
           model: cfg.model || cfg.models?.task,
           skipPermissionsFlag: cfg.skipPermissionsFlag || baseAgent?.skipPermissionsFlag,
+          env: cfg.env,
         } as any);
         continue;
       }

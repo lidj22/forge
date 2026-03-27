@@ -30,6 +30,7 @@ export interface AgentConfig {
   provider?: string;         // API provider (anthropic, google, openai, grok)
   model?: string;            // model override for profiles
   apiKey?: string;           // per-profile API key
+  env?: Record<string, string>; // env vars injected on spawn
 }
 
 export interface AgentSpawnOptions {

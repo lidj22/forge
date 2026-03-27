@@ -812,6 +812,7 @@ function AddProfileForm({ type, baseAgents, onAdd }: {
   const [base, setBase] = useState(baseAgents[0]?.id || 'claude');
   const [model, setModel] = useState('');
   const [provider, setProvider] = useState('anthropic');
+  const [envText, setEnvText] = useState('');
   const [apiKey, setApiKey] = useState('');
 
   const inputClass = "w-full px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]";
@@ -825,15 +826,27 @@ function AddProfileForm({ type, baseAgents, onAdd }: {
     );
   }
 
+  const parseEnv = (): Record<string, string> | undefined => {
+    if (!envText.trim()) return undefined;
+    const env: Record<string, string> = {};
+    for (const line of envText.split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq > 0) {
+        env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+      }
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
+  };
+
   const handleAdd = () => {
     if (!id) return;
     if (type === 'cli') {
-      onAdd(id, { base, name: name || id, model: model || undefined });
+      onAdd(id, { base, name: name || id, model: model || undefined, env: parseEnv() });
     } else {
       onAdd(id, { type: 'api', name: name || id, provider, model: model || undefined, apiKey: apiKey || undefined });
     }
     setOpen(false);
-    setId(''); setName(''); setModel(''); setApiKey('');
+    setId(''); setName(''); setModel(''); setApiKey(''); setEnvText('');
   };
 
   return (
@@ -849,7 +862,7 @@ function AddProfileForm({ type, baseAgents, onAdd }: {
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Claude Opus" className={inputClass} />
         </div>
       </div>
-      {type === 'cli' ? (
+      {type === 'cli' ? (<>
         <div className="flex gap-2">
           <div className="flex-1">
             <label className="text-[8px] text-[var(--text-secondary)]">Base Agent</label>
@@ -871,7 +884,13 @@ function AddProfileForm({ type, baseAgents, onAdd }: {
             <input value={model} onChange={e => setModel(e.target.value)} placeholder="claude-opus-4-6" className={inputClass} />
           </div>
         </div>
-      ) : (
+        <div>
+          <label className="text-[8px] text-[var(--text-secondary)]">Environment Variables (one per line: KEY=VALUE)</label>
+          <textarea value={envText} onChange={e => setEnvText(e.target.value)} rows={3}
+            placeholder={'ANTHROPIC_AUTH_TOKEN=sk-...\nANTHROPIC_BASE_URL=http://...\nDISABLE_TELEMETRY=true'}
+            className={inputClass + ' resize-none font-mono'} />
+        </div>
+      </>) : (
         <>
           <div className="flex gap-2">
             <div className="flex-1">

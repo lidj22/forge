@@ -110,10 +110,12 @@ export class CliBackend implements AgentBackend {
     const prompt = this.buildStepPrompt(step, history, upstreamContext);
 
     // Use adapter to build spawn command (same as task-manager)
+    // Model priority: workspace config > profile config > adapter default
+    const effectiveModel = config.model || (adapter.config as any).model;
     const spawnOpts = adapter.buildTaskSpawn({
       projectPath,
       prompt,
-      model: config.model,
+      model: effectiveModel,
       conversationId: this.sessionId,
       skipPermissions: true,
       outputFormat: adapter.config.capabilities?.supportsStreamJson ? 'stream-json' : undefined,
@@ -127,7 +129,9 @@ export class CliBackend implements AgentBackend {
     });
 
     return new Promise<StepExecutionResult>((resolve, reject) => {
-      const env = { ...process.env, ...(spawnOpts.env || {}) };
+      // Merge env: process env → adapter spawn env → profile env overrides
+      const profileEnv = (adapter.config as any).env || {};
+      const env = { ...process.env, ...(spawnOpts.env || {}), ...profileEnv };
       delete env.CLAUDECODE;
 
       // Check if agent needs TTY (same logic as task-manager)
