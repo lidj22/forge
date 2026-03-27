@@ -22,6 +22,7 @@ export interface AgentEntry {
   model?: string;                // model override (for both CLI and API profiles)
   apiKey?: string;               // per-profile API key (encrypted)
   env?: Record<string, string>;  // environment variables injected when spawning CLI
+  cliType?: 'claude-code' | 'codex' | 'aider' | 'generic'; // CLI tool type — determines session support, resume flags, etc.
 }
 
 export interface ProviderEntry {

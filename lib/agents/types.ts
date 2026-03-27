@@ -31,6 +31,7 @@ export interface AgentConfig {
   model?: string;            // model override for profiles
   apiKey?: string;           // per-profile API key
   env?: Record<string, string>; // env vars injected on spawn
+  cliType?: 'claude-code' | 'codex' | 'aider' | 'generic'; // CLI tool type
 }
 
 export interface AgentSpawnOptions {

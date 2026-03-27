@@ -22,7 +22,7 @@ export function listAgents(): AgentConfig[] {
   const claudeConfig = settings.agents?.claude;
   const claude = detectClaude(claudeConfig?.path || settings.claudePath);
   if (claude) {
-    agents.push({ ...claude, enabled: claudeConfig?.enabled !== false, detected: true, skipPermissionsFlag: claudeConfig?.skipPermissionsFlag || '--dangerously-skip-permissions' } as any);
+    agents.push({ ...claude, enabled: claudeConfig?.enabled !== false, detected: true, skipPermissionsFlag: claudeConfig?.skipPermissionsFlag || '--dangerously-skip-permissions', cliType: 'claude-code' } as any);
   }
 
   // Codex
@@ -30,14 +30,14 @@ export function listAgents(): AgentConfig[] {
   const codex = detectAgent('codex', 'OpenAI Codex', codexConfig?.path || 'codex');
   if (codex) {
     codex.capabilities.requiresTTY = true;
-    agents.push({ ...codex, enabled: codexConfig?.enabled !== false, detected: true, skipPermissionsFlag: codexConfig?.skipPermissionsFlag || '--full-auto' } as any);
+    agents.push({ ...codex, enabled: codexConfig?.enabled !== false, detected: true, skipPermissionsFlag: codexConfig?.skipPermissionsFlag || '--full-auto', cliType: 'codex' } as any);
   }
 
   // Aider
   const aiderConfig = settings.agents?.aider;
   const aider = detectAgent('aider', 'Aider', aiderConfig?.path || 'aider', ['--message']);
   if (aider) {
-    agents.push({ ...aider, enabled: aiderConfig?.enabled !== false, detected: true, skipPermissionsFlag: aiderConfig?.skipPermissionsFlag || '--yes' } as any);
+    agents.push({ ...aider, enabled: aiderConfig?.enabled !== false, detected: true, skipPermissionsFlag: aiderConfig?.skipPermissionsFlag || '--yes', cliType: 'aider' } as any);
   }
 
   // Custom agents + profiles from settings
@@ -78,6 +78,7 @@ export function listAgents(): AgentConfig[] {
           model: cfg.model || cfg.models?.task,
           skipPermissionsFlag: cfg.skipPermissionsFlag || baseAgent?.skipPermissionsFlag,
           env: cfg.env,
+          cliType: cfg.cliType || (baseAgent as any)?.cliType || 'generic',
         } as any);
         continue;
       }
