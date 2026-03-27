@@ -280,15 +280,18 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         // Skills call Next.js API (/api/workspace/.../smith), so use FORGE_PORT not daemon PORT
         const result = installForgeSkills(orch.projectPath, id, agentId, FORGE_PORT);
 
-        // Apply agent profile config (env vars, model) to project's .claude/settings.json
-        // so interactive claude in terminal uses the right configuration
+        // Apply agent profile config (env vars, model) to smith's workDir .claude/settings.json
         if (agentConfig.agentId) {
           try {
+            const { join } = require('node:path');
             const { loadSettings } = require('../settings');
             const settings = loadSettings();
             const profileCfg = settings.agents?.[agentConfig.agentId];
             if (profileCfg && (profileCfg.env || profileCfg.model)) {
-              applyProfileToProject(orch.projectPath, { env: profileCfg.env, model: profileCfg.model });
+              const smithDir = agentConfig.workDir
+                ? join(orch.projectPath, agentConfig.workDir)
+                : orch.projectPath;
+              applyProfileToProject(smithDir, { env: profileCfg.env, model: profileCfg.model });
             }
           } catch {}
         }
