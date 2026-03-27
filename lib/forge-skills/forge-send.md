@@ -16,9 +16,9 @@ Send a message to another agent in the Forge Workspace. Use this INSTEAD of writ
 ## How to send
 
 ```bash
-curl -s -X POST http://localhost:{{FORGE_PORT}}/api/workspace/{{WORKSPACE_ID}}/smith \
+curl -s -X POST http://localhost:$FORGE_PORT/api/workspace/$FORGE_WORKSPACE_ID/smith \
   -H "Content-Type: application/json" \
-  -d '{"action":"send","agentId":"{{AGENT_ID}}","to":"TARGET_LABEL","msgAction":"ACTION","content":"YOUR MESSAGE"}'
+  -d '{"action":"send","agentId":"'$FORGE_AGENT_ID'","to":"TARGET_LABEL","msgAction":"ACTION","content":"YOUR MESSAGE"}'
 ```
 
 Where:

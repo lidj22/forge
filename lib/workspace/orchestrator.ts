@@ -30,6 +30,7 @@ import { AgentBus } from './agent-bus';
 import { ApiBackend } from './backends/api-backend';
 import { CliBackend } from './backends/cli-backend';
 import { appendAgentLog, saveWorkspace, saveWorkspaceSync, startAutoSave, stopAutoSave } from './persistence';
+import { hasForgeSkills, installForgeSkills } from './skill-installer';
 import {
   loadMemory, saveMemory, createMemory, formatMemoryForPrompt,
   addObservation, addSessionSummary, parseStepToObservations, buildSessionSummary,
@@ -361,7 +362,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const worker = new AgentWorker({
       config,
       backend,
-      projectPath: this.projectPath,
+      projectPath: this.projectPath, workspaceId: this.workspaceId,
       peerAgentIds,
       memoryContext: memoryContext || undefined,
       onBusSend: (to, content) => {
@@ -567,7 +568,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     const worker = new AgentWorker({
       config, backend,
-      projectPath: this.projectPath,
+      projectPath: this.projectPath, workspaceId: this.workspaceId,
       peerAgentIds,
       memoryContext: memoryContext || undefined,
       onBusSend: (to, content) => {
@@ -743,12 +744,22 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
 
     const { config } = entry;
+
+    // Ensure forge skills are installed for CLI agents
+    if (config.backend !== 'api' && !hasForgeSkills(this.projectPath)) {
+      try {
+        const port = Number(process.env.PORT) || 8403;
+        installForgeSkills(this.projectPath, this.workspaceId, agentId, port);
+        console.log(`[workspace] Installed forge skills for ${config.label}`);
+      } catch {}
+    }
+
     const backend = this.createBackend(config, agentId);
     const peerAgentIds = Array.from(this.agents.keys()).filter(id => id !== agentId);
 
     const worker = new AgentWorker({
       config, backend,
-      projectPath: this.projectPath,
+      projectPath: this.projectPath, workspaceId: this.workspaceId,
       peerAgentIds,
       initialTaskStatus: entry.state.taskStatus, // preserve current task status
       onBusSend: (to, content) => {

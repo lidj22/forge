@@ -96,7 +96,7 @@ export class CliBackend implements AgentBackend {
   }
 
   async executeStep(params: StepExecutionParams): Promise<StepExecutionResult> {
-    const { config, step, history, projectPath, upstreamContext, onLog, abortSignal } = params;
+    const { config, step, history, projectPath, upstreamContext, onLog, abortSignal, workspaceId } = params;
     const agentId = config.agentId || 'claude';
 
     let adapter;
@@ -129,9 +129,17 @@ export class CliBackend implements AgentBackend {
     });
 
     return new Promise<StepExecutionResult>((resolve, reject) => {
-      // Merge env: process env → adapter spawn env → profile env overrides
+      // Merge env: process env → adapter spawn env → profile env → workspace context
       const profileEnv = (adapter.config as any).env || {};
-      const env = { ...process.env, ...(spawnOpts.env || {}), ...profileEnv };
+      const env = {
+        ...process.env,
+        ...(spawnOpts.env || {}),
+        ...profileEnv,
+        // Inject workspace context so forge skills can use them
+        FORGE_AGENT_ID: config.id,
+        FORGE_WORKSPACE_ID: workspaceId || '',
+        FORGE_PORT: String(process.env.PORT || 8403),
+      };
       delete env.CLAUDECODE;
 
       // Check if agent needs TTY (same logic as task-manager)

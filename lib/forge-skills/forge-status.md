@@ -14,9 +14,9 @@ Check the current status of all agents in the Forge Workspace.
 ## How to check
 
 ```bash
-curl -s -X POST http://localhost:{{FORGE_PORT}}/api/workspace/{{WORKSPACE_ID}}/smith \
+curl -s -X POST http://localhost:$FORGE_PORT/api/workspace/$FORGE_WORKSPACE_ID/smith \
   -H "Content-Type: application/json" \
-  -d '{"action":"status","agentId":"{{AGENT_ID}}"}'
+  -d '{"action":"status","agentId":"'$FORGE_AGENT_ID'"}'
 ```
 
 Present the results as a clear status overview:

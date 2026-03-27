@@ -27,6 +27,7 @@ export interface AgentWorkerOptions {
   config: WorkspaceAgentConfig;
   backend: AgentBackend;
   projectPath: string;
+  workspaceId?: string;
   initialTaskStatus?: 'idle' | 'running' | 'done' | 'failed';
   // Bus communication callbacks (injected by orchestrator)
   onBusSend?: (to: string, content: string) => void;
@@ -45,6 +46,7 @@ export class AgentWorker extends EventEmitter {
   private state: AgentState;
   private backend: AgentBackend;
   private projectPath: string;
+  private workspaceId?: string;
   private busCallbacks: {
     onBusSend?: (to: string, content: string) => void;
     onBusRequest?: (to: string, question: string) => Promise<string>;
@@ -81,6 +83,7 @@ export class AgentWorker extends EventEmitter {
       onBusRequest: opts.onBusRequest,
       peerAgentIds: opts.peerAgentIds,
     };
+    this.workspaceId = opts.workspaceId;
     this.memoryContext = opts.memoryContext;
     this.onMemoryUpdate = opts.onMemoryUpdate;
     this.onMessageDone = opts.onMessageDone;
@@ -151,6 +154,7 @@ export class AgentWorker extends EventEmitter {
           stepIndex: i,
           history: this.state.history,
           projectPath: this.projectPath,
+          workspaceId: this.workspaceId,
           upstreamContext: i === startStep ? upstreamContext : undefined,
           onBusSend: this.busCallbacks.onBusSend,
           onBusRequest: this.busCallbacks.onBusRequest,
@@ -451,6 +455,7 @@ export class AgentWorker extends EventEmitter {
       stepIndex: -1,
       history: this.state.history,
       projectPath: this.projectPath,
+      workspaceId: this.workspaceId,
       onBusSend: this.busCallbacks.onBusSend,
       onBusRequest: this.busCallbacks.onBusRequest,
       peerAgentIds: this.busCallbacks.peerAgentIds,

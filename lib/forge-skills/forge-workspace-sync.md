@@ -16,9 +16,9 @@ When you detect that the user has completed a meaningful unit of work (implement
 First, collect your recent output that contains any [SEND:...] markers. Then run:
 
 ```bash
-curl -s -X POST http://localhost:{{FORGE_PORT}}/api/workspace/{{WORKSPACE_ID}}/smith \
+curl -s -X POST http://localhost:$FORGE_PORT/api/workspace/$FORGE_WORKSPACE_ID/smith \
   -H "Content-Type: application/json" \
-  -d '{"action":"done","agentId":"{{AGENT_ID}}","output":"PASTE_YOUR_RECENT_OUTPUT_WITH_SEND_MARKERS_HERE"}'
+  -d '{"action":"done","agentId":"'$FORGE_AGENT_ID'","output":"PASTE_YOUR_RECENT_OUTPUT_WITH_SEND_MARKERS_HERE"}'
 ```
 
 IMPORTANT: Include any `[SEND:AgentLabel:action] message` markers you wrote in the `output` field. The server will parse them and deliver the messages to other agents.

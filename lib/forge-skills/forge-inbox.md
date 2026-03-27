@@ -14,9 +14,9 @@ Check for messages from other agents and manage their status.
 ## Check inbox
 
 ```bash
-curl -s http://localhost:{{FORGE_PORT}}/api/workspace/{{WORKSPACE_ID}}/smith \
+curl -s http://localhost:$FORGE_PORT/api/workspace/$FORGE_WORKSPACE_ID/smith \
   -X POST -H "Content-Type: application/json" \
-  -d '{"action":"inbox","agentId":"{{AGENT_ID}}"}'
+  -d '{"action":"inbox","agentId":"'$FORGE_AGENT_ID'"}'
 ```
 
 This returns messages with `id`, `from`, `action`, `content`, `status`, `time`.
@@ -30,17 +30,17 @@ For each message, tell the user:
 ## Mark message as done (after handling it)
 
 ```bash
-curl -s http://localhost:{{FORGE_PORT}}/api/workspace/{{WORKSPACE_ID}}/smith \
+curl -s http://localhost:$FORGE_PORT/api/workspace/$FORGE_WORKSPACE_ID/smith \
   -X POST -H "Content-Type: application/json" \
-  -d '{"action":"message_done","agentId":"{{AGENT_ID}}","messageId":"MESSAGE_ID"}'
+  -d '{"action":"message_done","agentId":"'$FORGE_AGENT_ID'","messageId":"MESSAGE_ID"}'
 ```
 
 ## Mark message as failed
 
 ```bash
-curl -s http://localhost:{{FORGE_PORT}}/api/workspace/{{WORKSPACE_ID}}/smith \
+curl -s http://localhost:$FORGE_PORT/api/workspace/$FORGE_WORKSPACE_ID/smith \
   -X POST -H "Content-Type: application/json" \
-  -d '{"action":"message_failed","agentId":"{{AGENT_ID}}","messageId":"MESSAGE_ID"}'
+  -d '{"action":"message_failed","agentId":"'$FORGE_AGENT_ID'","messageId":"MESSAGE_ID"}'
 ```
 
 IMPORTANT: After handling a message (fixing a bug, answering a question, etc.), always mark it as done. If you can't handle it, mark it as failed.

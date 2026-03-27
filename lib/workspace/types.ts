@@ -161,6 +161,8 @@ export interface StepExecutionParams {
   onBusRequest?: (to: string, question: string) => Promise<string>;
   /** List of other agent IDs in the workspace (for communication tools) */
   peerAgentIds?: string[];
+  /** Workspace ID — injected as env var for forge skills */
+  workspaceId?: string;
 }
 
 export interface StepExecutionResult {
