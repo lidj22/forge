@@ -856,10 +856,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const entry = this.agents.get(agentId);
     if (!entry) return;
 
-    const { config } = entry;
+    // Stop existing worker first to prevent duplicate execution
+    if (entry.worker) {
+      entry.worker.removeAllListeners();
+      entry.worker.stop();
+      entry.worker = null;
+    }
 
-    // TODO: per-smith install hook for future use (commands, custom skills, etc.)
-    // Skills are installed globally in startDaemon, not per-smith
+    const { config } = entry;
 
     const backend = this.createBackend(config, agentId);
     const peerAgentIds = Array.from(this.agents.keys()).filter(id => id !== agentId);
