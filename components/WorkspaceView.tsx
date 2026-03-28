@@ -293,9 +293,18 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
     fetch(`/api/code?dir=${encodeURIComponent(projectPath)}`)
       .then(r => r.json())
       .then(data => {
-        const dirs = (data.tree || [])
-          .filter((f: any) => f.type === 'directory')
-          .map((f: any) => f.name);
+        // Flatten directory tree (type='dir') to list of paths
+        const dirs: string[] = [];
+        const walk = (nodes: any[], prefix = '') => {
+          for (const n of nodes || []) {
+            if (n.type === 'dir') {
+              const path = prefix ? `${prefix}/${n.name}` : n.name;
+              dirs.push(path);
+              if (n.children) walk(n.children, path);
+            }
+          }
+        };
+        walk(data.tree || []);
         setProjectDirs(dirs);
       })
       .catch(() => {});
