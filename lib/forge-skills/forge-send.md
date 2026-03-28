@@ -12,6 +12,9 @@ Send a message to another agent in the Forge Workspace.
 - You found an issue that another agent should know about
 - User explicitly asks to send a message to another agent
 
+## When NOT to trigger
+- Do NOT send a reply to the agent whose message you are currently processing. The system automatically marks your result as done and notifies them. Only use forge-send for NEW issues or questions to OTHER agents.
+
 ## How to send
 
 IMPORTANT: Do NOT check environment variables first. Just run the command below — it auto-discovers everything.

@@ -534,6 +534,21 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
         ? agentId
         : 'user';
 
+      // Block: if sender is currently processing a message FROM the target,
+      // don't send — the result is already delivered via markMessageDone
+      if (senderId !== 'user') {
+        const senderEntry = orch.getSnapshot().agentStates[senderId];
+        if (senderEntry?.currentMessageId) {
+          const currentMsg = orch.getBus().getLog().find(m => m.id === senderEntry.currentMessageId);
+          if (currentMsg && currentMsg.from === target.id) {
+            return json(res, {
+              ok: true, skipped: true,
+              reason: `You are processing a message from ${target.label}. Your result will be delivered automatically — no need to send a reply.`,
+            });
+          }
+        }
+      }
+
       const sentMsg = orch.getBus().send(senderId, target.id, 'notify', {
         action: msgAction || 'agent_message',
         content,
