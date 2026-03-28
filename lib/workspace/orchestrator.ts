@@ -1522,19 +1522,30 @@ export class WorkspaceOrchestrator extends EventEmitter {
     let debugTick = 0;
     const tick = () => {
       const entry = this.agents.get(agentId);
-      if (!entry || entry.state.smithStatus !== 'active') {
+      if (!entry) {
         this.stopMessageLoop(agentId);
         return;
       }
+
+      // Don't stop loop if smith is down — just skip this tick
+      // (loop stays alive so it works when smith comes back)
+      if (entry.state.smithStatus !== 'active') return;
 
       // Skip if manual (user in terminal) or running (already busy)
       if (entry.state.mode === 'manual') return;
       if (entry.state.taskStatus === 'running') return;
 
-      // Skip if no worker ready
-      if (!entry.worker?.isListening()) {
+      // Skip if no worker ready — recreate if needed
+      if (!entry.worker) {
+        if (this.daemonActive) {
+          console.log(`[inbox] ${entry.config.label}: no worker, recreating...`);
+          this.enterDaemonListening(agentId);
+        }
+        return;
+      }
+      if (!entry.worker.isListening()) {
         if (++debugTick % 15 === 0) {
-          console.log(`[inbox] ${entry.config.label}: not listening (worker=${!!entry.worker} smith=${entry.state.smithStatus} task=${entry.state.taskStatus})`);
+          console.log(`[inbox] ${entry.config.label}: not listening (smith=${entry.state.smithStatus} task=${entry.state.taskStatus})`);
         }
         return;
       }
