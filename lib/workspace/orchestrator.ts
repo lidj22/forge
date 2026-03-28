@@ -1290,6 +1290,15 @@ export class WorkspaceOrchestrator extends EventEmitter {
    * Replaces direct triggerDownstream — all execution is now message-driven.
    * If no artifacts/changes, no message is sent → downstream stays idle.
    */
+  /** Build causedBy from the message currently being processed */
+  private buildCausedBy(agentId: string, entry: { worker: AgentWorker | null }): BusMessage['causedBy'] | undefined {
+    const msgId = entry.worker?.getCurrentMessageId?.();
+    if (!msgId) return undefined;
+    const msg = this.bus.getLog().find(m => m.id === msgId);
+    if (!msg) return undefined;
+    return { messageId: msg.id, from: msg.from, to: msg.to };
+  }
+
   /** Unified done handler: broadcast downstream or reply to sender based on message source */
   private handleAgentDone(agentId: string, entry: { config: WorkspaceAgentConfig; worker: AgentWorker | null; state: AgentState }, summary?: string): void {
     const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
@@ -1298,8 +1307,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.bus.notifyTaskComplete(agentId, files, summary);
 
     // Check what message triggered this execution
-    const processedMsgId = entry.worker?.getCurrentMessageId?.();
-    const processedMsg = processedMsgId ? this.bus.getLog().find(m => m.id === processedMsgId) : null;
+    const causedBy = this.buildCausedBy(agentId, entry);
+    const processedMsg = causedBy ? this.bus.getLog().find(m => m.id === causedBy.messageId) : null;
 
     if (processedMsg && !this.isUpstream(processedMsg.from, agentId)) {
       // Processed a message from downstream (or peer) → only reply to sender, don't broadcast
@@ -1309,10 +1318,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
         action: 'request_complete',
         content: `${entry.config.label} completed processing your request. ${files.length} files changed.`,
         files,
-      });
+      }, { category: 'notification', causedBy });
     } else {
       // Normal upstream completion or initial execution → broadcast to all downstream
-      this.broadcastCompletion(agentId);
+      this.broadcastCompletion(agentId, causedBy);
       this.notifyDownstreamForRevalidation(agentId, files);
     }
 
@@ -1320,7 +1329,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.checkWorkspaceComplete?.();
   }
 
-  private broadcastCompletion(completedAgentId: string): void {
+  private broadcastCompletion(completedAgentId: string, causedBy?: BusMessage['causedBy']): void {
     const completed = this.agents.get(completedAgentId);
     if (!completed) return;
 
@@ -1330,7 +1339,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
       .filter(h => h.subtype === 'final_summary' || h.subtype === 'step_summary')
       .slice(-1)[0]?.content || '';
 
-    // Always broadcast — downstream decides whether to act based on message content
     const content = files.length > 0
       ? `${completedLabel} completed: ${files.length} files changed. ${summary.slice(0, 200)}`
       : `${completedLabel} completed. ${summary.slice(0, 300) || 'Check upstream outputs for updates.'}`;
@@ -1346,7 +1354,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         action: 'upstream_complete',
         content,
         files,
-      });
+      }, { category: 'notification', causedBy });
       sent++;
       console.log(`[bus] ${completedLabel} → ${entry.config.label}: upstream_complete (${files.length} files)`);
     }
@@ -1460,8 +1468,29 @@ export class WorkspaceOrchestrator extends EventEmitter {
         return;
       }
 
-      // Find next pending message
-      const pending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
+      // Find next pending message, applying causedBy rules
+      const allPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
+      const pending = allPending.filter(m => {
+        // Tickets always accepted (1-to-1, ignores DAG)
+        if (m.category === 'ticket') return true;
+
+        // Notifications: check causedBy for loop prevention
+        if (m.causedBy) {
+          // Rule 1: Is this a response to something I sent? → accept (for verification)
+          const myOutbox = this.bus.getOutboxFor(agentId);
+          if (myOutbox.some(o => o.id === m.causedBy!.messageId)) return true;
+
+          // Rule 2: Notification from downstream → discard (prevents reverse flow)
+          if (!this.isUpstream(m.from, agentId)) {
+            console.log(`[inbox] ${entry.config.label}: discarding notification from downstream ${this.agents.get(m.from)?.config.label || m.from}`);
+            m.status = 'done' as any; // silently consume
+            return false;
+          }
+        }
+
+        // Default: accept (upstream notifications, no causedBy = initial trigger)
+        return true;
+      });
       if (pending.length === 0) return;
 
       const nextMsg = pending[0];

@@ -102,6 +102,10 @@ export interface Artifact {
 
 // ─── Bus Message ─────────────────────────────────────────
 
+export type MessageCategory = 'notification' | 'ticket';
+
+export type TicketStatus = 'open' | 'in_progress' | 'fixed' | 'verified' | 'closed';
+
 export interface BusMessage {
   id: string;
   from: string;                      // source agent ID
@@ -117,6 +121,18 @@ export interface BusMessage {
   // Delivery tracking
   status?: 'pending' | 'running' | 'done' | 'failed';
   retries?: number;
+  // Message classification
+  category?: MessageCategory;        // 'notification' (default, follows DAG) | 'ticket' (1-to-1, ignores DAG)
+  // Causal chain — which inbox message triggered this outbox message
+  causedBy?: {
+    messageId: string;               // the inbox message being processed
+    from: string;                    // who sent that inbox message
+    to: string;                      // who received it (this agent)
+  };
+  // Ticket lifecycle (only for category='ticket')
+  ticketStatus?: TicketStatus;
+  ticketRetries?: number;            // how many times this ticket has been retried
+  maxRetries?: number;               // configurable limit (default 3)
 }
 
 // ─── Agent Heartbeat ─────────────────────────────────────

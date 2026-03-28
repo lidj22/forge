@@ -12,7 +12,7 @@
 
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import type { BusMessage, AgentLiveness } from './types';
+import type { BusMessage, AgentLiveness, MessageCategory } from './types';
 
 const ACK_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
@@ -43,13 +43,23 @@ export class AgentBus extends EventEmitter {
 
   // ─── Send (one-to-one, reliable) ──────────────────────
 
-  send(from: string, to: string, type: BusMessage['type'], payload: BusMessage['payload']): BusMessage {
+  send(from: string, to: string, type: BusMessage['type'], payload: BusMessage['payload'], options?: {
+    category?: MessageCategory;
+    causedBy?: BusMessage['causedBy'];
+    ticketStatus?: BusMessage['ticketStatus'];
+    maxRetries?: number;
+  }): BusMessage {
     const msg: BusMessage = {
       id: randomUUID(),
       from, to, type, payload,
       timestamp: Date.now(),
       status: 'pending',
       retries: 0,
+      category: options?.category || 'notification',
+      causedBy: options?.causedBy,
+      ticketStatus: options?.ticketStatus,
+      ticketRetries: 0,
+      maxRetries: options?.maxRetries ?? 3,
     };
 
     this.log.push(msg);
@@ -261,6 +271,34 @@ export class AgentBus extends EventEmitter {
     this.unsee(messageId);
     console.log(`[bus] Retrying message ${messageId.slice(0, 8)} (${msg.payload.action})`);
     return msg;
+  }
+
+  /** Create a ticket (1-to-1, ignores DAG direction) */
+  createTicket(from: string, to: string, action: string, content: string, files?: string[], causedBy?: BusMessage['causedBy']): BusMessage {
+    return this.send(from, to, 'request', { action, content, files }, {
+      category: 'ticket',
+      causedBy,
+      ticketStatus: 'open',
+    });
+  }
+
+  /** Update ticket status */
+  updateTicketStatus(messageId: string, ticketStatus: BusMessage['ticketStatus']): void {
+    const msg = this.log.find(m => m.id === messageId && m.category === 'ticket');
+    if (msg) {
+      msg.ticketStatus = ticketStatus;
+      this.emit('message', msg);
+    }
+  }
+
+  /** Find outbox messages sent by an agent */
+  getOutboxFor(agentId: string): BusMessage[] {
+    return this.log.filter(m => m.from === agentId && m.type !== 'ack' && m.to !== '_system');
+  }
+
+  /** Find a message in agent's outbox by causedBy.messageId */
+  findInOutbox(agentId: string, causedByMessageId: string): BusMessage | null {
+    return this.log.find(m => m.from === agentId && m.causedBy?.messageId === causedByMessageId) || null;
   }
 
   /** Delete a message from the log (only done/failed) */
