@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback, memo, useImperativeHandle, forwardRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import '@xterm/xterm/css/xterm.css';
 
 // ─── Imperative API for parent components ────────────────────
@@ -1332,6 +1334,18 @@ const MemoTerminalPane = memo(function TerminalPane({
       if (el.closest('.hidden') || el.offsetWidth < 50 || el.offsetHeight < 30) return;
       initDone = true;
       term.open(el);
+      // WebGL: GPU-accelerated rendering with canvas fallback
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch {}
+      // Unicode 11: correct width for CJK characters
+      try {
+        const unicode11 = new Unicode11Addon();
+        term.loadAddon(unicode11);
+        term.unicode.activeVersion = '11';
+      } catch {}
       try { fit.fit(); } catch {}
       connect();
     }
