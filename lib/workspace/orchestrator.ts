@@ -1536,6 +1536,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
     }
   }
 
+  /** Track how many history entries have been scanned per agent to avoid re-parsing */
+  private busMarkerScanned = new Map<string, number>();
+
   private parseBusMarkers(fromAgentId: string, history: { type: string; content: string }[]): void {
     const markerRegex = /\[SEND:([^:]+):([^\]]+)\]\s*(.+)/g;
     const labelToId = new Map<string, string>();
@@ -1543,10 +1546,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
       labelToId.set(e.config.label.toLowerCase(), id);
     }
 
-    // Dedup: same target+action+content = only send once
-    const sent = new Set<string>();
+    // Only scan new entries since last parse (avoid re-sending from old history)
+    const lastScanned = this.busMarkerScanned.get(fromAgentId) || 0;
+    const newEntries = history.slice(lastScanned);
+    this.busMarkerScanned.set(fromAgentId, history.length);
 
-    for (const entry of history) {
+    for (const entry of newEntries) {
       let match;
       while ((match = markerRegex.exec(entry.content)) !== null) {
         const targetLabel = match[1].trim();
@@ -1555,10 +1560,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
         const targetId = labelToId.get(targetLabel.toLowerCase());
 
         if (targetId && targetId !== fromAgentId) {
-          const key = `${targetId}:${action}:${content}`;
-          if (sent.has(key)) continue;
-          sent.add(key);
-
           console.log(`[bus] Parsed marker from ${fromAgentId}: → ${targetLabel} (${action}): ${content.slice(0, 60)}`);
           this.bus.send(fromAgentId, targetId, 'notify', { action, content });
         }
