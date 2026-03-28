@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import TabBar from './TabBar';
 import ProjectDetail from './ProjectDetail';
+import { useSidebarResize } from '@/hooks/useSidebarResize';
 
 interface Project {
   name: string;
@@ -24,6 +25,8 @@ const MAX_MOUNTED_TABS = 5;
 function genTabId(): number { return Date.now() + Math.floor(Math.random() * 10000); }
 
 export default function ProjectManager() {
+  const { sidebarWidth, onSidebarDragStart } = useSidebarResize({ defaultWidth: 240, minWidth: 140, maxWidth: 400 });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [showClone, setShowClone] = useState(false);
   const [cloneUrl, setCloneUrl] = useState('');
@@ -193,8 +196,10 @@ export default function ProjectManager() {
 
   // Group projects by root
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set());
-  const roots = [...new Set(projects.map(p => p.root))];
-  const favoriteProjects = projects.filter(p => favorites.includes(p.path));
+  const roots = [...new Set(projects.map(p => p.root))].sort();
+  const favoriteProjects = projects
+    .filter(p => favorites.includes(p.path))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const toggleRoot = (root: string) => {
     setCollapsedRoots(prev => {
@@ -204,10 +209,40 @@ export default function ProjectManager() {
     });
   };
 
+  const activeTab = tabs.find(t => t.id === activeTabId);
+
   return (
     <div className="flex-1 flex min-h-0">
-      {/* Left sidebar — project list */}
-      <aside className="w-64 border-r border-[var(--border)] flex flex-col shrink-0">
+      {/* Collapsed sidebar — narrow strip with project initials */}
+      {sidebarCollapsed && (
+        <div className="w-10 border-r border-[var(--border)] flex flex-col shrink-0 overflow-hidden">
+          <button onClick={() => setSidebarCollapsed(false)}
+            className="w-full text-sm text-[var(--text-secondary)] hover:text-[var(--accent)] py-3 hover:bg-[var(--bg-secondary)] transition-colors"
+            title="Expand sidebar">
+            ▶
+          </button>
+          <div className="flex-1 overflow-y-auto">
+            {[...projects].sort((a, b) => a.name.localeCompare(b.name)).map(p => {
+              const isActive = activeTab?.projectPath === p.path;
+              const initial = p.name.slice(0, 2).toUpperCase();
+              return (
+                <button key={p.path}
+                  onClick={() => openProjectTab(p)}
+                  title={p.name}
+                  className={`w-full py-1.5 text-[9px] font-bold text-center ${
+                    isActive ? 'text-[var(--accent)] bg-[var(--accent)]/10' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
+                  }`}>
+                  {initial}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Full sidebar — project list */}
+      {!sidebarCollapsed && <>
+      <aside style={{ width: sidebarWidth }} className="border-r border-[var(--border)] flex flex-col shrink-0">
         <div className="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between">
           <span className="text-[11px] font-semibold text-[var(--text-primary)]">Projects</span>
           <button
@@ -308,6 +343,16 @@ export default function ProjectManager() {
           })}
         </div>
       </aside>
+      {/* Resize handle + collapse button */}
+      <div className="flex flex-col shrink-0">
+        <button onClick={() => setSidebarCollapsed(true)}
+          className="text-sm text-[var(--text-secondary)] hover:text-[var(--accent)] py-2 px-1 hover:bg-[var(--bg-secondary)] transition-colors"
+          title="Collapse sidebar">
+          ◀
+        </button>
+        <div onMouseDown={onSidebarDragStart} className="flex-1 w-1 cursor-col-resize hover:bg-[var(--accent)]/30 bg-[var(--border)]" />
+      </div>
+      </>}
 
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0">

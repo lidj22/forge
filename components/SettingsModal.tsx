@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 function SecretInput({ value, onChange, placeholder, className }: {
   value: string;
@@ -244,6 +244,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tunnelPassword, setTunnelPassword] = useState('');
   const [tunnelPasswordError, setTunnelPasswordError] = useState('');
   const [editingSecret, setEditingSecret] = useState<{ field: string; label: string } | null>(null);
+  const [hasUnsaved, setHasUnsaved] = useState(false);
+  const origSettingsRef = useRef('');
 
   const refreshTunnel = useCallback(() => {
     fetch('/api/tunnel').then(r => r.json()).then(setTunnel).catch(() => {});
@@ -254,6 +256,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       const status = data._secretStatus || {};
       delete data._secretStatus;
       setSettings(data);
+      origSettingsRef.current = JSON.stringify(data);
       setSecretStatus(status);
     });
   }, []);
@@ -276,9 +279,18 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings),
     });
+    origSettingsRef.current = JSON.stringify(settings);
+    setHasUnsaved(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
+
+  // Track unsaved changes
+  useEffect(() => {
+    if (origSettingsRef.current) {
+      setHasUnsaved(JSON.stringify(settings) !== origSettingsRef.current);
+    }
+  }, [settings]);
 
   const saveSecret = async (field: string, adminPassword: string, newValue: string): Promise<string | null> => {
     const res = await fetch('/api/settings', {
@@ -308,7 +320,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => {
+      if (hasUnsaved && !confirm('You have unsaved changes. Close anyway?')) return;
+      onClose();
+    }}>
       <div
         className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg w-[500px] max-h-[80vh] overflow-y-auto p-5 space-y-5"
         onClick={e => e.stopPropagation()}
@@ -364,13 +379,13 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             Markdown document directories (e.g. Obsidian vaults). Shown in the Docs tab.
           </p>
 
-          {(settings.docRoots || []).map(root => (
+          {(settings.docRoots || []).map((root: string) => (
             <div key={root} className="flex items-center gap-2">
               <span className="flex-1 text-xs px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded font-mono truncate">
                 {root}
               </span>
               <button
-                onClick={() => setSettings({ ...settings, docRoots: settings.docRoots.filter(r => r !== root) })}
+                onClick={() => setSettings({ ...settings, docRoots: settings.docRoots.filter((r: string) => r !== root) })}
                 className="text-[10px] px-2 py-1 text-[var(--red)] hover:bg-[var(--red)] hover:text-white rounded transition-colors"
               >
                 Remove
@@ -405,63 +420,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               Add
             </button>
           </div>
+          <DocsAgentSelect settings={settings} setSettings={setSettings} />
         </div>
 
-        {/* Claude Path */}
-        <div className="space-y-2">
-          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
-            Claude Code Path
-          </label>
-          <div className="flex gap-2">
-            <input
-              value={settings.claudePath}
-              onChange={e => setSettings({ ...settings, claudePath: e.target.value })}
-              placeholder="Auto-detect or enter path manually"
-              className="flex-1 px-2 py-1.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]"
-            />
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/detect-cli');
-                  const data = await res.json();
-                  const claude = data.tools?.find((t: any) => t.name === 'claude');
-                  if (claude?.path) {
-                    setSettings({ ...settings, claudePath: claude.path });
-                  } else {
-                    const hint = claude?.installHint || 'npm install -g @anthropic-ai/claude-code';
-                    alert(`Claude Code not found.\n\nInstall:\n  ${hint}`);
-                  }
-                } catch { alert('Detection failed'); }
-              }}
-              className="text-[10px] px-2 py-1.5 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white transition-colors shrink-0"
-            >
-              Detect
-            </button>
-          </div>
-          <p className={`text-[9px] ${settings.claudePath ? 'text-[var(--text-secondary)]' : 'text-[var(--yellow)]'}`}>
-            {settings.claudePath
-              ? 'Click Detect to re-scan, or edit manually.'
-              : 'Not configured. Click Detect or run `which claude` in terminal to find the path.'}
-          </p>
-        </div>
-
-        {/* Claude Home Directory */}
-        <div className="space-y-2">
-          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
-            Claude Home Directory
-          </label>
-          <input
-            type="text"
-            value={(settings as any).claudeHome || ''}
-            onChange={e => setSettings({ ...settings, claudeHome: e.target.value } as any)}
-            placeholder="~/.claude (default)"
-            className="w-full px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono"
-          />
-          <p className="text-[9px] text-[var(--text-secondary)]">
-            Where Claude Code stores skills, commands, and sessions. Leave empty for default (~/.claude).
-          </p>
-        </div>
+        {/* Agents */}
+        <AgentsSection settings={settings} setSettings={setSettings} />
 
         {/* Telegram Notifications */}
         <div className="space-y-2">
@@ -528,74 +491,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
             )}
           </div>
+          <TelegramAgentSelect settings={settings} setSettings={setSettings} />
         </div>
 
-        {/* Model Settings */}
-        <div className="space-y-2">
-          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">
-            Models
-          </label>
-          <p className="text-[10px] text-[var(--text-secondary)]">
-            Claude model for each feature. Uses your Claude Code subscription. Options: sonnet, opus, haiku, or default (subscription default).
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="text-[9px] text-[var(--text-secondary)] block mb-0.5">Tasks</label>
-              <select
-                value={settings.taskModel || 'sonnet'}
-                onChange={e => setSettings({ ...settings, taskModel: e.target.value })}
-                className="w-full text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
-              >
-                <option value="default">Default</option>
-                <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus</option>
-                <option value="haiku">Haiku</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[9px] text-[var(--text-secondary)] block mb-0.5">Pipelines</label>
-              <select
-                value={settings.pipelineModel || 'sonnet'}
-                onChange={e => setSettings({ ...settings, pipelineModel: e.target.value })}
-                className="w-full text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
-              >
-                <option value="default">Default</option>
-                <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus</option>
-                <option value="haiku">Haiku</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[9px] text-[var(--text-secondary)] block mb-0.5">Telegram</label>
-              <select
-                value={settings.telegramModel || 'sonnet'}
-                onChange={e => setSettings({ ...settings, telegramModel: e.target.value })}
-                className="w-full text-xs bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)]"
-              >
-                <option value="default">Default</option>
-                <option value="sonnet">Sonnet</option>
-                <option value="opus">Opus</option>
-                <option value="haiku">Haiku</option>
-              </select>
-            </div>
-          </div>
-        </div>
 
-        {/* Permissions */}
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-xs text-[var(--text-primary)] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={settings.skipPermissions || false}
-              onChange={e => setSettings({ ...settings, skipPermissions: e.target.checked })}
-              className="rounded"
-            />
-            Skip permissions check (--dangerously-skip-permissions)
-          </label>
-          <p className="text-[9px] text-[var(--text-secondary)]">
-            When enabled, all Claude Code tasks and pipelines run without permission prompts. Useful for background automation but less safe.
-          </p>
-        </div>
 
         {/* Notification Retention */}
         <div className="space-y-2">
@@ -877,6 +776,773 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           onClose={() => setEditingSecret(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Agents Configuration Section ─────────────────────────────
+
+interface AgentEntry {
+  id: string;
+  name: string;
+  path: string;
+  enabled: boolean;
+  type: string;
+  taskFlags: string;
+  interactiveCmd: string;
+  resumeFlag: string;
+  outputFormat: string;
+  models: { terminal: string; task: string; telegram: string; help: string; mobile: string };
+  skipPermissionsFlag: string;
+  requiresTTY: boolean;
+  detected: boolean;
+  isProfile?: boolean;
+  base?: string;
+  backendType?: string;
+}
+
+function ProfileRow({ id, cfg, inputClass, onUpdate, onDelete }: {
+  id: string; cfg: any; inputClass: string;
+  onUpdate: (cfg: any) => void; onDelete: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isApi = cfg.type === 'api';
+  const summary = isApi
+    ? `API: ${cfg.provider || '?'} / ${cfg.model || '?'}`
+    : `CLI: ${cfg.base || '?'} / ${cfg.model || cfg.models?.task || 'default'}`;
+  const envStr = cfg.env ? Object.entries(cfg.env).map(([k, v]) => `${k}=${v}`).join('\n') : '';
+
+  return (
+    <div className="mb-1 rounded" style={{ background: 'var(--bg-tertiary)' }}>
+      <div className="flex items-center gap-2 px-2 py-1.5 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <span className="text-[8px] text-[var(--text-secondary)]">{expanded ? '▼' : '▶'}</span>
+        <span className="text-[9px] text-[var(--accent)] font-mono w-28 truncate">{id}</span>
+        <span className="text-[9px] text-[var(--text-secondary)]">{summary}</span>
+        <span className="text-[8px] text-[var(--text-secondary)]">{cfg.name || ''}</span>
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="text-[9px] text-gray-500 hover:text-red-400 ml-auto">✕</button>
+      </div>
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1.5 border-t border-[var(--border)]">
+          <div className="flex gap-2 mt-1.5">
+            <div className="flex-1">
+              <label className="text-[8px] text-[var(--text-secondary)]">Name</label>
+              <input value={cfg.name || ''} onChange={e => onUpdate({ ...cfg, name: e.target.value })} className={inputClass} />
+            </div>
+            <div className="flex-1">
+              <label className="text-[8px] text-[var(--text-secondary)]">Model</label>
+              <input value={cfg.model || ''} onChange={e => onUpdate({ ...cfg, model: e.target.value })} className={inputClass} />
+            </div>
+          </div>
+          {isApi ? (
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <label className="text-[8px] text-[var(--text-secondary)]">Provider</label>
+                <select value={cfg.provider || 'anthropic'} onChange={e => onUpdate({ ...cfg, provider: e.target.value })} className={inputClass}>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="grok">Grok</option>
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="text-[8px] text-[var(--text-secondary)]">API Key (optional)</label>
+                <input type="password" value={cfg.apiKey || ''} onChange={e => onUpdate({ ...cfg, apiKey: e.target.value })} className={inputClass} />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="text-[8px] text-[var(--text-secondary)]">CLI Type</label>
+                <select value={cfg.base || 'claude'} onChange={e => onUpdate({ ...cfg, base: e.target.value, cliType: e.target.value === 'claude' ? 'claude-code' : e.target.value })} className={inputClass}>
+                  <option value="claude">Claude Code</option>
+                  <option value="codex">Codex</option>
+                  <option value="aider">Aider</option>
+                  <option value="generic">Generic</option>
+                </select>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[8px] text-[var(--text-secondary)]">Environment Variables (KEY=VALUE per line)</label>
+                  {cfg.base && (
+                    <button onClick={() => {
+                      const templates: Record<string, string> = {
+                        claude: 'ANTHROPIC_AUTH_TOKEN=\nANTHROPIC_BASE_URL=\nANTHROPIC_SMALL_FAST_MODEL=\nCLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=true\nDISABLE_TELEMETRY=true\nDISABLE_ERROR_REPORTING=true\nDISABLE_AUTOUPDATER=true\nDISABLE_NON_ESSENTIAL_MODEL_CALLS=true',
+                        codex: 'OPENAI_API_KEY=\nOPENAI_BASE_URL=',
+                        aider: 'ANTHROPIC_API_KEY=\nOPENAI_API_KEY=',
+                      };
+                      const tpl = templates[cfg.base!];
+                      if (tpl) {
+                        const env: Record<string, string> = {};
+                        for (const line of tpl.split('\n')) {
+                          const eq = line.indexOf('=');
+                          if (eq > 0) env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+                        }
+                        // Merge with existing (don't overwrite filled values)
+                        const merged = { ...env, ...(cfg.env || {}) };
+                        onUpdate({ ...cfg, env: merged });
+                      }
+                    }} className="text-[7px] px-1.5 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20">
+                      Fill {cfg.base} template
+                    </button>
+                  )}
+                </div>
+                <textarea
+                  value={envStr}
+                  onChange={e => {
+                    const env: Record<string, string> = {};
+                    for (const line of e.target.value.split('\n')) {
+                      const eq = line.indexOf('=');
+                      if (eq > 0) env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+                    }
+                    onUpdate({ ...cfg, env: Object.keys(env).length > 0 ? env : undefined });
+                  }}
+                  rows={5}
+                  placeholder="ANTHROPIC_AUTH_TOKEN=sk-...\nANTHROPIC_BASE_URL=http://..."
+                  className={inputClass + ' resize-none font-mono'} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddProfileForm({ type, baseAgents, onAdd }: {
+  type: 'cli' | 'api';
+  baseAgents: AgentEntry[];
+  onAdd: (id: string, cfg: any) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [id, setId] = useState('');
+  const [name, setName] = useState('');
+  const [base, setBase] = useState(baseAgents[0]?.id || 'claude');
+  const [model, setModel] = useState('');
+  const [provider, setProvider] = useState('anthropic');
+  const [envText, setEnvText] = useState('');
+  const [apiKey, setApiKey] = useState('');
+
+  const inputClass = "w-full px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]";
+
+  // Env var templates per CLI type
+  const envTemplates: Record<string, string> = {
+    claude: [
+      'ANTHROPIC_AUTH_TOKEN=',
+      'ANTHROPIC_BASE_URL=',
+      'ANTHROPIC_SMALL_FAST_MODEL=',
+      'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=true',
+      'DISABLE_TELEMETRY=true',
+      'DISABLE_ERROR_REPORTING=true',
+      'DISABLE_AUTOUPDATER=true',
+      'DISABLE_NON_ESSENTIAL_MODEL_CALLS=true',
+    ].join('\n'),
+    codex: [
+      'OPENAI_API_KEY=',
+      'OPENAI_BASE_URL=',
+    ].join('\n'),
+    aider: [
+      'ANTHROPIC_API_KEY=',
+      'OPENAI_API_KEY=',
+    ].join('\n'),
+  };
+
+  const fillEnvTemplate = () => {
+    const tpl = envTemplates[base] || '';
+    if (tpl && (!envText.trim() || confirm('Replace current env vars with template?'))) {
+      setEnvText(tpl);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="text-[9px] px-2 py-0.5 border border-dashed border-[var(--border)] text-[var(--text-secondary)] rounded hover:text-[var(--text-primary)] mt-1">
+        + {type === 'cli' ? 'CLI Profile' : 'API Profile'}
+      </button>
+    );
+  }
+
+  const parseEnv = (): Record<string, string> | undefined => {
+    if (!envText.trim()) return undefined;
+    const env: Record<string, string> = {};
+    for (const line of envText.split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq > 0) {
+        env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+      }
+    }
+    return Object.keys(env).length > 0 ? env : undefined;
+  };
+
+  const handleAdd = () => {
+    if (!id) return;
+    if (type === 'cli') {
+      onAdd(id, { base, cliType: base === 'claude' ? 'claude-code' : base, name: name || id, model: model || undefined, env: parseEnv() });
+    } else {
+      onAdd(id, { type: 'api', name: name || id, provider, model: model || undefined, apiKey: apiKey || undefined });
+    }
+    setOpen(false);
+    setId(''); setName(''); setModel(''); setApiKey(''); setEnvText('');
+  };
+
+  return (
+    <div className="mt-2 p-2 rounded border border-[var(--border)] space-y-1.5" style={{ background: 'var(--bg-secondary)' }}>
+      <div className="text-[9px] text-[var(--text-secondary)] font-semibold">New {type === 'cli' ? 'CLI' : 'API'} Profile</div>
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className="text-[8px] text-[var(--text-secondary)]">Profile ID</label>
+          <input value={id} onChange={e => setId(e.target.value.replace(/\s+/g, '-').toLowerCase())} placeholder={type === 'cli' ? 'claude-opus' : 'api-sonnet'} className={inputClass} />
+        </div>
+        <div className="flex-1">
+          <label className="text-[8px] text-[var(--text-secondary)]">Display Name</label>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Claude Opus" className={inputClass} />
+        </div>
+      </div>
+      {type === 'cli' ? (<>
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className="text-[8px] text-[var(--text-secondary)]">CLI Type</label>
+            <select value={base} onChange={e => setBase(e.target.value)}
+              className={inputClass}>
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="aider">Aider</option>
+              <option value="generic">Generic</option>
+            </select>
+          </div>
+          <div className="flex-1">
+            <label className="text-[8px] text-[var(--text-secondary)]">Model</label>
+            <input value={model} onChange={e => setModel(e.target.value)} placeholder="claude-opus-4-6" className={inputClass} />
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <label className="text-[8px] text-[var(--text-secondary)]">Environment Variables (KEY=VALUE per line)</label>
+            {envTemplates[base] && (
+              <button onClick={fillEnvTemplate} className="text-[7px] px-1.5 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20">
+                Fill {base} template
+              </button>
+            )}
+          </div>
+          <textarea value={envText} onChange={e => setEnvText(e.target.value)} rows={5}
+            placeholder={envTemplates[base] || 'KEY=VALUE\nKEY2=VALUE2'}
+            className={inputClass + ' resize-none font-mono'} />
+        </div>
+      </>) : (
+        <>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="text-[8px] text-[var(--text-secondary)]">Provider</label>
+              <select value={provider} onChange={e => setProvider(e.target.value)} className={inputClass}>
+                <option value="anthropic">Anthropic</option>
+                <option value="google">Google</option>
+                <option value="openai">OpenAI</option>
+                <option value="grok">Grok</option>
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="text-[8px] text-[var(--text-secondary)]">Model</label>
+              <input value={model} onChange={e => setModel(e.target.value)} placeholder="claude-sonnet-4-6" className={inputClass} />
+            </div>
+          </div>
+          <div>
+            <label className="text-[8px] text-[var(--text-secondary)]">API Key (optional, uses provider key if empty)</label>
+            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..." className={inputClass} />
+          </div>
+        </>
+      )}
+      <div className="flex gap-2">
+        <button onClick={handleAdd} disabled={!id} className="text-[10px] px-3 py-1 bg-[var(--accent)] text-white rounded disabled:opacity-50">Add</button>
+        <button onClick={() => setOpen(false)} className="text-[10px] px-3 py-1 border border-[var(--border)] text-[var(--text-secondary)] rounded">Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function AgentsSection({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
+  const [agents, setAgents] = useState<AgentEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newAgent, setNewAgent] = useState({ id: '', name: '', path: '', taskFlags: '', interactiveCmd: '', resumeFlag: '', outputFormat: 'text', models: { terminal: 'default', task: 'default', telegram: 'default', help: 'default', mobile: 'default' }, skipPermissionsFlag: '', requiresTTY: false });
+
+  // Fetch detected + configured agents
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch('/api/agents');
+        const data = await res.json();
+        const detected = (data.agents || []) as any[];
+        const configured = settings.agents || {};
+
+        const merged: AgentEntry[] = [];
+
+        // Add agents from API (may be detected or configured-only)
+        for (const a of detected) {
+          const cfg = configured[a.id] || {};
+          merged.push({
+            id: a.id,
+            name: cfg.name || a.name,
+            path: cfg.path || a.path,
+            enabled: cfg.enabled !== false,
+            type: a.type || 'generic',
+            taskFlags: cfg.taskFlags || (a.id === 'claude' ? '-p --verbose --output-format stream-json --dangerously-skip-permissions' : cfg.flags?.join(' ') || ''),
+            interactiveCmd: cfg.interactiveCmd || a.path,
+            resumeFlag: cfg.resumeFlag || (a.capabilities?.supportsResume ? '-c' : ''),
+            outputFormat: cfg.outputFormat || (a.capabilities?.supportsStreamJson ? 'stream-json' : 'text'),
+            models: cfg.models || { terminal: "default", task: "default", telegram: "default", help: "default", mobile: "default" },
+            skipPermissionsFlag: cfg.skipPermissionsFlag || a.skipPermissionsFlag || "",
+            requiresTTY: cfg.requiresTTY ?? a.capabilities?.requiresTTY ?? false,
+            detected: a.detected !== false,
+          });
+        }
+
+        // Add configured but not detected agents
+        for (const [id, cfg] of Object.entries(configured) as [string, any][]) {
+          if (merged.find(a => a.id === id)) continue;
+          merged.push({
+            id,
+            name: cfg.name || id,
+            path: cfg.path || '',
+            enabled: cfg.enabled !== false,
+            type: 'generic',
+            taskFlags: cfg.taskFlags || cfg.flags?.join(' ') || '',
+            interactiveCmd: cfg.interactiveCmd || cfg.path || '',
+            resumeFlag: cfg.resumeFlag || '',
+            outputFormat: cfg.outputFormat || 'text',
+            models: cfg.models || { terminal: "default", task: "default", telegram: "default", help: "default", mobile: "default" },
+            skipPermissionsFlag: cfg.skipPermissionsFlag || '',
+            requiresTTY: cfg.requiresTTY ?? false,
+            detected: false,
+          });
+        }
+
+        setAgents(merged);
+      } catch {}
+      setLoading(false);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only fetch once on mount
+
+  const defaultAgent = settings.defaultAgent || 'claude';
+
+  const saveAgentConfig = (updated: AgentEntry[]) => {
+    // Start with existing config to preserve profile fields (base/env/model/type/provider/apiKey)
+    const agentsCfg: Record<string, any> = { ...(settings.agents || {}) };
+    for (const a of updated) {
+      const existing = agentsCfg[a.id] || {};
+      agentsCfg[a.id] = {
+        ...existing, // preserve profile-specific fields
+        name: a.name,
+        path: a.path,
+        enabled: a.enabled,
+        taskFlags: a.taskFlags,
+        interactiveCmd: a.interactiveCmd,
+        resumeFlag: a.resumeFlag,
+        outputFormat: a.outputFormat,
+        models: a.models,
+        skipPermissionsFlag: a.skipPermissionsFlag,
+        requiresTTY: a.requiresTTY,
+      };
+    }
+    // Keep claudePath in sync for backward compat
+    const claude = updated.find(a => a.id === 'claude');
+    setSettings({ ...settings, agents: agentsCfg, claudePath: claude?.path || settings.claudePath });
+  };
+
+  const [agentsDirty, setAgentsDirty] = useState(false);
+  const saveTimerRef = useRef<any>(null);
+
+  const debouncedSave = useCallback((updated: AgentEntry[]) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveAgentConfig(updated);
+      setAgentsDirty(false);
+    }, 1000); // save after 1s of no changes
+  }, [saveAgentConfig]);
+
+  const updateAgent = (id: string, field: string, value: any) => {
+    const updated = agents.map(a => a.id === id ? { ...a, [field]: value } : a);
+    setAgents(updated);
+    setAgentsDirty(true);
+    debouncedSave(updated);
+  };
+
+  const saveAgents = () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveAgentConfig(agents);
+    setAgentsDirty(false);
+  };
+
+  const removeAgent = (id: string) => {
+    if (!confirm(`Remove "${id}" agent?`)) return;
+    const updated = agents.filter(a => a.id !== id);
+    setAgents(updated);
+    debouncedSave(updated);
+  };
+
+  const addAgent = () => {
+    if (!newAgent.id || !newAgent.path) return;
+    const entry: AgentEntry = {
+      ...newAgent,
+      enabled: true,
+      type: 'generic',
+      detected: false,
+    };
+    const updated = [...agents, entry];
+    setAgents(updated);
+    debouncedSave(updated);
+    setShowAdd(false);
+    setNewAgent({ id: '', name: '', path: '', taskFlags: '', interactiveCmd: '', resumeFlag: '', outputFormat: 'text', models: { terminal: 'default', task: 'default', telegram: 'default', help: 'default', mobile: 'default' }, skipPermissionsFlag: '', requiresTTY: false });
+  };
+
+  const inputClass = "w-full px-2 py-1 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-xs text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">Agents</label>
+        <button
+          onClick={async () => {
+            try {
+              const res = await fetch('/api/agents');
+              const data = await res.json();
+              if (data.agents?.length) alert(`Detected: ${data.agents.map((a: any) => a.name).join(', ')}`);
+              else alert('No agents detected');
+            } catch { alert('Detection failed'); }
+          }}
+          className="text-[9px] px-2 py-0.5 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white ml-auto"
+        >Detect</button>
+        <button
+          onClick={() => setShowAdd(v => !v)}
+          className="text-[9px] px-2 py-0.5 border border-[var(--border)] text-[var(--text-secondary)] rounded hover:text-[var(--text-primary)]"
+        >+ Add</button>
+        {agentsDirty && (
+          <button
+            onClick={saveAgents}
+            className="text-[9px] px-2 py-0.5 bg-[var(--accent)] text-white rounded"
+          >Save Agents</button>
+        )}
+      </div>
+
+      {/* Default agent selector */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] text-[var(--text-secondary)]">Default:</span>
+        <select
+          value={defaultAgent}
+          onChange={e => setSettings({ ...settings, defaultAgent: e.target.value })}
+          className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--text-primary)]"
+        >
+          {agents.filter(a => a.enabled).map(a => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+        <span className="text-[9px] text-[var(--text-secondary)]">Used for Task, Terminal, Pipeline, Mobile, Help</span>
+      </div>
+
+      {loading ? (
+        <p className="text-[10px] text-[var(--text-secondary)]">Loading agents...</p>
+      ) : agents.length === 0 ? (
+        <p className="text-[10px] text-[var(--text-secondary)]">No agents detected. Click Detect or Add manually.</p>
+      ) : (
+        <div className="space-y-2">
+          {agents.map(a => (
+            <div key={a.id} className="border border-[var(--border)] rounded-lg overflow-hidden">
+              {/* Agent header */}
+              <div
+                className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[var(--bg-tertiary)]"
+                onClick={() => setExpandedAgent(expandedAgent === a.id ? null : a.id)}
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 ${
+                  !a.detected ? 'bg-gray-500' : a.id === defaultAgent ? 'bg-green-500' : 'bg-green-400/60'
+                }`} title={!a.detected ? 'Not installed' : a.id === defaultAgent ? 'Default agent' : 'Installed'} />
+                <span className={`text-xs font-medium ${!a.detected ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)]'}`}>{a.name}</span>
+                <span className="text-[9px] text-[var(--text-secondary)] font-mono">{a.id}</span>
+                {a.id === defaultAgent && <span className="text-[8px] px-1 rounded bg-green-500/20 text-green-400">default</span>}
+                {!a.detected && <span className="text-[8px] text-gray-500">not installed</span>}
+                <label className="flex items-center gap-1 ml-auto text-[9px] text-[var(--text-secondary)]" onClick={e => e.stopPropagation()}>
+                  <input type="checkbox" checked={a.enabled} onChange={e => updateAgent(a.id, 'enabled', e.target.checked)} className="accent-[var(--accent)]" />
+                  Enabled
+                </label>
+                <span className="text-[10px] text-[var(--text-secondary)]">{expandedAgent === a.id ? '▾' : '▸'}</span>
+              </div>
+
+              {/* Agent detail */}
+              {expandedAgent === a.id && (
+                <div className="px-3 py-2 border-t border-[var(--border)] space-y-2 bg-[var(--bg-secondary)]">
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="text-[9px] text-[var(--text-secondary)]">Name</label>
+                      <input value={a.name} onChange={e => updateAgent(a.id, 'name', e.target.value)} className={inputClass} />
+                    </div>
+                    <div className="w-36">
+                      <label className="text-[9px] text-[var(--text-secondary)]">CLI Type</label>
+                      <select value={(settings.agents?.[a.id] as any)?.cliType || (a.id === 'claude' ? 'claude-code' : a.id === 'codex' ? 'codex' : a.id === 'aider' ? 'aider' : 'generic')}
+                        onChange={e => setSettings({ ...settings, agents: { ...settings.agents, [a.id]: { ...(settings.agents?.[a.id] || {}), cliType: e.target.value } } })}
+                        className={inputClass}>
+                        <option value="claude-code">Claude Code</option>
+                        <option value="codex">Codex</option>
+                        <option value="aider">Aider</option>
+                        <option value="generic">Generic</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[var(--text-secondary)]">Binary Path</label>
+                    <input value={a.path} onChange={e => updateAgent(a.id, 'path', e.target.value)} placeholder="/usr/local/bin/agent" className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[var(--text-secondary)]">Task Flags <span className="text-[8px]">(non-interactive mode, e.g. -p --output-format json)</span></label>
+                    <input value={a.taskFlags} onChange={e => updateAgent(a.id, 'taskFlags', e.target.value)} placeholder="-p --verbose" className={inputClass} />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[var(--text-secondary)]">Interactive Command <span className="text-[8px]">(terminal startup)</span></label>
+                    <input value={a.interactiveCmd} onChange={e => updateAgent(a.id, 'interactiveCmd', e.target.value)} placeholder="claude" className={inputClass} />
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="text-[9px] text-[var(--text-secondary)]">Resume Flag <span className="text-[8px]">(empty = no resume)</span></label>
+                      <input value={a.resumeFlag} onChange={e => updateAgent(a.id, 'resumeFlag', e.target.value)} placeholder="-c or --resume" className={inputClass} />
+                    </div>
+                    <div className="w-32">
+                      <label className="text-[9px] text-[var(--text-secondary)]">Output Format</label>
+                      <select value={a.outputFormat} onChange={e => updateAgent(a.id, 'outputFormat', e.target.value)} className={inputClass}>
+                        <option value="stream-json">stream-json</option>
+                        <option value="json">json</option>
+                        <option value="text">text</option>
+                      </select>
+                    </div>
+                  </div>
+                  {/* Per-scene model config */}
+                  <div>
+                    <label className="text-[9px] text-[var(--text-secondary)] mb-1 block">
+                      Models per scene <span className="text-[8px]">(type or pick from presets below)</span>
+                    </label>
+                    <div className="grid grid-cols-5 gap-1">
+                      {(['terminal', 'task', 'telegram', 'help', 'mobile'] as const).map(scene => (
+                        <div key={scene}>
+                          <label className="text-[8px] text-[var(--text-secondary)] capitalize">{scene}</label>
+                          <input
+                            value={a.models[scene]}
+                            onChange={e => {
+                              const updated = { ...a.models, [scene]: e.target.value };
+                              updateAgent(a.id, 'models', updated);
+                            }}
+                            placeholder="default"
+                            className="w-full px-1.5 py-0.5 bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[9px] text-[var(--text-primary)] font-mono"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    {/* Preset models */}
+                    <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                      <span className="text-[8px] text-[var(--text-secondary)]">Presets:</span>
+                      {(a.id === 'claude'
+                        ? ['default', 'sonnet', 'opus', 'haiku', 'claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001']
+                        : a.id === 'codex'
+                          ? ['default', 'o3-mini', 'o4-mini', 'gpt-4.1']
+                          : ['default']
+                      ).map(preset => (
+                        <button
+                          key={preset}
+                          onClick={() => navigator.clipboard.writeText(preset)}
+                          className="text-[8px] px-1 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
+                          title={`Click to copy "${preset}"`}
+                        >{preset}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-[var(--text-secondary)]">Auto-approve flag <span className="text-[8px]">(empty = requires manual approval)</span></label>
+                    <input value={a.skipPermissionsFlag} onChange={e => updateAgent(a.id, 'skipPermissionsFlag', e.target.value)} placeholder="e.g. --dangerously-skip-permissions" className={inputClass} />
+                    <div className="flex gap-1 mt-1">
+                      {[
+                        { label: 'Claude', flag: '--dangerously-skip-permissions' },
+                        { label: 'Codex', flag: '--full-auto' },
+                        { label: 'Aider', flag: '--yes' },
+                      ].map(p => (
+                        <button key={p.label} onClick={() => updateAgent(a.id, 'skipPermissionsFlag', p.flag)}
+                          className="text-[8px] px-1 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                        >{p.label}: {p.flag}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-[9px] text-[var(--text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={a.requiresTTY} onChange={e => updateAgent(a.id, 'requiresTTY', e.target.checked)} className="accent-[var(--accent)]" />
+                    Requires terminal environment (TTY)
+                    <span className="text-[8px]">— enable for agents that need a terminal to run (e.g. Codex)</span>
+                  </label>
+                  {a.id !== 'claude' && (
+                    <button onClick={() => removeAgent(a.id)} className="text-[9px] text-red-400 hover:underline">Remove Agent</button>
+                  )}
+
+                  {/* Profile selector */}
+                  <div>
+                    <label className="text-[9px] text-[var(--text-secondary)]">Profile <span className="text-[8px]">— select to override model, env vars, API endpoint</span></label>
+                    <select
+                      value={(settings.agents?.[a.id] as any)?.profile || ''}
+                      onChange={e => setSettings({ ...settings, agents: { ...settings.agents, [a.id]: { ...(settings.agents?.[a.id] || {}), profile: e.target.value || undefined } } })}
+                      className={inputClass}
+                    >
+                      <option value="">Default (no profile)</option>
+                      {Object.entries(settings.agents || {}).filter(([, cfg]: [string, any]) => cfg.base || cfg.type === 'profile').map(([pid, cfg]: [string, any]) => (
+                        <option key={pid} value={pid}>{cfg.name || pid}{cfg.model ? ` (${cfg.model})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add agent form */}
+      {showAdd && (
+        <div className="border border-[var(--accent)]/30 rounded-lg p-3 space-y-2 bg-[var(--bg-secondary)]">
+          <div className="text-[10px] text-[var(--text-primary)] font-semibold">Add Custom Agent</div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[9px] text-[var(--text-secondary)]">ID (unique)</label>
+              <input value={newAgent.id} onChange={e => setNewAgent({ ...newAgent, id: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} placeholder="my-agent" className={inputClass} />
+            </div>
+            <div>
+              <label className="text-[9px] text-[var(--text-secondary)]">Display Name</label>
+              <input value={newAgent.name} onChange={e => setNewAgent({ ...newAgent, name: e.target.value })} placeholder="My Agent" className={inputClass} />
+            </div>
+          </div>
+          <div>
+            <label className="text-[9px] text-[var(--text-secondary)]">Binary Path</label>
+            <input value={newAgent.path} onChange={e => setNewAgent({ ...newAgent, path: e.target.value })} placeholder="/usr/local/bin/my-agent" className={inputClass} />
+          </div>
+          <div>
+            <label className="text-[9px] text-[var(--text-secondary)]">Task Flags (non-interactive)</label>
+            <input value={newAgent.taskFlags} onChange={e => setNewAgent({ ...newAgent, taskFlags: e.target.value })} placeholder="--prompt" className={inputClass} />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={addAgent} disabled={!newAgent.id || !newAgent.path} className="text-[10px] px-3 py-1 bg-[var(--accent)] text-white rounded disabled:opacity-50">Add</button>
+            <button onClick={() => setShowAdd(false)} className="text-[10px] px-3 py-1 border border-[var(--border)] text-[var(--text-secondary)] rounded">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Profiles Section ── */}
+      <div className="mt-4 pt-3 border-t border-[var(--border)]">
+        <div className="flex items-center gap-2 mb-2">
+          <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase">Profiles</label>
+          <span className="text-[8px] text-[var(--text-secondary)]">Shared across workspace and terminal — override model, env vars, API endpoint</span>
+        </div>
+
+        {/* All profiles (CLI + API) */}
+        {Object.entries(settings.agents || {}).filter(([, cfg]: [string, any]) => cfg.base || cfg.type === 'api').map(([id, cfg]: [string, any]) => (
+          <ProfileRow key={id} id={id} cfg={cfg} inputClass={inputClass}
+            onUpdate={(updated) => setSettings({ ...settings, agents: { ...settings.agents, [id]: updated } })}
+            onDelete={() => {
+              const updated = { ...settings.agents };
+              delete updated[id];
+              setSettings({ ...settings, agents: updated });
+            }}
+          />
+        ))}
+
+        <div className="flex gap-2 mt-1">
+          <AddProfileForm type="cli" baseAgents={agents.filter(a => !a.isProfile && a.detected)} onAdd={(id, cfg) => {
+            setSettings({ ...settings, agents: { ...settings.agents, [id]: cfg } });
+          }} />
+          <AddProfileForm type="api" baseAgents={[]} onAdd={(id, cfg) => {
+            setSettings({ ...settings, agents: { ...settings.agents, [id]: cfg } });
+          }} />
+        </div>
+      </div>
+
+      {/* ── Providers Section ── */}
+      <div className="mt-4 pt-3 border-t border-[var(--border)]">
+        <label className="text-xs text-[var(--text-secondary)] font-semibold uppercase mb-2 block">API Providers</label>
+        {['anthropic', 'google', 'openai', 'grok'].map(name => {
+          const provider = settings.providers?.[name] || {};
+          const secretKey = `providers.${name}.apiKey`;
+          const hasKey = (provider.apiKey && provider.apiKey !== '••••••••') || settings._secretStatus?.[secretKey];
+          return (
+            <div key={name} className="flex items-center gap-2 px-2 py-1.5 mb-1 rounded" style={{ background: 'var(--bg-tertiary)' }}>
+              <span className="text-[10px] text-[var(--text-primary)] w-20 font-semibold capitalize">{name}</span>
+              <input
+                type="password"
+                placeholder="API Key"
+                value={provider.apiKey || ''}
+                onChange={e => setSettings({
+                  ...settings,
+                  providers: { ...settings.providers, [name]: { ...provider, apiKey: e.target.value } }
+                })}
+                className="flex-1 text-[9px] px-2 py-0.5 bg-[var(--bg-secondary)] border border-[var(--border)] rounded text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--accent)]"
+              />
+              <span className={`text-[8px] ${hasKey ? 'text-green-400' : 'text-gray-600'}`}>
+                {hasKey ? '● set' : '○'}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Telegram Agent Selector ──────────────────────────────
+
+function TelegramAgentSelect({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.json())
+      .then(data => setAgents((data.agents || []).filter((a: any) => a.enabled)))
+      .catch(() => {});
+  }, []);
+
+  if (agents.length <= 1) return null;
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <span className="text-[9px] text-[var(--text-secondary)]">Default Agent:</span>
+      <select
+        value={settings.telegramAgent || ''}
+        onChange={e => setSettings({ ...settings, telegramAgent: e.target.value })}
+        className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[10px] text-[var(--text-primary)]"
+      >
+        <option value="">Global default ({settings.defaultAgent || 'claude'})</option>
+        {agents.map(a => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
+      <span className="text-[8px] text-[var(--text-secondary)]">Used for /task without @agent</span>
+    </div>
+  );
+}
+
+// ─── Docs Agent Selector ──────────────────────────────
+
+function DocsAgentSelect({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.json())
+      .then(data => setAgents((data.agents || []).filter((a: any) => a.enabled)))
+      .catch(() => {});
+  }, []);
+
+  if (agents.length <= 1) return null;
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <span className="text-[9px] text-[var(--text-secondary)]">Docs Agent:</span>
+      <select
+        value={settings.docsAgent || ''}
+        onChange={e => setSettings({ ...settings, docsAgent: e.target.value })}
+        className="bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-0.5 text-[10px] text-[var(--text-primary)]"
+      >
+        <option value="">Global default ({settings.defaultAgent || 'claude'})</option>
+        {agents.map(a => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+      </select>
     </div>
   );
 }

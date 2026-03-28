@@ -60,9 +60,11 @@ export function createTask(opts: {
   conversationId?: string;  // Explicit override; otherwise auto-inherits from project
   scheduledAt?: string;     // ISO timestamp — task won't run until this time
   watchConfig?: WatchConfig;
+  agent?: string;           // Agent ID (default: from settings)
 }): Task {
   const id = randomUUID().slice(0, 8);
   const mode = opts.mode || 'prompt';
+  const agent = opts.agent || '';
 
   // For prompt mode: auto-inherit conversation_id
   // For monitor mode: conversationId is required (the session to watch)
@@ -71,12 +73,13 @@ export function createTask(opts: {
     : (opts.conversationId || (mode === 'prompt' ? getProjectConversationId(opts.projectName) : null));
 
   db().prepare(`
-    INSERT INTO tasks (id, project_name, project_path, prompt, mode, status, priority, conversation_id, log, scheduled_at, watch_config)
-    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, '[]', ?, ?)
+    INSERT INTO tasks (id, project_name, project_path, prompt, mode, status, priority, conversation_id, log, scheduled_at, watch_config, agent)
+    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, '[]', ?, ?, ?)
   `).run(
     id, opts.projectName, opts.projectPath, opts.prompt, mode,
     opts.priority || 0, convId || null, opts.scheduledAt || null,
     opts.watchConfig ? JSON.stringify(opts.watchConfig) : null,
+    agent || null,
   );
 
   // Kick the runner
@@ -180,12 +183,13 @@ export function retryTask(id: string): Task | null {
   if (!task) return null;
   if (task.status !== 'failed' && task.status !== 'cancelled') return null;
 
-  // Create a new task with same params
+  // Create a new task with same params (including agent)
   return createTask({
     projectName: task.projectName,
     projectPath: task.projectPath,
     prompt: task.prompt,
     priority: task.priority,
+    agent: (task as any).agent || undefined,
   });
 }
 
@@ -284,38 +288,103 @@ function executeTask(task: Task): Promise<void> {
 
   return new Promise((resolve, reject) => {
     const settings = loadSettings();
-    const claudePath = settings.claudePath || process.env.CLAUDE_PATH || 'claude';
+    const { getAgent } = require('./agents');
+    const agentId = (task as any).agent || settings.defaultAgent || 'claude';
+    const adapter = getAgent(agentId);
 
-    const args = ['-p', '--verbose', '--output-format', 'stream-json', '--dangerously-skip-permissions'];
+    // Model: per-task override > agent scene model > global fallback
+    const agentCfg = settings.agents?.[agentId];
+    const isPipeline = (() => { try { const { pipelineTaskIds: p } = require('./pipeline'); return p.has(task.id); } catch { return false; } })();
+    const model = taskModelOverrides.get(task.id) || (isPipeline ? agentCfg?.models?.task : agentCfg?.models?.task) || agentCfg?.models?.task || settings.taskModel;
+    const supportsModel = adapter.config.capabilities?.supportsModel;
+    const spawnOpts = adapter.buildTaskSpawn({
+      projectPath: task.projectPath,
+      prompt: task.prompt,
+      model: supportsModel && model && model !== 'default' ? model : undefined,
+      conversationId: task.conversationId || undefined,
+      skipPermissions: true,
+      outputFormat: adapter.config.capabilities?.supportsStreamJson ? 'stream-json' : undefined,
+    });
 
-    // Use model override if set, otherwise fall back to taskModel setting
-    const model = taskModelOverrides.get(task.id) || settings.taskModel;
-    if (model && model !== 'default') {
-      args.push('--model', model);
-    }
-
-    // Resume specific session to continue the conversation
-    if (task.conversationId) {
-      args.push('--resume', task.conversationId);
-    }
-
-    args.push(task.prompt);
-
-    const env = { ...process.env };
+    const env = { ...process.env, ...(spawnOpts.env || {}) };
     delete env.CLAUDECODE;
 
     updateTaskStatus(task.id, 'running');
     db().prepare('UPDATE tasks SET started_at = datetime(\'now\') WHERE id = ?').run(task.id);
 
-    // Resolve the actual claude CLI script path (claude is a symlink to a .js file)
-    const resolvedClaude = resolveClaudePath(claudePath);
-    console.log(`[task] ${task.projectName} [${model || 'default'}]: "${task.prompt.slice(0, 60)}..."`);
+    const agentName = adapter.config.name || agentId;
+    console.log(`[task] ${task.projectName} [${agentName}${supportsModel && model ? '/' + model : ''}]: "${task.prompt.slice(0, 60)}..."`);
 
-    const child = spawn(resolvedClaude.cmd, [...resolvedClaude.prefix, ...args], {
-      cwd: task.projectPath,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    // Log agent info as first entry
+    appendLog(task.id, { type: 'system', subtype: 'init', content: `Agent: ${agentName}${supportsModel && model && model !== 'default' ? ` | Model: ${model}` : ''}`, timestamp: new Date().toISOString() });
+
+    const needsTTY = adapter.config.capabilities?.requiresTTY;
+    let child: any;
+    let ptyProcess: any = null;
+
+    if (needsTTY) {
+      // Use node-pty for agents that require a terminal environment
+      const pty = require('node-pty');
+      ptyProcess = pty.spawn(spawnOpts.cmd, spawnOpts.args, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 40,
+        cwd: task.projectPath,
+        env,
+      });
+      // Strip terminal control codes from PTY output for clean logging
+      const stripAnsi = (s: string) => s
+        .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')   // CSI sequences
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences
+        .replace(/\x1b[()][0-9A-B]/g, '')           // charset
+        .replace(/\x1b[=>]/g, '')                    // keypad
+        .replace(/\r/g, '')                          // carriage return
+        .replace(/\x07/g, '');                       // bell
+
+      // Auto-kill PTY after idle (interactive agents don't exit on their own)
+      let ptyBytes = 0;
+      let ptyIdleTimer: any = null;
+      const PTY_IDLE_MS = 15000; // 15s idle = done
+
+      // Create a child-like interface for pty
+      let exitCb: Function | null = null;
+
+      ptyProcess.onData((data: string) => {
+        const clean = stripAnsi(data);
+        ptyBytes += clean.length;
+        if (dataCallback) dataCallback(Buffer.from(clean));
+        // Reset idle timer
+        if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
+        if (ptyBytes > 500) {
+          ptyIdleTimer = setTimeout(() => {
+            console.log(`[task] PTY idle timeout — killing process (${ptyBytes} bytes received)`);
+            try { ptyProcess.kill(); } catch {}
+          }, PTY_IDLE_MS);
+        }
+      });
+
+      ptyProcess.onExit(({ exitCode }: any) => {
+        if (ptyIdleTimer) clearTimeout(ptyIdleTimer);
+        if (exitCb) exitCb(exitCode, null);
+      });
+
+      let dataCallback: Function | null = null;
+      child = {
+        stdout: { on: (evt: string, cb: Function) => { if (evt === 'data') dataCallback = cb; } },
+        stderr: { on: (_evt: string, _cb: Function) => {} },
+        on: (evt: string, cb: Function) => { if (evt === 'exit') exitCb = cb; if (evt === 'error') {} },
+        kill: (sig: string) => { if (ptyIdleTimer) clearTimeout(ptyIdleTimer); try { ptyProcess.kill(sig); } catch {} },
+        stdin: null,
+        pid: ptyProcess.pid,
+      };
+    } else {
+      child = spawn(spawnOpts.cmd, spawnOpts.args, {
+        cwd: task.projectPath,
+        env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      child.stdin?.end();
+    }
 
     let buffer = '';
     let resultText = '';
@@ -325,7 +394,7 @@ function executeTask(task: Task): Promise<void> {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
 
-    child.on('error', (err) => {
+    child.on('error', (err: any) => {
       console.error(`[task-runner] Spawn error:`, err.message);
       updateTaskStatus(task.id, 'failed', err.message);
       reject(err);
@@ -346,10 +415,14 @@ function executeTask(task: Task): Promise<void> {
 
       for (const line of lines) {
         if (!line.trim()) continue;
+        let jsonParsed = false;
         try {
           const parsed = JSON.parse(line);
+          jsonParsed = true;
           const entries = parseStreamJson(parsed);
           for (const entry of entries) {
+            // Skip Claude's Model init line for non-claude agents (we already logged our own)
+            if (entry.subtype === 'init' && agentId !== 'claude' && entry.content?.startsWith('Model:')) continue;
             appendLog(task.id, entry);
           }
 
@@ -368,7 +441,13 @@ function executeTask(task: Task): Promise<void> {
             if (parsed.total_input_tokens) totalInputTokens = parsed.total_input_tokens;
             if (parsed.total_output_tokens) totalOutputTokens = parsed.total_output_tokens;
           }
-        } catch {}
+        } catch {
+          // Non-JSON output (generic agents) — log as raw text
+          if (!jsonParsed) {
+            resultText += (resultText ? '\n' : '') + line;
+            appendLog(task.id, { type: 'system', subtype: 'text', content: line, timestamp: new Date().toISOString() });
+          }
+        }
       }
     });
 
@@ -380,7 +459,7 @@ function executeTask(task: Task): Promise<void> {
       }
     });
 
-    child.on('exit', (code, signal) => {
+    child.on('exit', (code: any, signal: any) => {
       // Process exit handled below
       // Process remaining buffer
       if (buffer.trim()) {
@@ -453,7 +532,7 @@ function executeTask(task: Task): Promise<void> {
       }
     });
 
-    child.on('error', (err) => {
+    child.on('error', (err: any) => {
       updateTaskStatus(task.id, 'failed', err.message);
       reject(err);
     });
@@ -637,7 +716,8 @@ function rowToTask(row: any): Task {
     startedAt: toIsoUTC(row.started_at) ?? undefined,
     completedAt: toIsoUTC(row.completed_at) ?? undefined,
     scheduledAt: toIsoUTC(row.scheduled_at) ?? undefined,
-  };
+    agent: row.agent || undefined,
+  } as Task;
 }
 
 // ─── Monitor task execution ──────────────────────────────────

@@ -223,6 +223,9 @@ async function handleMessage(msg: any) {
       case '/p':
         await sendProjectList(chatId);
         break;
+      case '/agents':
+        await sendAgentList(chatId);
+        break;
       case '/watch':
       case '/w':
         if (args.length > 0) {
@@ -309,8 +312,28 @@ async function sendHelp(chatId: number) {
     `🌐 /tunnel — status\n` +
     `/tunnel_start / /tunnel_stop\n` +
     `/tunnel_code <admin_pw> — get session code\n\n` +
+    `🤖 /agents — list available agents\n` +
+    `Use @agent in /task to select (e.g. /task app @codex: review)\n\n` +
     `Reply number to select`
   );
+}
+
+async function sendAgentList(chatId: number) {
+  try {
+    const { listAgents, getDefaultAgentId } = require('./agents');
+    const agents = listAgents();
+    const defaultId = getDefaultAgentId();
+    if (agents.length === 0) {
+      await send(chatId, 'No agents detected.');
+      return;
+    }
+    const lines = agents.map((a: any) =>
+      `${a.id === defaultId ? '⭐' : '  '} ${a.name} (${a.id})${a.detected === false ? ' ⚠️ not installed' : ''}`
+    );
+    await send(chatId, `🤖 Agents:\n\n${lines.join('\n')}\n\nUse @agent in /task command`);
+  } catch {
+    await send(chatId, 'Failed to list agents.');
+  }
 }
 
 async function sendNumberedTaskList(chatId: number, statusFilter?: string) {
@@ -671,10 +694,11 @@ async function handleNewTask(chatId: number, input: string) {
     await send(chatId,
       'Usage:\nproject: instructions\n\n' +
       'Options:\n' +
+      '  @agent — use specific agent (e.g. @codex @aider)\n' +
       '  -s <sessionId> — resume specific session\n' +
       '  -in 30m — delay (e.g. 10m, 2h, 1d)\n' +
       '  -at 18:00 — schedule at time\n\n' +
-      'Example:\nmy-app: Fix the login bug\nmy-app -s abc123 -in 1h: continue work'
+      'Example:\nmy-app: Fix the login bug\nmy-app @codex: review code\nmy-app -s abc123 -in 1h: continue work'
     );
     return;
   }
@@ -709,6 +733,7 @@ async function handleNewTask(chatId: number, input: string) {
   // Parse flags
   let sessionId: string | undefined;
   let scheduledAt: string | undefined;
+  let agentId: string | undefined;
   let tokens = restPart.split(/\s+/);
   const promptTokens: string[] = [];
 
@@ -719,6 +744,8 @@ async function handleNewTask(chatId: number, input: string) {
       scheduledAt = parseDelay(tokens[++i]);
     } else if (tokens[i] === '-at' && i + 1 < tokens.length) {
       scheduledAt = parseTimeAt(tokens[++i]);
+    } else if (tokens[i].startsWith('@')) {
+      agentId = tokens[i].slice(1); // @codex → codex
     } else {
       promptTokens.push(tokens[i]);
     }
@@ -730,12 +757,17 @@ async function handleNewTask(chatId: number, input: string) {
     return;
   }
 
+  // Use @agent if specified, else telegram default, else global default
+  const settings = loadSettings();
+  const resolvedAgent = agentId || settings.telegramAgent || undefined;
+
   const task = createTask({
     projectName: project.name,
     projectPath: project.path,
     prompt,
     conversationId: sessionId,
     scheduledAt,
+    agent: resolvedAgent,
   });
 
   let statusLine = 'Status: queued';

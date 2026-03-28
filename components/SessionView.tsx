@@ -38,10 +38,12 @@ export default function SessionView({
   projectName,
   projects,
   onOpenInTerminal,
+  singleProject,
 }: {
   projectName?: string;
   projects: { name: string; path: string; language: string | null }[];
   onOpenInTerminal?: (sessionId: string, projectPath: string) => void;
+  singleProject?: boolean; // hide project tree sidebar, show only the given project
 }) {
   const { sidebarWidth, onSidebarDragStart } = useSidebarResize({ defaultWidth: 288, minWidth: 160, maxWidth: 480 });
   // Tree data: project → sessions
@@ -83,9 +85,14 @@ export default function SessionView({
   }, []);
 
   useEffect(() => {
-    loadTree(true);
+    // In single-project mode: load cached first (fast), then sync in background
+    if (singleProject) {
+      loadTree(false).then(() => loadTree(true));
+    } else {
+      loadTree(true);
+    }
     loadWatchers();
-  }, [loadTree, loadWatchers]);
+  }, [loadTree, loadWatchers, singleProject]);
 
   // Auto-expand project if only one or if pre-selected
   useEffect(() => {
@@ -287,7 +294,7 @@ export default function SessionView({
   return (
     <div className="flex h-full">
       {/* Left: tree view */}
-      <div style={{ width: sidebarWidth }} className="flex flex-col shrink-0 overflow-hidden">
+      <div style={{ width: singleProject ? 200 : sidebarWidth }} className="flex flex-col shrink-0 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-2 border-b border-[var(--border)]">
           <span className="text-[10px] font-semibold text-[var(--text-secondary)] uppercase">Sessions</span>
@@ -339,9 +346,13 @@ export default function SessionView({
             </p>
           )}
 
-          {Object.entries(sessionTree).sort(([a], [b]) => a.localeCompare(b)).map(([project, sessions]) => (
+          {Object.entries(sessionTree)
+            .filter(([project]) => !singleProject || project === projectName)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([project, sessions]) => (
             <div key={project}>
-              {/* Project node */}
+              {/* Project node (hidden in single-project mode) */}
+              {!singleProject && (
               <div
                 className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-[var(--bg-tertiary)] transition-colors border-b border-[var(--border)]/50 cursor-pointer"
                 onClick={() => toggleProject(project)}
@@ -364,15 +375,16 @@ export default function SessionView({
                   <span className="text-[9px] text-[var(--accent)]" title="Watching">👁</span>
                 )}
               </div>
+              )}
 
-              {/* Session children */}
-              {expandedProjects.has(project) && sessions.map(s => {
+              {/* Session children (always visible in single-project mode) */}
+              {(singleProject || expandedProjects.has(project)) && sessions.map(s => {
                 const isActive = selectedProject === project && activeSessionId === s.sessionId;
                 const isWatched = watchedSessionIds.has(s.sessionId);
                 return (
                   <div
                     key={s.sessionId}
-                    className={`group relative w-full text-left pl-6 pr-2 py-1.5 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer ${
+                    className={`group relative w-full text-left ${singleProject ? 'pl-2' : 'pl-6'} pr-2 py-1.5 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer ${
                       isActive ? 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--accent)]' : 'border-l-2 border-l-transparent'
                     }`}
                     onClick={() => batchMode ? toggleSelect(project, s.sessionId) : selectSession(project, s.sessionId)}
@@ -453,11 +465,13 @@ export default function SessionView({
         </div>
       </div>
 
-      {/* Sidebar resize handle */}
-      <div
-        onMouseDown={onSidebarDragStart}
-        className="w-1 bg-[var(--border)] cursor-col-resize shrink-0 hover:bg-[var(--accent)]/50 transition-colors"
-      />
+      {/* Sidebar resize handle (not in single-project mode) */}
+      {!singleProject && (
+        <div
+          onMouseDown={onSidebarDragStart}
+          className="w-1 bg-[var(--border)] cursor-col-resize shrink-0 hover:bg-[var(--accent)]/50 transition-colors"
+        />
+      )}
 
       {/* Right: session content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">

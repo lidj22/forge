@@ -1,6 +1,6 @@
 # Forge Overview
 
-Forge is a self-hosted Vibe Coding platform for Claude Code. It provides a browser-based terminal, AI task orchestration, remote access, and mobile control via Telegram.
+Forge is a self-hosted Vibe Coding platform for Claude Code. It provides a browser-based terminal, multi-agent workspace orchestration, AI task management, remote access, and mobile control via Telegram.
 
 ## Quick Start
 
@@ -19,7 +19,13 @@ Open `http://localhost:8403`. First launch prompts you to set an admin password.
 ## Data Location
 - Config: `~/.forge/` (binaries)
 - Data: `~/.forge/data/` (settings, database, state)
+- Workspaces: `~/.forge/workspaces/<id>/` (workspace state files)
 - Claude: `~/.claude/` (skills, commands, sessions)
+
+## Architecture
+- `forge-server.mjs` starts: Next.js (port 8403) + Terminal server + Telegram bot + Workspace daemon (port 8405)
+- `pnpm dev` / `start.sh dev`: Next.js dev mode (init.ts spawns terminal + telegram + workspace)
+- `FORGE_EXTERNAL_SERVICES=1`: Next.js skips spawning (forge-server manages external services)
 
 ## Server Commands
 ```bash

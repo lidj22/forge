@@ -1,7 +1,7 @@
 import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
-import Dashboard from '@/components/Dashboard';
+import DashboardWrapper from '@/components/DashboardWrapper';
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ force?: string }> }) {
   const session = await auth();
@@ -17,5 +17,5 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ f
     if (isMobile) redirect('/mobile');
   }
 
-  return <Dashboard user={session.user} />;
+  return <DashboardWrapper user={session.user} />;
 }

@@ -36,6 +36,7 @@ function initSchema(db: Database.Database) {
   migrate('ALTER TABLE skills ADD COLUMN deleted_remotely INTEGER NOT NULL DEFAULT 0');
   migrate('ALTER TABLE project_pipelines ADD COLUMN last_run_at TEXT');
   migrate('ALTER TABLE pipeline_runs ADD COLUMN dedup_key TEXT');
+  migrate("ALTER TABLE tasks ADD COLUMN agent TEXT DEFAULT 'claude'");
   // Recreate token_usage with day column (drop old version if schema changed)
   try { db.exec("SELECT day FROM token_usage LIMIT 1"); } catch { try { db.exec("DROP TABLE IF EXISTS token_usage"); db.exec("DROP TABLE IF EXISTS usage_scan_state"); } catch {} }
   // Unique index for dedup (only applies when dedup_key is NOT NULL)

@@ -4,11 +4,7 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { signOut } from 'next-auth/react';
 import TaskBoard from './TaskBoard';
 import TaskDetail from './TaskDetail';
-import SessionView from './SessionView';
-import NewTaskModal from './NewTaskModal';
-import SettingsModal from './SettingsModal';
 import TunnelToggle from './TunnelToggle';
-import MonitorPanel from './MonitorPanel';
 import type { Task } from '@/src/types';
 import type { WebTerminalHandle } from './WebTerminal';
 
@@ -22,6 +18,12 @@ const HelpDialog = lazy(() => import('./HelpDialog'));
 const LogViewer = lazy(() => import('./LogViewer'));
 const SkillsPanel = lazy(() => import('./SkillsPanel'));
 const UsagePanel = lazy(() => import('./UsagePanel'));
+const SessionView = lazy(() => import('./SessionView'));
+const NewTaskModal = lazy(() => import('./NewTaskModal'));
+const SettingsModal = lazy(() => import('./SettingsModal'));
+const MonitorPanel = lazy(() => import('./MonitorPanel'));
+const WorkspaceView = lazy(() => import('./WorkspaceView'));
+// WorkspaceTree moved into ProjectDetail — no longer needed at Dashboard level
 
 interface UsageSummary {
   provider: string;
@@ -95,7 +97,9 @@ function FloatingBrowser({ onClose }: { onClose: () => void }) {
 }
 
 export default function Dashboard({ user }: { user: any }) {
-  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects' | 'pipelines' | 'skills' | 'logs' | 'usage'>('terminal');
+  const [viewMode, setViewMode] = useState<'tasks' | 'sessions' | 'terminal' | 'docs' | 'projects' | 'pipelines' | 'workspace' | 'skills' | 'logs' | 'usage'>('terminal');
+  // workspaceProject state kept for forge:open-terminal event compatibility
+  const [workspaceProject, setWorkspaceProject] = useState<{ name: string; path: string } | null>(null);
   const [browserMode, setBrowserMode] = useState<'none' | 'float' | 'right' | 'left'>('none');
   const [showBrowserMenu, setShowBrowserMenu] = useState(false);
   const [browserWidth, setBrowserWidth] = useState(600);
@@ -147,11 +151,10 @@ export default function Dashboard({ user }: { user: any }) {
   // Listen for open-terminal events from ProjectManager
   useEffect(() => {
     const handler = (e: Event) => {
-      const { projectPath, projectName } = (e as CustomEvent).detail;
+      const { projectPath, projectName, agentId, resumeMode, sessionId, profileEnv } = (e as CustomEvent).detail;
       setViewMode('terminal');
-      // Give terminal time to render, then trigger open
       setTimeout(() => {
-        terminalRef.current?.openProjectTerminal?.(projectPath, projectName);
+        terminalRef.current?.openProjectTerminal?.(projectPath, projectName, agentId, resumeMode, sessionId, profileEnv);
       }, 300);
     };
     window.addEventListener('forge:open-terminal', handler);
@@ -291,7 +294,7 @@ export default function Dashboard({ user }: { user: any }) {
           {/* View mode toggle */}
           <div className="flex items-center bg-[var(--bg-tertiary)] rounded p-0.5">
             {/* Workspace */}
-            {(['terminal', 'projects', 'sessions'] as const).map(mode => (
+            {(['terminal', 'projects'] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
@@ -301,7 +304,7 @@ export default function Dashboard({ user }: { user: any }) {
                     : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                {{ terminal: 'Vibe Coding', projects: 'Projects', sessions: 'Sessions' }[mode]}
+                {{ terminal: 'Vibe Coding', projects: 'Projects' }[mode]}
               </button>
             ))}
             <span className="w-[2px] h-4 bg-[var(--text-secondary)]/30 mx-1.5" />
@@ -332,7 +335,7 @@ export default function Dashboard({ user }: { user: any }) {
               </button>
             ))}
             <span className="w-[2px] h-4 bg-[var(--text-secondary)]/30 mx-1.5" />
-            {/* Skills */}
+            {/* Marketplace */}
             <button
               onClick={() => setViewMode('skills')}
               className={`text-[11px] px-2.5 py-0.5 rounded transition-colors ${
@@ -341,7 +344,7 @@ export default function Dashboard({ user }: { user: any }) {
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
-              Skills
+              Marketplace
             </button>
           </div>
 
@@ -679,24 +682,14 @@ export default function Dashboard({ user }: { user: any }) {
               )}
             </aside>
           </>
-        ) : viewMode === 'sessions' ? (
-          <SessionView
-            projects={projects}
-            onOpenInTerminal={(sessionId, projectPath) => {
-              setViewMode('terminal');
-              setTimeout(() => {
-                terminalRef.current?.openSessionInTerminal(sessionId, projectPath);
-              }, 100);
-            }}
-          />
         ) : null}
 
-        {/* Projects */}
-        {viewMode === 'projects' && (
+        {/* Projects — keep alive to preserve state across tab switches */}
+        <div className={`flex-1 flex flex-col min-h-0 ${viewMode !== 'projects' ? 'hidden' : ''}`}>
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
             <ProjectManager />
           </Suspense>
-        )}
+        </div>
 
         {/* Pipelines */}
         {viewMode === 'pipelines' && (
@@ -780,24 +773,28 @@ export default function Dashboard({ user }: { user: any }) {
       )}
 
       {showNewTask && (
-        <NewTaskModal
-          onClose={() => setShowNewTask(false)}
-          onCreate={async (data) => {
-            await fetch('/api/tasks', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(data),
-            });
-            setShowNewTask(false);
-            fetchData();
-          }}
-        />
+        <Suspense fallback={null}>
+          <NewTaskModal
+            onClose={() => setShowNewTask(false)}
+            onCreate={async (data) => {
+              await fetch('/api/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+              });
+              setShowNewTask(false);
+              fetchData();
+            }}
+          />
+        </Suspense>
       )}
 
-      {showMonitor && <MonitorPanel onClose={() => setShowMonitor(false)} />}
+      {showMonitor && <Suspense fallback={null}><MonitorPanel onClose={() => setShowMonitor(false)} /></Suspense>}
 
       {showSettings && (
-        <SettingsModal onClose={() => { setShowSettings(false); fetchData(); refreshDisplayName(); }} />
+        <Suspense fallback={null}>
+          <SettingsModal onClose={() => { setShowSettings(false); fetchData(); refreshDisplayName(); }} />
+        </Suspense>
       )}
       {showHelp && (
         <Suspense fallback={null}>

@@ -64,6 +64,9 @@ export default function TaskBoard({
             <div className="flex items-center gap-2 mb-0.5">
               <span className={`text-[10px] ${STATUS_COLORS[task.status]}`}>●</span>
               <span className="text-xs font-medium truncate">{task.projectName}</span>
+              {(task as any).agent && (task as any).agent !== 'claude' && (
+                <span className="text-[8px] px-1 rounded bg-green-900/30 text-green-400">{(task as any).agent}</span>
+              )}
               <span className={`text-[9px] ml-auto ${STATUS_COLORS[task.status]}`}>
                 {task.scheduledAt && task.status === 'queued'
                   ? `⏰ ${new Date(task.scheduledAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`

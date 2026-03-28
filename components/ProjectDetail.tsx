@@ -1,7 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, memo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo, lazy, Suspense } from 'react';
 import { useSidebarResize } from '@/hooks/useSidebarResize';
+
+const InlinePipelineView = lazy(() => import('./InlinePipelineView'));
+const WorkspaceViewLazy = lazy(() => import('./WorkspaceView'));
+const SessionViewLazy = lazy(() => import('./SessionView'));
 
 // ─── Syntax highlighting ─────────────────────────────────
 const KEYWORDS = new Set([
@@ -72,11 +76,14 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [diffFile, setDiffFile] = useState<string | null>(null);
   const [projectSkills, setProjectSkills] = useState<{ name: string; displayName: string; type: string; scope: string; version: string; installedVersion: string; hasUpdate: boolean; source: 'registry' | 'local' }[]>([]);
   const [showSkillsDetail, setShowSkillsDetail] = useState(false);
-  const [projectTab, setProjectTab] = useState<'code' | 'skills' | 'claudemd' | 'pipelines'>('code');
+  const [projectTab, setProjectTab] = useState<'workspace' | 'sessions' | 'code' | 'skills' | 'claudemd' | 'pipelines'>('code');
+  const wsViewRef = useRef<import('./WorkspaceView').WorkspaceViewHandle>(null);
   // Pipeline bindings state
   const [pipelineBindings, setPipelineBindings] = useState<{ id: number; workflowName: string; enabled: boolean; config: any; lastRunAt: string | null; nextRunAt: string | null }[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<{ id: string; workflowName: string; pipelineId: string; status: string; summary: string; dedupKey: string | null; createdAt: string }[]>([]);
-  const [availableWorkflows, setAvailableWorkflows] = useState<{ name: string; description?: string; builtin?: boolean }[]>([]);
+  const [availableWorkflows, setAvailableWorkflows] = useState<{ name: string; description?: string; builtin?: boolean; type?: string }[]>([]);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [expandedPipeline, setExpandedPipeline] = useState<any>(null);
   const [showAddPipeline, setShowAddPipeline] = useState(false);
   const [triggerInput, setTriggerInput] = useState<Record<string, string>>({});
   const [runMenu, setRunMenu] = useState<string | null>(null); // workflowName of open run menu
@@ -403,6 +410,15 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
     if (projectTab === 'claudemd') fetchClaudeMd();
   }, [projectTab, fetchProjectSkills, fetchPipelineBindings, fetchClaudeMd]);
 
+  // Auto-refresh pipeline runs while any is running
+  useEffect(() => {
+    if (projectTab !== 'pipelines') return;
+    const hasRunning = pipelineRuns.some(r => r.status === 'running');
+    if (!hasRunning) return;
+    const timer = setInterval(fetchPipelineBindings, 4000);
+    return () => clearInterval(timer);
+  }, [projectTab, pipelineRuns, fetchPipelineBindings]);
+
   return (
     <>
       {/* Project header */}
@@ -416,17 +432,8 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
           {gitInfo?.behind ? <span className="text-[9px] text-yellow-400">↓{gitInfo.behind}</span> : null}
           {/* Action buttons */}
           <div className="flex items-center gap-1.5 ml-auto">
-            {/* Open Terminal */}
-            <button
-              onClick={() => {
-                const event = new CustomEvent('forge:open-terminal', { detail: { projectPath, projectName } });
-                window.dispatchEvent(event);
-              }}
-              className="text-[9px] px-2 py-0.5 border border-[var(--accent)] text-[var(--accent)] rounded hover:bg-[var(--accent)] hover:text-white transition-colors"
-              title="Open terminal with claude -c"
-            >
-              Terminal
-            </button>
+            {/* Open Terminal with agent selection */}
+            <AgentTerminalButton projectPath={projectPath} projectName={projectName} />
             <button
               onClick={() => { fetchGitInfo(); fetchTree(); if (selectedFile) openFile(selectedFile); }}
               className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
@@ -451,6 +458,18 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                 projectTab === 'code' ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >Code</button>
+            <button
+              onClick={() => setProjectTab('workspace')}
+              className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
+                projectTab === 'workspace' ? 'bg-[var(--accent)]/20 text-[var(--accent)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >🔨 Workspace</button>
+            <button
+              onClick={() => setProjectTab('sessions')}
+              className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
+                projectTab === 'sessions' ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`}
+            >Sessions</button>
             <button
               onClick={() => setProjectTab('skills')}
               className={`text-[9px] px-2 py-0.5 rounded transition-colors ${
@@ -505,6 +524,33 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
               <span className="text-[var(--text-secondary)] text-[9px] shrink-0 w-16 text-right">{c.date}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Workspace tab */}
+      {projectTab === 'workspace' && (
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <WorkspaceViewLazy
+              ref={wsViewRef}
+              projectPath={projectPath}
+              projectName={projectName}
+              onClose={() => setProjectTab('code')}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Sessions tab */}
+      {projectTab === 'sessions' && (
+        <div className="flex-1 flex min-h-0 overflow-hidden">
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[var(--text-secondary)]">Loading...</div>}>
+            <SessionViewLazy
+              projectName={projectName}
+              projects={[{ name: projectName, path: projectPath, language: null }]}
+              singleProject
+            />
+          </Suspense>
         </div>
       )}
 
@@ -1056,60 +1102,101 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
               <div className="text-[9px] text-[var(--text-secondary)] uppercase mb-2">Execution History</div>
               <div className="border border-[var(--border)] rounded overflow-hidden">
                 {pipelineRuns.map(run => (
-                  <div key={run.id} className="flex items-start gap-2 px-3 py-2 border-b border-[var(--border)]/30 last:border-b-0 text-[10px]">
-                    <span className={`shrink-0 ${
-                      run.status === 'done' ? 'text-green-400' : run.status === 'failed' ? 'text-red-400' : run.status === 'skipped' ? 'text-gray-400' : 'text-yellow-400'
-                    }`}>●</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[var(--text-primary)] font-medium">{run.workflowName}</span>
-                        {run.dedupKey && (
-                          <span className="text-[8px] text-[var(--accent)] font-mono">{run.dedupKey.replace('issue:', '#')}</span>
+                  <div key={run.id} className="border-b border-[var(--border)]/30 last:border-b-0">
+                    <div className="flex items-start gap-2 px-3 py-2 text-[10px]">
+                      <span className={`shrink-0 mt-0.5 ${
+                        run.status === 'done' ? 'text-green-400' : run.status === 'failed' ? 'text-red-400' : run.status === 'skipped' ? 'text-gray-400' : 'text-yellow-400'
+                      }`}>{run.status === 'running' ? '●' : '●'}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[var(--text-primary)] font-medium">{run.workflowName}</span>
+                          {run.dedupKey && (
+                            <span className="text-[8px] text-[var(--accent)] font-mono">{run.dedupKey.replace('issue:', '#')}</span>
+                          )}
+                          <button
+                            onClick={async () => {
+                              if (expandedRunId === run.pipelineId) {
+                                setExpandedRunId(null);
+                                setExpandedPipeline(null);
+                              } else {
+                                setExpandedRunId(run.pipelineId);
+                                const res = await fetch(`/api/pipelines/${run.pipelineId}`);
+                                if (res.ok) setExpandedPipeline(await res.json());
+                              }
+                            }}
+                            className={`text-[8px] font-mono hover:underline ${expandedRunId === run.pipelineId ? 'text-[var(--accent)] font-bold' : 'text-[var(--accent)]'}`}
+                            title="Expand / View in Pipelines"
+                          >{run.status === 'running' ? '▾ ' : ''}{run.pipelineId.slice(0, 8)}</button>
+                          <button
+                            onClick={() => window.dispatchEvent(new CustomEvent('forge:navigate', { detail: { view: 'pipelines', pipelineId: run.pipelineId } }))}
+                            className="text-[7px] text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                            title="Open in Pipeline page"
+                          >↗</button>
+                          <span className="text-[8px] text-[var(--text-secondary)] ml-auto">{new Date(run.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        {!expandedRunId && run.summary && (
+                          <pre className="text-[9px] text-[var(--text-secondary)] mt-1 whitespace-pre-wrap break-words line-clamp-3">{run.summary}</pre>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {run.status === 'running' && (
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/pipelines/${run.pipelineId}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'cancel' }),
+                              });
+                              fetchPipelineBindings();
+                            }}
+                            className="text-[8px] text-red-400 hover:underline"
+                          >Cancel</button>
+                        )}
+                        {run.status === 'failed' && run.dedupKey && (
+                          <button
+                            onClick={async () => {
+                              await fetch('/api/project-pipelines', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'reset-dedup', projectPath, workflowName: run.workflowName, dedupKey: run.dedupKey }),
+                              });
+                              await fetch('/api/project-pipelines', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'delete-run', id: run.id }),
+                              });
+                              fetchPipelineBindings();
+                            }}
+                            className="text-[8px] text-[var(--accent)] hover:underline"
+                          >Retry</button>
                         )}
                         <button
-                          onClick={() => window.dispatchEvent(new CustomEvent('forge:navigate', { detail: { view: 'pipelines', pipelineId: run.pipelineId } }))}
-                          className="text-[8px] text-[var(--accent)] font-mono hover:underline"
-                          title="View in Pipelines"
-                        >{run.pipelineId.slice(0, 8)}</button>
-                        <span className="text-[8px] text-[var(--text-secondary)] ml-auto">{new Date(run.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      {run.summary && (
-                        <pre className="text-[9px] text-[var(--text-secondary)] mt-1 whitespace-pre-wrap break-words line-clamp-3">{run.summary}</pre>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {run.status === 'failed' && run.dedupKey && (
-                        <button
                           onClick={async () => {
-                            await fetch('/api/project-pipelines', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ action: 'reset-dedup', projectPath, workflowName: run.workflowName, dedupKey: run.dedupKey }),
-                            });
-                            // Delete the failed run then re-scan
+                            if (!confirm('Delete this run?')) return;
                             await fetch('/api/project-pipelines', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ action: 'delete-run', id: run.id }),
                             });
+                            if (expandedRunId === run.pipelineId) { setExpandedRunId(null); setExpandedPipeline(null); }
                             fetchPipelineBindings();
                           }}
-                          className="text-[8px] text-[var(--accent)] hover:underline"
-                        >Retry</button>
-                      )}
-                      <button
-                        onClick={async () => {
-                          if (!confirm('Delete this run?')) return;
-                          await fetch('/api/project-pipelines', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'delete-run', id: run.id }),
-                          });
-                          fetchPipelineBindings();
-                        }}
-                        className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--red)]"
-                      >×</button>
+                          className="text-[8px] text-[var(--text-secondary)] hover:text-[var(--red)]"
+                        >×</button>
+                      </div>
                     </div>
+                    {/* Expanded inline pipeline view */}
+                    {expandedRunId === run.pipelineId && expandedPipeline && (
+                      <Suspense fallback={<div className="p-2 text-[9px] text-[var(--text-secondary)]">Loading...</div>}>
+                        <InlinePipelineView
+                          pipeline={expandedPipeline}
+                          onRefresh={async () => {
+                            const res = await fetch(`/api/pipelines/${run.pipelineId}`);
+                            if (res.ok) setExpandedPipeline(await res.json());
+                          }}
+                        />
+                      </Suspense>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1239,3 +1326,174 @@ const FileTreeNode = memo(function FileTreeNode({ node, depth, selected, onSelec
     </button>
   );
 });
+
+// ─── Agent Terminal Button ───────────────────────────────
+
+function AgentTerminalButton({ projectPath, projectName }: { projectPath: string; projectName: string }) {
+  const [agents, setAgents] = useState<{ id: string; name: string; detected?: boolean; isProfile?: boolean; base?: string; backendType?: string; env?: Record<string, string>; model?: string }[]>([]);
+  const [showMenu, setShowMenu] = useState(false);
+  const [launchDialog, setLaunchDialog] = useState<{ agentId: string; agentName: string; env?: Record<string, string>; model?: string } | null>(null);
+  const [sessions, setSessions] = useState<{ id: string; modified: string; size: number }[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch('/api/agents').then(r => r.json())
+      .then(d => setAgents(d.agents || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as globalThis.Node)) setShowMenu(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [showMenu]);
+
+  // Fetch sessions when dialog opens (only for claude-code agents)
+  useEffect(() => {
+    if (!launchDialog) return;
+    const pName = projectPath.replace(/\/+$/, '').split('/').pop() || '';
+    fetch(`/api/claude-sessions/${encodeURIComponent(pName)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setSessions(data.map((s: any) => ({
+            id: s.sessionId || s.id || '',
+            modified: s.modified || '',
+            size: s.fileSize || s.size || 0,
+          })));
+        }
+      })
+      .catch(() => {});
+  }, [launchDialog, projectPath]);
+
+  const openWithAgent = (agentId: string, resumeMode?: boolean, sessionId?: string, env?: Record<string, string>, model?: string) => {
+    setLaunchDialog(null);
+    setShowMenu(false);
+    // Build profile env for the event
+    const profileEnv = env ? { ...env } : undefined;
+    if (model && profileEnv) profileEnv.CLAUDE_MODEL = model;
+    else if (model) {
+      const pe: Record<string, string> = { CLAUDE_MODEL: model };
+      window.dispatchEvent(new CustomEvent('forge:open-terminal', {
+        detail: { projectPath, projectName, agentId, resumeMode, sessionId, profileEnv: pe },
+      }));
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('forge:open-terminal', {
+      detail: { projectPath, projectName, agentId, resumeMode, sessionId, profileEnv },
+    }));
+  };
+
+  const handleAgentClick = async (a: typeof agents[0]) => {
+    setShowMenu(false);
+    // Resolve launch info from server (reads cliType + profile)
+    try {
+      const res = await fetch(`/api/agents?resolve=${encodeURIComponent(a.id)}`);
+      const info = await res.json();
+      if (info.supportsSession) {
+        setSessions([]);
+        setShowSessions(false);
+        setLaunchDialog({ agentId: a.id, agentName: a.name, env: info.env, model: info.model });
+      } else {
+        openWithAgent(a.id, false, undefined, info.env, info.model);
+      }
+    } catch {
+      // Fallback: open directly
+      openWithAgent(a.id);
+    }
+  };
+
+  const formatTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return new Date(iso).toLocaleDateString();
+  };
+  const formatSize = (b: number) => b < 1024 ? `${b}B` : b < 1048576 ? `${(b/1024).toFixed(0)}KB` : `${(b/1048576).toFixed(1)}MB`;
+
+  const allAgents = agents.filter(a => a.detected !== false || a.isProfile);
+
+  return (
+    <>
+      <div ref={ref} className="relative">
+        <div className="flex items-center">
+          <button
+            onClick={() => handleAgentClick({ id: 'claude', name: 'Claude' })}
+            className="text-[9px] px-2 py-0.5 border border-[var(--accent)] text-[var(--accent)] rounded-l hover:bg-[var(--accent)] hover:text-white transition-colors"
+            title="Open terminal"
+          >
+            Terminal
+          </button>
+          {allAgents.length > 1 && (
+            <button
+              onClick={() => setShowMenu(v => !v)}
+              className="text-[9px] px-1 py-0.5 border border-l-0 border-[var(--accent)] text-[var(--accent)] rounded-r hover:bg-[var(--accent)] hover:text-white transition-colors"
+            >
+              ▾
+            </button>
+          )}
+        </div>
+        {showMenu && (
+          <div className="absolute right-0 top-full mt-1 w-44 rounded border border-[var(--border)] shadow-lg z-40 overflow-hidden" style={{ background: 'var(--bg-primary)' }}>
+            {allAgents.map(a => (
+              <button key={a.id} onClick={() => handleAgentClick(a)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] text-left">
+                <span className="font-bold w-4 text-center text-[var(--accent)]">
+                  {a.isProfile ? '●' : a.id === 'claude' ? 'C' : a.id === 'codex' ? 'X' : a.id === 'aider' ? 'A' : a.id.charAt(0).toUpperCase()}
+                </span>
+                <span>{a.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Launch dialog — New / Resume / Sessions */}
+      {launchDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.75)' }}
+          onClick={e => { if (e.target === e.currentTarget) setLaunchDialog(null); }}>
+          <div className="w-80 rounded-lg border border-[#30363d] p-4 shadow-xl" style={{ background: '#0d1117' }}>
+            <div className="text-sm font-bold text-white mb-3">⌨️ {launchDialog.agentName}</div>
+            <div className="space-y-2">
+              <button onClick={() => openWithAgent(launchDialog.agentId, false, undefined, launchDialog.env, launchDialog.model)}
+                className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#58a6ff] hover:bg-[#161b22] transition-colors">
+                <div className="text-xs text-white font-semibold">New Session</div>
+                <div className="text-[9px] text-gray-500">Start fresh</div>
+              </button>
+
+              {sessions.length > 0 && (
+                <button onClick={() => openWithAgent(launchDialog.agentId, true, undefined, launchDialog.env, launchDialog.model)}
+                  className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#3fb950] hover:bg-[#161b22] transition-colors">
+                  <div className="text-xs text-white font-semibold">Resume Latest</div>
+                  <div className="text-[9px] text-gray-500">{sessions[0].id.slice(0, 8)} · {formatTime(sessions[0].modified)} · {formatSize(sessions[0].size)}</div>
+                </button>
+              )}
+
+              {sessions.length > 1 && (
+                <button onClick={() => setShowSessions(!showSessions)}
+                  className="w-full text-[9px] text-gray-500 hover:text-white py-1">
+                  {showSessions ? '▼' : '▶'} More sessions ({sessions.length - 1})
+                </button>
+              )}
+
+              {showSessions && sessions.slice(1).map(s => (
+                <button key={s.id} onClick={() => openWithAgent(launchDialog.agentId, true, s.id, launchDialog.env, launchDialog.model)}
+                  className="w-full text-left px-3 py-1.5 rounded border border-[#21262d] hover:border-[#30363d] hover:bg-[#161b22] transition-colors">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9px] text-gray-400 font-mono">{s.id.slice(0, 8)}</span>
+                    <span className="text-[8px] text-gray-600">{formatTime(s.modified)}</span>
+                    <span className="text-[8px] text-gray-600">{formatSize(s.size)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setLaunchDialog(null)}
+              className="w-full mt-3 text-[9px] text-gray-500 hover:text-white">Cancel</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

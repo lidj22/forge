@@ -3,13 +3,16 @@
 import { useState, useEffect, useRef, useCallback, memo, useImperativeHandle, forwardRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 
 // ─── Imperative API for parent components ────────────────────
 
 export interface WebTerminalHandle {
   openSessionInTerminal: (sessionId: string, projectPath: string) => void;
-  openProjectTerminal: (projectPath: string, projectName: string) => void;
+  openProjectTerminal: (projectPath: string, projectName: string, agentId?: string, resumeMode?: boolean, sessionId?: string, profileEnv?: Record<string, string>) => void;
 }
 
 export interface WebTerminalProps {
@@ -38,6 +41,7 @@ interface TabState {
   activeId: number;
   projectPath?: string;
   bellEnabled?: boolean;
+  agent?: string; // agent ID (e.g., 'claude', 'codex', 'aider')
 }
 
 // ─── Layout persistence ──────────────────────────────────────
@@ -219,6 +223,9 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
   const [allProjects, setAllProjects] = useState<{ name: string; path: string; root: string }[]>([]);
   const [skipPermissions, setSkipPermissions] = useState(false);
   const [expandedRoot, setExpandedRoot] = useState<string | null>(null);
+  const [availableAgents, setAvailableAgents] = useState<{ id: string; name: string; detected?: boolean }[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+  const [defaultAgentId, setDefaultAgentId] = useState('claude');
 
   // Restore shared state from server after mount
   useEffect(() => {
@@ -321,22 +328,49 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       setTabs(prev => [...prev, newTab]);
       setTimeout(() => setActiveTabId(newTab.id), 0);
     },
-    async openProjectTerminal(projectPath: string, projectName: string) {
-      // Check for existing sessions to use -c
-      let hasSession = false;
-      try {
-        const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(projectName)}`);
-        const sData = await sRes.json();
-        hasSession = Array.isArray(sData) ? sData.length > 0 : false;
-      } catch {}
-      const sf = skipPermissions ? ' --dangerously-skip-permissions' : '';
-      const resumeFlag = hasSession ? ' -c' : '';
+    async openProjectTerminal(projectPath: string, projectName: string, agentId?: string, resumeMode?: boolean, sessionId?: string, profileEnv?: Record<string, string>) {
+      const agent = agentId || 'claude';
+      // Resolve CLI command — profiles use base agent's binary
+      const knownClis = ['claude', 'codex', 'aider'];
+      const agentCmd = knownClis.includes(agent) ? agent : 'claude';
 
-      // Use a ref-stable ID so we can set active after state update
+      // Resume flag from user's choice
+      let resumeFlag = '';
+      if (agentCmd === 'claude') {
+        if (sessionId) resumeFlag = ` --resume ${sessionId}`;
+        else if (resumeMode) resumeFlag = ' -c';
+      }
+
+      // Model flag from profile
+      const modelFlag = profileEnv?.CLAUDE_MODEL ? ` --model ${profileEnv.CLAUDE_MODEL}` : '';
+
+      // Build env exports from profile (exclude CLAUDE_MODEL — passed via --model)
+      const envExports = profileEnv
+        ? Object.entries(profileEnv)
+            .filter(([k]) => k !== 'CLAUDE_MODEL')
+            .map(([k, v]) => `export ${k}="${v}"`)
+            .join(' && ')
+        : '';
+      const envPrefix = envExports ? envExports + ' && ' : '';
+
+      // Get skip-permissions flag
+      let sf = '';
+      try {
+        const agentRes = await fetch('/api/agents');
+        const agentData = await agentRes.json();
+        const agentConfig = (agentData.agents || []).find((a: any) => a.id === agent);
+        if (agentConfig?.skipPermissionsFlag && skipPermissions) {
+          sf = ` ${agentConfig.skipPermissionsFlag}`;
+        } else if (skipPermissions && agentCmd === 'claude') {
+          sf = ' --dangerously-skip-permissions';
+        }
+      } catch {
+        if (skipPermissions && agentCmd === 'claude') sf = ' --dangerously-skip-permissions';
+      }
+
       let targetTabId: number | null = null;
 
       setTabs(prev => {
-        // Check if there's already a tab for this project
         const existing = prev.find(t => t.projectPath === projectPath);
         if (existing) {
           targetTabId = existing.id;
@@ -344,7 +378,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
         }
         const tree = makeTerminal(undefined, projectPath);
         const paneId = firstTerminalId(tree);
-        pendingCommands.set(paneId, `cd "${projectPath}" && claude${resumeFlag}${sf}\n`);
+        pendingCommands.set(paneId, `${envPrefix}cd "${projectPath}" && ${agentCmd}${resumeFlag}${modelFlag}${sf}\n`);
         const newTab: TabState = {
           id: nextId++,
           label: projectName,
@@ -626,6 +660,9 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                   {tab.label}
                 </span>
               )}
+              {tab.agent && tab.agent !== 'claude' && (
+                <span className="text-[8px] text-[var(--accent)] ml-0.5">{tab.agent}</span>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); toggleBell(tab.id); }}
                 className={`text-[10px] ml-1 ${tab.bellEnabled ? 'text-yellow-400' : 'text-gray-600 hover:text-gray-400'}`}
@@ -644,12 +681,19 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
           <button
             onClick={() => {
               setShowNewTabModal(true);
-              // Refresh projects list when opening modal
+              setSelectedAgent('');
+              // Refresh projects + agents when opening modal
               fetch('/api/projects').then(r => r.json())
                 .then((p: { name: string; path: string; root: string }[]) => {
                   if (!Array.isArray(p)) return;
                   setAllProjects(p);
                   setProjectRoots([...new Set(p.map(proj => proj.root))]);
+                })
+                .catch(() => {});
+              fetch('/api/agents').then(r => r.json())
+                .then(data => {
+                  setAvailableAgents((data.agents || []).filter((a: any) => a.enabled));
+                  setDefaultAgentId(data.defaultAgent || 'claude');
                 })
                 .catch(() => {});
             }}
@@ -805,13 +849,13 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                 onClick={() => { addTab(); setShowNewTabModal(false); setExpandedRoot(null); }}
                 className="w-full text-left px-3 py-2 rounded hover:bg-[var(--term-border)] text-[12px] text-gray-300 flex items-center gap-2"
               >
-                <span className="text-gray-500">▸</span> Terminal
+                <span className="text-gray-500">▸</span> Terminal (no agent)
               </button>
 
               {/* Project roots */}
               {projectRoots.length > 0 && (
                 <div className="mt-2 pt-2 border-t border-[var(--term-border)]">
-                  <div className="px-3 py-1 text-[9px] text-gray-500 uppercase">Claude in Project</div>
+                  <div className="px-3 py-1 text-[9px] text-gray-500 uppercase">Agent in Project</div>
                   {projectRoots.map(root => {
                     const rootName = root.split('/').pop() || root;
                     const isExpanded = expandedRoot === root;
@@ -829,32 +873,63 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                         {isExpanded && (
                           <div className="ml-4">
                             {rootProjects.map(p => (
-                              <button
-                                key={p.path}
-                                onClick={async () => {
-                                  setShowNewTabModal(false); setExpandedRoot(null);
-                                  // Pre-check sessions before creating tab
-                                  let hasSession = false;
-                                  try {
-                                    const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
-                                    const sData = await sRes.json();
-                                    hasSession = Array.isArray(sData) ? sData.length > 0 : (Array.isArray(sData.sessions) && sData.sessions.length > 0);
-                                  } catch {}
-                                  const skipFlag = skipPermissions ? ' --dangerously-skip-permissions' : '';
-                                  const resumeFlag = hasSession ? ' -c' : '';
-                                  const tree = makeTerminal(undefined, p.path);
-                                  const paneId = firstTerminalId(tree);
-                                  pendingCommands.set(paneId, `cd "${p.path}" && claude${resumeFlag}${skipFlag}\n`);
-                                  const tabNum = tabs.length + 1;
-                                  const newTab: TabState = { id: nextId++, label: p.name || `Terminal ${tabNum}`, tree, ratios: {}, activeId: paneId, projectPath: p.path };
-                                  setTabs(prev => [...prev, newTab]);
-                                  setActiveTabId(newTab.id);
-                                }}
-                                className="w-full text-left px-3 py-1.5 rounded hover:bg-[var(--term-border)] text-[11px] text-gray-300 flex items-center gap-2 truncate"
-                                title={p.path}
-                              >
-                                <span className="text-gray-600 text-[10px]">↳</span> {p.name}
-                              </button>
+                              <div key={p.path} className="flex items-center gap-1 px-3 py-1.5 rounded hover:bg-[var(--term-border)]/50 text-[11px]" title={p.path}>
+                                <span className="text-gray-600 text-[10px]">↳</span>
+                                <span className="text-gray-300 truncate">{p.name}</span>
+                                <AgentButtons
+                                  agents={availableAgents}
+                                  defaultAgentId={defaultAgentId}
+                                  onSelect={async (a) => {
+                                          setShowNewTabModal(false); setExpandedRoot(null);
+                                          let cmd: string;
+                                          try {
+                                            // Resolve terminal launch info (reads profile env/model)
+                                            const resolveRes = await fetch(`/api/agents?resolve=${encodeURIComponent(a.id)}`);
+                                            const info = await resolveRes.json();
+                                            const cliCmd = info.cliCmd || 'claude';
+
+                                            // Build env exports from profile
+                                            const profileEnv = { ...(info.env || {}), ...(info.model ? { CLAUDE_MODEL: info.model } : {}) };
+                                            const envEntries = Object.entries(profileEnv).filter(([k]) => k !== 'CLAUDE_MODEL');
+                                            const envExports = envEntries.length > 0
+                                              ? envEntries.map(([k, v]) => `export ${k}="${v}"`).join(' && ') + ' && '
+                                              : '';
+
+                                            // Model flag (claude-code only)
+                                            const modelFlag = info.supportsSession && profileEnv.CLAUDE_MODEL ? ` --model ${profileEnv.CLAUDE_MODEL}` : '';
+
+                                            // Resume flag (claude-code only)
+                                            let resumeFlag = '';
+                                            if (info.supportsSession) {
+                                              try {
+                                                const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
+                                                const sData = await sRes.json();
+                                                if (Array.isArray(sData) && sData.length > 0) resumeFlag = ' -c';
+                                              } catch {}
+                                            }
+
+                                            // Skip permissions flag
+                                            let sf = '';
+                                            if (skipPermissions) {
+                                              const agentRes = await fetch('/api/agents');
+                                              const agentData = await agentRes.json();
+                                              const cfg = (agentData.agents || []).find((ag: any) => ag.id === a.id);
+                                              sf = cfg?.skipPermissionsFlag ? ` ${cfg.skipPermissionsFlag}` : (cliCmd === 'claude' ? ' --dangerously-skip-permissions' : '');
+                                            }
+
+                                            cmd = `${envExports}cd "${p.path}" && ${cliCmd}${resumeFlag}${modelFlag}${sf}\n`;
+                                          } catch {
+                                            cmd = `cd "${p.path}" && ${a.id}\n`;
+                                          }
+                                          const tree = makeTerminal(undefined, p.path);
+                                          const paneId = firstTerminalId(tree);
+                                          pendingCommands.set(paneId, cmd);
+                                          const newTab: TabState = { id: nextId++, label: p.name || 'Terminal', tree, ratios: {}, activeId: paneId, projectPath: p.path, agent: a.id };
+                                          setTabs(prev => [...prev, newTab]);
+                                          setActiveTabId(newTab.id);
+                                  }}
+                                />
+                              </div>
                             ))}
                             {rootProjects.length === 0 && (
                               <div className="px-3 py-1.5 text-[10px] text-gray-600">No projects</div>
@@ -942,6 +1017,70 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
 export default WebTerminal;
 
 // ─── Pane renderer ───────────────────────────────────────────
+
+// ─── Agent shortcut buttons (inline with project name) ──────
+
+function AgentButtons({ agents, defaultAgentId, onSelect }: {
+  agents: { id: string; name: string; detected?: boolean }[];
+  defaultAgentId: string;
+  onSelect: (agent: { id: string; name: string }) => void;
+}) {
+  const [showMore, setShowMore] = useState(false);
+  const MAX_INLINE = 3;
+
+  const getAbbr = (id: string) =>
+    id === 'claude' ? 'C' : id === 'codex' ? 'X' : id === 'aider' ? 'A' : id.charAt(0).toUpperCase();
+
+  const btnClass = (id: string, detected?: boolean) => {
+    if (detected === false) return 'w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold bg-gray-800/50 text-gray-600 cursor-not-allowed';
+    if (id === defaultAgentId) return 'w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold bg-green-500/30 text-green-400 hover:bg-green-500 hover:text-white';
+    return 'w-5 h-5 flex items-center justify-center rounded text-[9px] font-bold bg-green-900/30 text-green-300/70 hover:bg-green-700/50 hover:text-green-200';
+  };
+
+  const inline = agents.slice(0, MAX_INLINE);
+  const overflow = agents.slice(MAX_INLINE);
+
+  return (
+    <div className="flex items-center gap-0.5 ml-auto shrink-0 relative">
+      {inline.map(a => (
+        <button
+          key={a.id}
+          title={a.detected === false ? `${a.name} (not installed)` : `Open with ${a.name}`}
+          onClick={() => { if (a.detected !== false) onSelect(a); }}
+          className={btnClass(a.id, a.detected)}
+        >
+          {getAbbr(a.id)}
+        </button>
+      ))}
+      {overflow.length > 0 && (
+        <>
+          <button
+            title="More agents"
+            onClick={(e) => { e.stopPropagation(); setShowMore(v => !v); }}
+            className="w-5 h-5 flex items-center justify-center rounded text-[9px] bg-gray-700/50 text-gray-400 hover:bg-gray-600 hover:text-white"
+          >…</button>
+          {showMore && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowMore(false)} />
+              <div className="absolute right-0 top-6 z-50 bg-[var(--term-bg)] border border-[var(--term-border)] rounded shadow-lg py-1 min-w-[120px]">
+                {overflow.map(a => (
+                  <button
+                    key={a.id}
+                    onClick={() => { if (a.detected !== false) { setShowMore(false); onSelect(a); } }}
+                    className={`w-full text-left px-3 py-1 text-[10px] flex items-center gap-2 ${a.detected === false ? 'text-gray-600 cursor-not-allowed' : 'text-gray-300 hover:bg-[var(--term-border)]'}`}
+                  >
+                    <span className={btnClass(a.id, a.detected) + ' w-4 h-4 text-[8px]'}>{getAbbr(a.id)}</span>
+                    {a.name} {a.detected === false ? '(not installed)' : ''}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 function PaneRenderer({
   node, activeId, onFocus, ratios, setRatios, onSessionConnected, refreshKeys, skipPermissions, canClose, onClosePane,
@@ -1108,6 +1247,10 @@ const MemoTerminalPane = memo(function TerminalPane({
   onSessionConnected: (paneId: number, sessionName: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const sessionNameRef = useRef(sessionName);
   sessionNameRef.current = sessionName;
   const projectPathRef = useRef(projectPath);
@@ -1133,6 +1276,7 @@ const MemoTerminalPane = memo(function TerminalPane({
     const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 
     const term = new Terminal({
+      allowProposedApi: true,
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
@@ -1196,6 +1340,24 @@ const MemoTerminalPane = memo(function TerminalPane({
       if (el.closest('.hidden') || el.offsetWidth < 50 || el.offsetHeight < 30) return;
       initDone = true;
       term.open(el);
+      // WebGL: GPU-accelerated rendering with canvas fallback
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch {}
+      // Unicode 11: correct width for CJK characters
+      try {
+        const unicode11 = new Unicode11Addon();
+        term.loadAddon(unicode11);
+        term.unicode.activeVersion = '11';
+      } catch {}
+      // Search: Ctrl/Cmd+F to find text in terminal buffer
+      try {
+        const search = new SearchAddon();
+        term.loadAddon(search);
+        searchAddonRef.current = search;
+      } catch {}
       try { fit.fit(); } catch {}
       connect();
     }
@@ -1366,6 +1528,19 @@ const MemoTerminalPane = memo(function TerminalPane({
     // Calling it both here and in initTerminal() causes duplicate WebSocket
     // connections to the same tmux session, resulting in doubled output.
 
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'f' && event.type === 'keydown') {
+        setShowSearch(true);
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+        return false;
+      }
+      if (event.key === 'Escape' && event.type === 'keydown') {
+        setShowSearch(false);
+        searchAddonRef.current?.clearDecorations();
+      }
+      return true;
+    });
+
     term.onData((data) => {
       if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data }));
       // Arm bell on Enter (user submitted a new prompt)
@@ -1450,5 +1625,44 @@ const MemoTerminalPane = memo(function TerminalPane({
     };
   }, [id, onSessionConnected]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div className="relative h-full w-full">
+      <div ref={containerRef} className="h-full w-full" />
+      {showSearch && (
+        <div className="absolute top-1 right-2 flex items-center gap-1 px-2 py-1 rounded border border-[var(--term-border)] shadow-lg z-10"
+          style={{ background: 'var(--term-bg, #1a1b26)' }}
+          onClick={e => e.stopPropagation()}>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={e => {
+              setSearchQuery(e.target.value);
+              if (e.target.value) searchAddonRef.current?.findNext(e.target.value, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#888', activeMatchColorOverviewRuler: '#ff0' } });
+              else searchAddonRef.current?.clearDecorations();
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                if (e.shiftKey) searchAddonRef.current?.findPrevious(searchQuery, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#888', activeMatchColorOverviewRuler: '#ff0' } });
+                else searchAddonRef.current?.findNext(searchQuery, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#888', activeMatchColorOverviewRuler: '#ff0' } });
+              }
+              if (e.key === 'Escape') {
+                setShowSearch(false);
+                searchAddonRef.current?.clearDecorations();
+              }
+            }}
+            placeholder="Search..."
+            className="bg-transparent text-[11px] text-[var(--term-fg,#c0caf5)] outline-none w-32 placeholder-gray-600"
+            autoFocus
+          />
+          <button onClick={() => searchAddonRef.current?.findPrevious(searchQuery, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#888', activeMatchColorOverviewRuler: '#ff0' } })}
+            className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Previous (Shift+Enter)">▲</button>
+          <button onClick={() => searchAddonRef.current?.findNext(searchQuery, { regex: false, caseSensitive: false, decorations: { matchOverviewRuler: '#888', activeMatchColorOverviewRuler: '#ff0' } })}
+            className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Next (Enter)">▼</button>
+          <button onClick={() => { setShowSearch(false); searchAddonRef.current?.clearDecorations(); }}
+            className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Close (Esc)">✕</button>
+        </div>
+      )}
+    </div>
+  );
 });

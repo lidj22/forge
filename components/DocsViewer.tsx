@@ -108,6 +108,7 @@ export default function DocsViewer() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [terminalHeight, setTerminalHeight] = useState(250);
+  const [docsAgent, setDocsAgent] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -266,6 +267,13 @@ export default function DocsViewer() {
   }, []);
 
   useEffect(() => { fetchTree(activeRoot); }, [activeRoot, fetchTree]);
+
+  // Fetch agent config for doc roots
+  useEffect(() => {
+    fetch('/api/settings').then(r => r.json())
+      .then((s: any) => setDocsAgent(s.docsAgent || ''))
+      .catch(() => {});
+  }, []);
 
   // Re-fetch when tab becomes visible (settings may have changed)
   useEffect(() => {
@@ -555,10 +563,10 @@ export default function DocsViewer() {
         className="h-1 bg-[var(--border)] cursor-row-resize hover:bg-[var(--accent)]/50 shrink-0"
       />
 
-      {/* Bottom — Claude console */}
+      {/* Bottom — Agent console */}
       <div className="shrink-0" style={{ height: terminalHeight }}>
         <Suspense fallback={<div className="h-full flex items-center justify-center text-[var(--text-secondary)] text-xs">Loading...</div>}>
-          <DocTerminal docRoot={rootPaths[activeRoot] || ''} />
+          <DocTerminal docRoot={rootPaths[activeRoot] || ''} agent={docsAgent || undefined} />
         </Suspense>
       </div>
     </div>

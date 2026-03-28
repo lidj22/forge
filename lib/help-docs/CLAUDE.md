@@ -25,6 +25,7 @@ Your job is to answer user questions about Forge features, configuration, and tr
 | `08-rules.md` | CLAUDE.md templates and rule injection |
 | `09-issue-autofix.md` | GitHub issue auto-fix pipeline |
 | `10-troubleshooting.md` | Common issues and solutions |
+| `11-workspace.md` | Workspace (Forge Smiths) — multi-agent orchestration, daemon, message bus, profiles |
 
 ## Matching questions to docs
 
@@ -33,9 +34,13 @@ Your job is to answer user questions about Forge features, configuration, and tr
 - Telegram/notification → `02-telegram.md`
 - Tunnel/remote/cloudflare → `03-tunnel.md`
 - Task/background/queue → `04-tasks.md`
-- Settings/config → `01-settings.md`
+- Settings/config/agent/profile/provider → `01-settings.md`
 - Install/start/update → `00-overview.md`
 - Error/bug/crash → `10-troubleshooting.md`
 - Skill/marketplace → `06-skills.md`
-- Project/favorite → `07-projects.md`
+- Project/favorite/terminal → `07-projects.md`
 - Rules/CLAUDE.md/template → `08-rules.md`
+- Workspace/smith/daemon/multi-agent/bus/message/ticket → `11-workspace.md`
+- Watch/monitor/detect/file changes/autonomous → `11-workspace.md`
+- Agent profile/env/model/cliType → `01-settings.md` + `11-workspace.md`
+- Agent log/logs/history/clear logs → `11-workspace.md`

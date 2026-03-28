@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 
 interface MonitorData {
   processes: {
-    nextjs: { running: boolean; pid: string };
-    terminal: { running: boolean; pid: string };
-    telegram: { running: boolean; pid: string };
+    nextjs: { running: boolean; pid: string; startedAt?: string };
+    terminal: { running: boolean; pid: string; startedAt?: string };
+    telegram: { running: boolean; pid: string; startedAt?: string };
+    workspace: { running: boolean; pid: string; startedAt?: string };
     tunnel: { running: boolean; pid: string; url: string };
   };
   sessions: { name: string; created: string; attached: boolean; windows: number }[];
@@ -47,13 +48,17 @@ export default function MonitorPanel({ onClose }: { onClose: () => void }) {
                   { label: 'Next.js', ...data.processes.nextjs },
                   { label: 'Terminal Server', ...data.processes.terminal },
                   { label: 'Telegram Bot', ...data.processes.telegram },
+                  { label: 'Workspace Daemon', ...data.processes.workspace },
                   { label: 'Tunnel', ...data.processes.tunnel },
                 ].map(p => (
                   <div key={p.label} className="flex items-center gap-2 text-xs">
                     <span className={p.running ? 'text-green-400' : 'text-gray-500'}>●</span>
                     <span className="text-[var(--text-primary)] w-28">{p.label}</span>
                     {p.running ? (
-                      <span className="text-[var(--text-secondary)] font-mono text-[10px]">pid: {p.pid}</span>
+                      <>
+                        <span className="text-[var(--text-secondary)] font-mono text-[10px]">pid: {p.pid}</span>
+                        {(p as any).startedAt && <span className="text-gray-500 font-mono text-[9px]">{(p as any).startedAt}</span>}
+                      </>
                     ) : (
                       <span className="text-gray-500 text-[10px]">stopped</span>
                     )}
