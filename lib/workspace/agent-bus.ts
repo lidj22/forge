@@ -304,8 +304,16 @@ export class AgentBus extends EventEmitter {
   /** Delete a message from the log (only done/failed) */
   deleteMessage(messageId: string): void {
     const idx = this.log.findIndex(m => m.id === messageId);
-    if (idx !== -1 && (this.log[idx].status === 'done' || this.log[idx].status === 'failed')) {
+    if (idx === -1) {
+      console.log(`[bus] deleteMessage: ${messageId.slice(0, 8)} not found`);
+      return;
+    }
+    const msg = this.log[idx];
+    if (msg.status === 'done' || msg.status === 'failed') {
       this.log.splice(idx, 1);
+      console.log(`[bus] deleteMessage: ${messageId.slice(0, 8)} deleted (was ${msg.status})`);
+    } else {
+      console.log(`[bus] deleteMessage: ${messageId.slice(0, 8)} skipped (status=${msg.status})`);
     }
   }
 
