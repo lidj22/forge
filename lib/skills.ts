@@ -61,7 +61,7 @@ function compareVersions(a: string, b: string): number {
 /** Max info.json enrichments per sync (incremental) */
 const ENRICH_BATCH_SIZE = 10;
 
-export async function syncSkills(): Promise<{ synced: number; enriched: number; error?: string }> {
+export async function syncSkills(): Promise<{ synced: number; enriched: number; total?: number; remaining?: number; error?: string }> {
   console.log('[skills] Syncing from registry...');
   const baseUrl = getBaseUrl();
 
@@ -181,8 +181,10 @@ export async function syncSkills(): Promise<{ synced: number; enriched: number; 
       }
     }));
 
+    const totalCount = (db().prepare('SELECT count(*) as c FROM skills WHERE deleted_remotely = 0').get() as any).c;
+    const remaining = totalCount - ENRICH_BATCH_SIZE; // approximate items not yet enriched this round
     console.log(`[skills] Synced ${rawItems.length} items, enriched ${enriched}/${staleItems.length} from info.json`);
-    return { synced: rawItems.length, enriched };
+    return { synced: rawItems.length, enriched, total: totalCount, remaining: Math.max(0, remaining) };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[skills] Sync failed:`, msg);

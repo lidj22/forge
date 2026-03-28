@@ -130,24 +130,37 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
     fetchRules();
   };
 
+  const [syncProgress, setSyncProgress] = useState('');
   const sync = async () => {
     setSyncing(true);
+    setSyncProgress('');
     try {
-      const res = await fetch('/api/skills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sync' }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        alert(`Sync error: ${data.error}`);
-      } else {
+      let enrichedTotal = 0;
+      let total = 0;
+      // Loop: each call enriches a batch of info.json, continue until all done
+      for (let round = 0; round < 20; round++) { // safety limit
+        setSyncProgress(total > 0 ? `${Math.min(enrichedTotal, total)}/${total}` : '');
+        const res = await fetch('/api/skills', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'sync' }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          alert(`Sync error: ${data.error}`);
+          break;
+        }
+        total = data.total || 0;
+        enrichedTotal += data.enriched || 0;
         await fetchSkills();
+        // If remaining is 0 or enriched nothing, we're done
+        if (!data.remaining || data.enriched === 0) break;
       }
     } catch (err: any) {
       alert(`Sync failed: ${err.message || 'Network error'}`);
     } finally {
       setSyncing(false);
+      setSyncProgress('');
     }
   };
 
@@ -271,7 +284,7 @@ export default function SkillsPanel({ projectFilter }: { projectFilter?: string 
           disabled={syncing}
           className="text-[9px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
         >
-          {syncing ? 'Syncing...' : 'Sync'}
+          {syncing ? `Syncing${syncProgress ? ` ${syncProgress}` : '...'}` : 'Sync'}
         </button>
       </div>
       {/* Search — hide on rules tab */}
