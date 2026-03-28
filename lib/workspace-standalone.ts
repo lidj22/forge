@@ -311,6 +311,21 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         orch.restartAgentDaemon(agentId);
         return json(res, { ok: true });
       }
+      case 'create_ticket': {
+        if (!agentId || !content) return jsonError(res, 'agentId (from) and content required');
+        const targetId = body.targetId;
+        if (!targetId) return jsonError(res, 'targetId required');
+        const causedByMsg = body.causedByMessageId ? orch.getBus().getLog().find(m => m.id === body.causedByMessageId) : undefined;
+        const causedBy = causedByMsg ? { messageId: causedByMsg.id, from: causedByMsg.from, to: causedByMsg.to } : undefined;
+        const ticket = orch.getBus().createTicket(agentId, targetId, body.ticketAction || 'bug_report', content, body.files, causedBy);
+        return json(res, { ok: true, ticketId: ticket.id });
+      }
+      case 'update_ticket': {
+        const { messageId, ticketStatus } = body;
+        if (!messageId || !ticketStatus) return jsonError(res, 'messageId and ticketStatus required');
+        orch.getBus().updateTicketStatus(messageId, ticketStatus);
+        return json(res, { ok: true });
+      }
       case 'message': {
         if (!agentId || !content) return jsonError(res, 'agentId and content required');
         orch.sendMessageToAgent(agentId, content);

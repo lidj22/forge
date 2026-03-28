@@ -1471,8 +1471,18 @@ export class WorkspaceOrchestrator extends EventEmitter {
       // Find next pending message, applying causedBy rules
       const allPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
       const pending = allPending.filter(m => {
-        // Tickets always accepted (1-to-1, ignores DAG)
-        if (m.category === 'ticket') return true;
+        // Tickets: accepted but check retry limit
+        if (m.category === 'ticket') {
+          const maxRetries = m.maxRetries ?? 3;
+          if ((m.ticketRetries || 0) >= maxRetries) {
+            console.log(`[inbox] ${entry.config.label}: ticket ${m.id.slice(0, 8)} exceeded max retries (${maxRetries}), marking failed`);
+            m.status = 'failed' as any;
+            m.ticketStatus = 'closed';
+            this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'failed' } as any);
+            return false;
+          }
+          return true;
+        }
 
         // Notifications: check causedBy for loop prevention
         if (m.causedBy) {

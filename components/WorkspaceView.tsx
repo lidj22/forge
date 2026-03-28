@@ -755,47 +755,84 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
           {messages.length === 0 && (
             <div className="text-gray-600 text-center mt-8">No {tab} messages</div>
           )}
-          {[...messages].reverse().map((msg, i) => (
-            <div key={i} className="px-3 py-2 rounded text-[10px]" style={{ background: '#161b22', border: '1px solid #21262d' }}>
-              <div className="flex items-center gap-2 mb-1">
+          {[...messages].reverse().map((msg, i) => {
+            const isTicket = msg.category === 'ticket';
+            return (
+            <div key={i} className="px-3 py-2 rounded text-[10px]" style={{
+              background: '#161b22',
+              border: `1px solid ${isTicket ? '#6e40c9' : '#21262d'}`,
+              borderLeft: isTicket ? '3px solid #a371f7' : undefined,
+            }}>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-[8px] text-gray-600">{new Date(msg.timestamp).toLocaleString()}</span>
                 {tab === 'inbox' ? (
                   <span className="text-blue-400">← {getLabel(msg.from)}</span>
                 ) : (
                   <span className="text-green-400">→ {getLabel(msg.to)}</span>
                 )}
+                {/* Category badge */}
+                {isTicket && (
+                  <span className="px-1 py-0.5 rounded text-[7px] bg-purple-500/20 text-purple-400">TICKET</span>
+                )}
+                {/* Action badge */}
                 <span className={`px-1.5 py-0.5 rounded text-[8px] ${
-                  msg.payload?.action === 'fix_request' ? 'bg-red-500/20 text-red-400' :
-                  msg.payload?.action === 'update_notify' ? 'bg-blue-500/20 text-blue-400' :
+                  msg.payload?.action === 'fix_request' || msg.payload?.action === 'bug_report' ? 'bg-red-500/20 text-red-400' :
+                  msg.payload?.action === 'update_notify' || msg.payload?.action === 'request_complete' ? 'bg-blue-500/20 text-blue-400' :
                   msg.payload?.action === 'question' ? 'bg-yellow-500/20 text-yellow-400' :
                   'bg-gray-500/20 text-gray-400'
                 }`}>{msg.payload?.action}</span>
+                {/* Ticket status */}
+                {isTicket && msg.ticketStatus && (
+                  <span className={`text-[7px] px-1 rounded ${
+                    msg.ticketStatus === 'open' ? 'bg-yellow-500/20 text-yellow-400' :
+                    msg.ticketStatus === 'in_progress' ? 'bg-blue-500/20 text-blue-400' :
+                    msg.ticketStatus === 'fixed' ? 'bg-green-500/20 text-green-400' :
+                    msg.ticketStatus === 'verified' ? 'bg-green-600/20 text-green-300' :
+                    msg.ticketStatus === 'closed' ? 'bg-gray-500/20 text-gray-400' :
+                    'bg-gray-500/20 text-gray-400'
+                  }`}>{msg.ticketStatus}</span>
+                )}
+                {/* Message delivery status */}
                 <span className={`text-[7px] ${msg.status === 'done' ? 'text-green-500' : msg.status === 'running' ? 'text-blue-400' : msg.status === 'failed' ? 'text-red-500' : 'text-yellow-500'}`}>
                   {msg.status || 'pending'}
                 </span>
+                {/* Retry count for tickets */}
+                {isTicket && (msg.ticketRetries || 0) > 0 && (
+                  <span className="text-[7px] text-orange-400">retry {msg.ticketRetries}/{msg.maxRetries || 3}</span>
+                )}
+                {/* CausedBy trace */}
+                {msg.causedBy && (
+                  <span className="text-[7px] text-gray-600" title={`Triggered by message from ${getLabel(msg.causedBy.from)}`}>
+                    ← {getLabel(msg.causedBy.from)}
+                  </span>
+                )}
+                {/* Actions */}
                 {msg.status === 'pending' && msg.type !== 'ack' && (
                   <button onClick={() => wsApi(workspaceId, 'abort_message', { messageId: msg.id })}
-                    className="text-[7px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 ml-1">
+                    className="text-[7px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 ml-auto">
                     ✕ Abort
                   </button>
                 )}
-                {(msg.status === 'done' || msg.status === 'failed') && msg.type !== 'ack' && (<>
-                  <button onClick={() => wsApi(workspaceId, 'retry_message', { messageId: msg.id })}
-                    className="text-[7px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 ml-1">
-                    {msg.status === 'done' ? '↻ Re-run' : '↻ Retry'}
-                  </button>
-                  <button onClick={() => handleDelete(msg.id)}
-                    className="text-[7px] px-1.5 py-0.5 rounded bg-gray-600/20 text-gray-400 hover:bg-red-600/20 hover:text-red-400 ml-1">
-                    🗑
-                  </button>
-                </>)}
+                {(msg.status === 'done' || msg.status === 'failed') && msg.type !== 'ack' && (
+                  <div className="flex gap-1 ml-auto">
+                    <button onClick={() => wsApi(workspaceId, 'retry_message', { messageId: msg.id })}
+                      className="text-[7px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-400 hover:bg-orange-600/30">
+                      {msg.status === 'done' ? '↻ Re-run' : '↻ Retry'}
+                    </button>
+                    <button onClick={() => handleDelete(msg.id)}
+                      className="text-[7px] px-1.5 py-0.5 rounded bg-gray-600/20 text-gray-400 hover:bg-red-600/20 hover:text-red-400">
+                      🗑
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="text-gray-300">{msg.payload?.content || ''}</div>
               {msg.payload?.files?.length > 0 && (
                 <div className="text-[8px] text-gray-600 mt-1">Files: {msg.payload.files.join(', ')}</div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
