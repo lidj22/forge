@@ -275,7 +275,8 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         // Resolve launch info using shared logic (same as VibeCoding terminal)
         let launchInfo: any = { cliCmd: 'claude', cliType: 'claude-code', supportsSession: true };
         try {
-          const { resolveTerminalLaunch } = await import('./agents/index.js');
+          const { resolveTerminalLaunch, clearAgentCache } = await import('./agents/index.js');
+          clearAgentCache(); // ensure fresh settings are read
           launchInfo = resolveTerminalLaunch(agentConfig.agentId);
         } catch {}
 
