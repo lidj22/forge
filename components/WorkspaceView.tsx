@@ -1285,7 +1285,7 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
   const taskStatus = state?.taskStatus || 'idle';
   const mode = state?.mode || 'auto';
   const smithInfo = SMITH_STATUS[smithStatus] || SMITH_STATUS.down;
-  const taskInfo = TASK_STATUS[taskStatus] || TASK_STATUS.idle;
+  const taskInfo = mode === 'manual' ? { label: 'manual', color: '#d2a8ff' } : (TASK_STATUS[taskStatus] || TASK_STATUS.idle);
   const currentStep = state?.currentStep;
   const step = currentStep !== undefined ? config.steps[currentStep] : undefined;
   const isApprovalPending = taskStatus === 'idle' && smithStatus === 'active'; // approximation, actual check would use approvalQueue
