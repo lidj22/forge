@@ -265,7 +265,7 @@ export class AgentBus extends EventEmitter {
   /** Retry/re-run a message — set back to pending and re-deliver */
   retryMessage(messageId: string): BusMessage | null {
     const msg = this.log.find(m => m.id === messageId);
-    if (!msg || msg.status === 'pending' || msg.status === 'running') return null;
+    if (!msg || msg.status === 'pending' || msg.status === 'pending_approval' || msg.status === 'running') return null;
     msg.status = 'pending';
     msg.retries = 0;
     this.unsee(messageId);

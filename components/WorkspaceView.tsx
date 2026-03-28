@@ -1792,7 +1792,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
             onShowLog: () => setLogTarget({ id: agent.id, label: agent.label }),
             onShowMemory: () => setMemoryTarget({ id: agent.id, label: agent.label }),
             onShowInbox: () => setInboxTarget({ id: agent.id, label: agent.label }),
-            inboxPending: busLog.filter(m => m.to === agent.id && m.status === 'pending' && m.type !== 'ack').length,
+            inboxPending: busLog.filter(m => m.to === agent.id && (m.status === 'pending' || m.status === 'pending_approval') && m.type !== 'ack').length,
             inboxFailed: busLog.filter(m => m.to === agent.id && m.status === 'failed' && m.type !== 'ack').length,
             onOpenTerminal: async () => {
               if (!workspaceId) return;
