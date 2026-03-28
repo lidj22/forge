@@ -196,7 +196,11 @@ export class WorkspaceOrchestrator extends EventEmitter {
   getAllAgentStates(): Record<string, AgentState> {
     const result: Record<string, AgentState> = {};
     for (const [id, entry] of this.agents) {
-      result[id] = entry.worker?.getState() ?? entry.state;
+      const workerState = entry.worker?.getState();
+      // Merge: worker state for task/smith, entry.state for mode (orchestrator controls mode)
+      result[id] = workerState
+        ? { ...workerState, mode: entry.state.mode }
+        : entry.state;
     }
     return result;
   }
