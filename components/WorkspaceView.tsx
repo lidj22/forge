@@ -22,6 +22,7 @@ interface AgentConfig {
   outputs: string[];
   steps: { id: string; label: string; prompt: string }[];
   requiresApproval?: boolean;
+  watch?: { enabled: boolean; interval: number; targets: any[] };
 }
 
 interface AgentState {
@@ -218,6 +219,18 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
             return newAgents;
           });
           if (event.agentStates) setStates(event.agentStates);
+        }
+
+        // Watch alerts — update agent state with last alert
+        if (event.type === 'watch_alert') {
+          setStates(prev => ({
+            ...prev,
+            [event.agentId]: {
+              ...prev[event.agentId],
+              lastWatchAlert: event.summary,
+              lastWatchTime: event.timestamp,
+            },
+          }));
         }
 
         // Forward special events to the component
@@ -1416,6 +1429,13 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: taskInfo.color, boxShadow: taskInfo.glow ? `0 0 4px ${taskInfo.color}` : 'none' }} />
             <span className="text-[7px]" style={{ color: taskInfo.color }}>{taskInfo.label}</span>
           </div>
+          {config.watch?.enabled && (
+            <div className="flex items-center gap-1">
+              <span className="text-[7px]" style={{ color: (state as any)?.lastWatchAlert ? '#f0883e' : '#6e7681' }}>
+                {(state as any)?.lastWatchAlert ? '👁 alert' : '👁 watching'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

@@ -32,6 +32,23 @@ export interface WorkspaceAgentConfig {
   steps: AgentStep[];
   // Approval gate
   requiresApproval?: boolean;
+  // Watch: autonomous periodic monitoring
+  watch?: WatchConfig;
+}
+
+// ─── Watch Config ─────────────────────────────────────────
+
+export interface WatchTarget {
+  type: 'directory' | 'git' | 'agent_output' | 'command';
+  path?: string;           // directory: relative path; agent_output: agent ID
+  pattern?: string;        // glob for directory, stdout pattern for command
+  cmd?: string;            // shell command (type='command' only)
+}
+
+export interface WatchConfig {
+  enabled: boolean;
+  interval: number;        // check interval in seconds (default 60)
+  targets: WatchTarget[];
 }
 
 export type AgentBackendType = 'api' | 'cli';

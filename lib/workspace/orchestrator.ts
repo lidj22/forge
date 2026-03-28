@@ -27,6 +27,7 @@ import type {
 } from './types';
 import { AgentWorker } from './agent-worker';
 import { AgentBus } from './agent-bus';
+import { WatchManager } from './watch-manager';
 import { ApiBackend } from './backends/api-backend';
 import { CliBackend } from './backends/cli-backend';
 import { appendAgentLog, saveWorkspace, saveWorkspaceSync, startAutoSave, stopAutoSave } from './persistence';
@@ -44,7 +45,8 @@ export type OrchestratorEvent =
   | { type: 'approval_required'; agentId: string; upstreamId: string }
   | { type: 'user_input_request'; agentId: string; fromAgent: string; question: string }
   | { type: 'workspace_status'; running: number; done: number; total: number }
-  | { type: 'workspace_complete' };
+  | { type: 'workspace_complete' }
+  | { type: 'watch_alert'; agentId: string; changes: any[]; summary: string; timestamp: number };
 
 // ─── Orchestrator class ──────────────────────────────────
 
@@ -55,6 +57,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
   private agents = new Map<string, { config: WorkspaceAgentConfig; worker: AgentWorker | null; state: AgentState }>();
   private bus: AgentBus;
+  private watchManager: WatchManager;
   private approvalQueue = new Set<string>();
   private daemonActive = false;
   private createdAt = Date.now();
@@ -65,6 +68,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.projectPath = projectPath;
     this.projectName = projectName;
     this.bus = new AgentBus();
+    this.watchManager = new WatchManager(workspaceId, projectPath, () => this.agents as any);
+    // Forward watch alerts as orchestrator events
+    this.watchManager.on('watch_alert', (event) => this.emit('event', event));
 
     // Forward bus messages as orchestrator events (after dedup, skip ACKs)
     this.bus.on('message', (msg: BusMessage) => {
@@ -793,6 +799,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
     }
 
+    // Start watch loops for agents with watch config
+    this.watchManager.start();
+
     console.log(`[workspace] Daemon started: ${started} smiths active, ${failed} failed`);
     this.emitAgentsChanged();
   }
@@ -936,6 +945,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Mark running messages as failed
     this.bus.markAllRunningAsFailed();
     this.emitAgentsChanged();
+    this.watchManager.stop();
     console.log('[workspace] Daemon stopped');
   }
 
