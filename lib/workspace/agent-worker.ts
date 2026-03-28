@@ -21,7 +21,7 @@ import type {
   BusMessage,
   DaemonWakeReason,
 } from './types';
-import type { TaskLogEntry } from '@/src/types';
+import type { TaskLogEntry } from '../../src/types';
 
 export interface AgentWorkerOptions {
   config: WorkspaceAgentConfig;

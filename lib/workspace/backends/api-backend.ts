@@ -9,9 +9,9 @@ import { generateText, stepCountIs, type ModelMessage } from 'ai';
 import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { execSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
-import { getModel } from '@/src/core/providers/registry';
+import { getModel } from '../../../src/core/providers/registry';
 import type { AgentBackend, StepExecutionParams, StepExecutionResult, Artifact } from '../types';
-import type { TaskLogEntry } from '@/src/types';
+import type { TaskLogEntry } from '../../../src/types';
 
 // ─── Tool factory ────────────────────────────────────────
 

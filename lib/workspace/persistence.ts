@@ -14,7 +14,7 @@ import { writeFile, appendFile, mkdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { WorkspaceState, AgentState, BusMessage, WorkspaceAgentConfig } from './types';
-import type { TaskLogEntry } from '@/src/types';
+import type { TaskLogEntry } from '../../src/types';
 
 // ─── Paths ───────────────────────────────────────────────
 

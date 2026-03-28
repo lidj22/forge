@@ -2,7 +2,7 @@
  * Workspace Agent types — core interfaces for the multi-agent workspace system.
  */
 
-import type { ProviderName, TaskLogEntry } from '@/src/types';
+import type { ProviderName, TaskLogEntry } from '../../src/types';
 
 // ─── Agent Config ────────────────────────────────────────
 
