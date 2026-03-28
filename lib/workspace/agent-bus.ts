@@ -255,14 +255,13 @@ export class AgentBus extends EventEmitter {
   /** Retry/re-run a message — set back to pending and re-deliver */
   retryMessage(messageId: string): BusMessage | null {
     const msg = this.log.find(m => m.id === messageId);
-    if (!msg || msg.status === 'pending') return null; // already pending, skip
+    if (!msg || msg.status === 'pending' || msg.status === 'running') return null;
     const prevStatus = msg.status;
     msg.status = 'pending';
     msg.retries = 0;
     // Remove from seen set so handleBusMessage won't dedup
     this.unsee(messageId);
-    // Re-emit for delivery
-    this.emit('message', msg);
+    // Don't emit — the message loop will pick up the pending message on next tick
     console.log(`[bus] ${prevStatus === 'done' ? 'Re-running' : 'Retrying'} message ${msg.payload.action} from ${msg.from} to ${msg.to}`);
     return msg;
   }
