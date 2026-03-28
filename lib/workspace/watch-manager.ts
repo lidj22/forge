@@ -15,12 +15,8 @@ import { appendAgentLog } from './persistence';
 
 // ─── Snapshot types ──────────────────────────────────────
 
-interface FileSnapshot {
-  [path: string]: number;  // relative path → mtime ms
-}
-
 interface WatchSnapshot {
-  files: FileSnapshot;
+  lastCheckTime: number;   // timestamp ms — only files modified after this are "changed"
   gitHash?: string;
   commandOutput?: string;
 }
@@ -33,9 +29,10 @@ interface WatchChange {
 
 // ─── Detection functions ─────────────────────────────────
 
-function scanDirectory(dir: string, pattern?: string, maxDepth = 3): FileSnapshot {
-  const snapshot: FileSnapshot = {};
-  if (!existsSync(dir)) return snapshot;
+/** Find files modified after `since` timestamp in a directory */
+function findModifiedFiles(dir: string, since: number, pattern?: string, maxDepth = 3): string[] {
+  const modified: string[] = [];
+  if (!existsSync(dir)) return modified;
 
   const globMatch = pattern
     ? (name: string) => {
@@ -54,8 +51,8 @@ function scanDirectory(dir: string, pattern?: string, maxDepth = 3): FileSnapsho
           const st = statSync(full);
           if (st.isDirectory()) {
             walk(full, depth + 1);
-          } else if (globMatch(entry)) {
-            snapshot[relative(dir, full)] = st.mtimeMs;
+          } else if (globMatch(entry) && st.mtimeMs > since) {
+            modified.push(relative(dir, full));
           }
         } catch {}
       }
@@ -63,45 +60,21 @@ function scanDirectory(dir: string, pattern?: string, maxDepth = 3): FileSnapsho
   }
 
   walk(dir, 0);
-  return snapshot;
+  return modified;
 }
 
-function diffSnapshots(prev: FileSnapshot, curr: FileSnapshot): { added: string[]; modified: string[]; removed: string[] } {
-  const added: string[] = [];
-  const modified: string[] = [];
-  const removed: string[] = [];
-
-  for (const [path, mtime] of Object.entries(curr)) {
-    if (!(path in prev)) added.push(path);
-    else if (prev[path] !== mtime) modified.push(path);
-  }
-  for (const path of Object.keys(prev)) {
-    if (!(path in curr)) removed.push(path);
-  }
-
-  return { added, modified, removed };
-}
-
-function detectDirectoryChanges(projectPath: string, target: WatchTarget, prev: FileSnapshot): { changes: WatchChange | null; snapshot: FileSnapshot } {
+function detectDirectoryChanges(projectPath: string, target: WatchTarget, since: number): { changes: WatchChange | null } {
   const dir = join(projectPath, target.path || '.');
-  const snapshot = scanDirectory(dir, target.pattern);
-  const diff = diffSnapshots(prev, snapshot);
-  const totalChanges = diff.added.length + diff.modified.length + diff.removed.length;
+  const files = findModifiedFiles(dir, since, target.pattern);
 
-  if (totalChanges === 0) return { changes: null, snapshot };
-
-  const parts: string[] = [];
-  if (diff.added.length) parts.push(`${diff.added.length} added`);
-  if (diff.modified.length) parts.push(`${diff.modified.length} modified`);
-  if (diff.removed.length) parts.push(`${diff.removed.length} removed`);
+  if (files.length === 0) return { changes: null };
 
   return {
     changes: {
       targetType: 'directory',
-      description: `${target.path || '.'}: ${parts.join(', ')}`,
-      files: [...diff.added, ...diff.modified, ...diff.removed].slice(0, 20),
+      description: `${target.path || '.'}: ${files.length} file(s) changed`,
+      files: files.slice(0, 20),
     },
-    snapshot,
   };
 }
 
@@ -227,17 +200,15 @@ export class WatchManager extends EventEmitter {
 
   /** Run a single check cycle */
   private runCheck(agentId: string, config: WorkspaceAgentConfig, initialRun: boolean): void {
-    const prev = this.snapshots.get(agentId) || { files: {} };
+    const now = Date.now();
+    const prev = this.snapshots.get(agentId) || { lastCheckTime: now };
     const allChanges: WatchChange[] = [];
-    const newSnapshot: WatchSnapshot = { files: {} };
+    const newSnapshot: WatchSnapshot = { lastCheckTime: now };
 
     for (const target of config.watch!.targets) {
       switch (target.type) {
         case 'directory': {
-          const dir = join(this.projectPath, target.path || '.');
-          const prevFiles = prev.files;
-          const { changes, snapshot } = detectDirectoryChanges(this.projectPath, target, prevFiles);
-          Object.assign(newSnapshot.files, snapshot);
+          const { changes } = detectDirectoryChanges(this.projectPath, target, prev.lastCheckTime);
           if (changes) allChanges.push(changes);
           break;
         }
@@ -248,14 +219,11 @@ export class WatchManager extends EventEmitter {
           break;
         }
         case 'agent_output': {
-          // Monitor another agent's declared output paths
           const agents = this.getAgents();
           const targetAgent = target.path ? agents.get(target.path) : null;
           if (targetAgent) {
             for (const outputPath of targetAgent.config.outputs) {
-              const dir = join(this.projectPath, outputPath);
-              const { changes, snapshot } = detectDirectoryChanges(this.projectPath, { ...target, path: outputPath }, prev.files);
-              Object.assign(newSnapshot.files, snapshot);
+              const { changes } = detectDirectoryChanges(this.projectPath, { ...target, path: outputPath }, prev.lastCheckTime);
               if (changes) allChanges.push({ ...changes, targetType: 'agent_output', description: `${targetAgent.config.label} output: ${changes.description}` });
             }
           }
@@ -273,7 +241,7 @@ export class WatchManager extends EventEmitter {
     this.snapshots.set(agentId, newSnapshot);
 
     if (initialRun) {
-      console.log(`[watch] ${config.label}: baseline snapshot built (${Object.keys(newSnapshot.files).length} files)`);
+      console.log(`[watch] ${config.label}: baseline set (checkTime=${new Date(now).toLocaleTimeString()})`);
       return;
     }
 
