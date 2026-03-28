@@ -1350,23 +1350,22 @@ function AgentTerminalButton({ projectPath, projectName }: { projectPath: string
     return () => document.removeEventListener('mousedown', h);
   }, [showMenu]);
 
-  // Fetch sessions when dialog opens
+  // Fetch sessions when dialog opens (only for claude-code agents)
   useEffect(() => {
     if (!launchDialog) return;
-    const encoded = projectPath.replace(/\//g, '-');
-    fetch('/api/agents').then(() => {
-      // Use workspace API if available, otherwise try direct
-      fetch(`/api/workspace?projectPath=${encodeURIComponent(projectPath)}`)
-        .then(r => r.json())
-        .then(ws => {
-          if (ws?.id) {
-            return fetch(`/api/workspace/${ws.id}/smith`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'sessions' }),
-            }).then(r => r.json()).then(d => setSessions(d.sessions || []));
-          }
-        }).catch(() => {});
-    }).catch(() => {});
+    const pName = projectPath.replace(/\/+$/, '').split('/').pop() || '';
+    fetch(`/api/claude-sessions/${encodeURIComponent(pName)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setSessions(data.map((s: any) => ({
+            id: s.sessionId || s.id || '',
+            modified: s.modified || '',
+            size: s.fileSize || s.size || 0,
+          })));
+        }
+      })
+      .catch(() => {});
   }, [launchDialog, projectPath]);
 
   const openWithAgent = (agentId: string, resumeMode?: boolean, sessionId?: string, env?: Record<string, string>, model?: string) => {
