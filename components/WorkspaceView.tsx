@@ -279,6 +279,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
   const [stepsText, setStepsText] = useState(
     (initial.steps || []).map(s => `${s.label}: ${s.prompt}`).join('\n') || ''
   );
+  const [requiresApproval, setRequiresApproval] = useState(initial.requiresApproval || false);
   const [watchEnabled, setWatchEnabled] = useState(initial.watch?.enabled || false);
   const [watchInterval, setWatchInterval] = useState(String(initial.watch?.interval || 60));
   const [watchAction, setWatchAction] = useState<'log' | 'analyze' | 'approve'>(initial.watch?.action || 'log');
@@ -465,6 +466,13 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
             </div>
           </div>
 
+          {/* Requires Approval */}
+          <div className="flex items-center gap-2">
+            <input type="checkbox" id="requiresApproval" checked={requiresApproval} onChange={e => setRequiresApproval(e.target.checked)}
+              className="accent-[#58a6ff]" />
+            <label htmlFor="requiresApproval" className="text-[9px] text-gray-400">Require approval before processing inbox messages</label>
+          </div>
+
           {/* Steps */}
           <div className="flex flex-col gap-1">
             <label className="text-[9px] text-gray-500 uppercase">Steps (one per line — Label: Prompt)</label>
@@ -570,6 +578,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
               workDir: workDirVal.trim() || label.trim().toLowerCase().replace(/\s+/g, '-') + '/',
               outputs: outputs.split(',').map(s => s.trim()).filter(Boolean),
               steps: parseSteps(),
+              requiresApproval: requiresApproval || undefined,
               watch: watchEnabled && watchTargets.length > 0 ? {
                 enabled: true,
                 interval: Math.max(10, parseInt(watchInterval) || 60),
