@@ -326,9 +326,10 @@ export class AgentWorker extends EventEmitter {
 
       try {
         await this.executeDaemonStep(reason);
-        this.markMessageDone();
         this.setTaskStatus('done');
+        // Emit done BEFORE markMessageDone — handleAgentDone needs getCurrentMessageId for causedBy
         this.emitEvent({ type: 'done', agentId: this.config.id, summary: `Daemon iteration ${this.state.daemonIteration}` });
+        this.markMessageDone();
       } catch (err: any) {
         const msg = err?.message || String(err);
 
