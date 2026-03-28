@@ -976,16 +976,20 @@ export class WorkspaceOrchestrator extends EventEmitter {
   setManualMode(agentId: string): void {
     const entry = this.agents.get(agentId);
     if (!entry) return;
-    if (entry.worker) entry.worker.stop();
+    if (entry.worker) {
+      entry.worker.removeAllListeners(); // detach before stop to prevent async 'down' override
+      entry.worker.stop();
+    }
     entry.worker = null;
+    this.stopMessageLoop(agentId);
     entry.state.mode = 'manual';
     entry.state.tmuxSession = undefined;
     entry.state.smithStatus = 'active';
-    // Don't set running — user hasn't started working yet. Keep current taskStatus.
+    entry.state.taskStatus = 'idle'; // manual mode starts idle, user drives execution
     entry.state.error = undefined;
 
     this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active', mode: 'manual' } satisfies WorkerEvent);
-    this.emit('event', { type: 'task_status', agentId, taskStatus: 'running' } satisfies WorkerEvent);
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'idle' } satisfies WorkerEvent);
     this.emitAgentsChanged();
     this.saveNow();
     console.log(`[workspace] Agent "${entry.config.label}" switched to manual mode`);
