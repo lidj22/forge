@@ -1571,6 +1571,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
       return;
     }
 
+    // ── requiresApproval → set pending_approval on arrival ──
+    if (target.config.requiresApproval) {
+      msg.status = 'pending_approval';
+      this.emit('event', { type: 'bus_message_status', messageId: msg.id, status: 'pending_approval' } as any);
+      console.log(`[bus] ${target.config.label}: received ${action} — pending approval`);
+      return;
+    }
+
     // ── Message stays pending — message loop will consume it when smith is ready ──
     console.log(`[bus] ${target.config.label}: received ${action} — queued in inbox (${msg.status})`);
   }
@@ -1619,16 +1627,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
         if (currentMsg && currentMsg.status === 'running') return;
       }
 
-      // If agent requires approval, convert new pending messages to pending_approval
-      // Skip messages that were already approved by user (have _approved flag)
-      if (entry.config.requiresApproval) {
-        const newPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack' && !(m as any)._approved);
-        for (const m of newPending) {
-          m.status = 'pending_approval';
-          this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'pending_approval' } as any);
-        }
-        if (newPending.length > 0) return;
-      }
+      // requiresApproval is handled at message arrival time (routeMessageToAgent),
+      // not in the message loop. Approved messages come through as normal 'pending'.
 
       // Find next pending message, applying causedBy rules
       const allPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
