@@ -1387,17 +1387,21 @@ function AgentTerminalButton({ projectPath, projectName }: { projectPath: string
     }));
   };
 
-  const handleAgentClick = (a: typeof agents[0]) => {
+  const handleAgentClick = async (a: typeof agents[0]) => {
     setShowMenu(false);
-    const knownClis = ['claude', 'codex', 'aider'];
-    const isClaude = a.id === 'claude' || !knownClis.includes(a.id);
-    if (isClaude) {
-      // Show New/Resume dialog
-      setSessions([]);
-      setShowSessions(false);
-      setLaunchDialog({ agentId: a.id, agentName: a.name, env: a.env, model: a.model });
-    } else {
-      // Non-claude: open directly
+    // Resolve launch info from server (reads cliType + profile)
+    try {
+      const res = await fetch(`/api/agents?resolve=${encodeURIComponent(a.id)}`);
+      const info = await res.json();
+      if (info.supportsSession) {
+        setSessions([]);
+        setShowSessions(false);
+        setLaunchDialog({ agentId: a.id, agentName: a.name, env: info.env, model: info.model });
+      } else {
+        openWithAgent(a.id, false, undefined, info.env, info.model);
+      }
+    } catch {
+      // Fallback: open directly
       openWithAgent(a.id);
     }
   };

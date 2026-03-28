@@ -185,3 +185,48 @@ export function autoDetectAgents(): AgentConfig[] {
 
   return detected;
 }
+
+/** Resolve terminal launch info for an agent — used by both VibeCoding and Workspace */
+export interface TerminalLaunchInfo {
+  cliCmd: string;              // actual binary: claude, codex, aider
+  cliType: string;             // claude-code, codex, aider, generic
+  supportsSession: boolean;    // has session files to resume
+  resumeFlag: string;          // -c, --resume, etc.
+  env?: Record<string, string>; // profile env vars to export
+  model?: string;              // profile model override (--model flag)
+}
+
+export function resolveTerminalLaunch(agentId?: string): TerminalLaunchInfo {
+  const settings = loadSettings();
+  const agentCfg = settings.agents?.[agentId || 'claude'] || {};
+  const cliType = agentCfg.cliType || (agentId === 'codex' ? 'codex' : agentId === 'aider' ? 'aider' : 'claude-code');
+
+  // Determine CLI command and capabilities from cliType
+  const cliMap: Record<string, { cmd: string; session: boolean; resume: string }> = {
+    'claude-code': { cmd: 'claude', session: true, resume: '-c' },
+    'codex': { cmd: 'codex', session: false, resume: '' },
+    'aider': { cmd: 'aider', session: false, resume: '' },
+    'generic': { cmd: agentCfg.path || agentId || 'claude', session: false, resume: '' },
+  };
+  const cli = cliMap[cliType] || cliMap['claude-code'];
+
+  // Resolve profile if linked
+  let env: Record<string, string> | undefined;
+  let model: string | undefined;
+  if (agentCfg.profile) {
+    const profileCfg = settings.agents?.[agentCfg.profile];
+    if (profileCfg) {
+      if (profileCfg.env) env = { ...profileCfg.env };
+      if (profileCfg.model) model = profileCfg.model;
+    }
+  }
+
+  return {
+    cliCmd: cli.cmd,
+    cliType,
+    supportsSession: cli.session,
+    resumeFlag: agentCfg.resumeFlag || cli.resume,
+    env,
+    model,
+  };
+}

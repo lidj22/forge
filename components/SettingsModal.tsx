@@ -853,8 +853,13 @@ function ProfileRow({ id, cfg, inputClass, onUpdate, onDelete }: {
           ) : (
             <>
               <div>
-                <label className="text-[8px] text-[var(--text-secondary)]">Base Agent</label>
-                <input value={cfg.base || ''} onChange={e => onUpdate({ ...cfg, base: e.target.value })} className={inputClass} />
+                <label className="text-[8px] text-[var(--text-secondary)]">CLI Type</label>
+                <select value={cfg.base || 'claude'} onChange={e => onUpdate({ ...cfg, base: e.target.value, cliType: e.target.value === 'claude' ? 'claude-code' : e.target.value })} className={inputClass}>
+                  <option value="claude">Claude Code</option>
+                  <option value="codex">Codex</option>
+                  <option value="aider">Aider</option>
+                  <option value="generic">Generic</option>
+                </select>
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -973,7 +978,7 @@ function AddProfileForm({ type, baseAgents, onAdd }: {
   const handleAdd = () => {
     if (!id) return;
     if (type === 'cli') {
-      onAdd(id, { base, name: name || id, model: model || undefined, env: parseEnv() });
+      onAdd(id, { base, cliType: base === 'claude' ? 'claude-code' : base, name: name || id, model: model || undefined, env: parseEnv() });
     } else {
       onAdd(id, { type: 'api', name: name || id, provider, model: model || undefined, apiKey: apiKey || undefined });
     }
@@ -997,18 +1002,13 @@ function AddProfileForm({ type, baseAgents, onAdd }: {
       {type === 'cli' ? (<>
         <div className="flex gap-2">
           <div className="flex-1">
-            <label className="text-[8px] text-[var(--text-secondary)]">Base Agent</label>
+            <label className="text-[8px] text-[var(--text-secondary)]">CLI Type</label>
             <select value={base} onChange={e => setBase(e.target.value)}
               className={inputClass}>
-              {baseAgents.length > 0 ? baseAgents.map(a => (
-                <option key={a.id} value={a.id}>{a.name || a.id}</option>
-              )) : (
-                <>
-                  <option value="claude">claude</option>
-                  <option value="codex">codex</option>
-                  <option value="aider">aider</option>
-                </>
-              )}
+              <option value="claude">Claude Code</option>
+              <option value="codex">Codex</option>
+              <option value="aider">Aider</option>
+              <option value="generic">Generic</option>
             </select>
           </div>
           <div className="flex-1">
