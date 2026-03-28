@@ -76,6 +76,7 @@ export interface AgentState {
   logFile?: string;
   lastCheckpoint?: number;
   cliSessionId?: string;
+  currentMessageId?: string;          // bus message that triggered current/last task execution
   tmuxSession?: string;               // tmux session name for manual terminal reattach
   startedAt?: number;
   completedAt?: number;

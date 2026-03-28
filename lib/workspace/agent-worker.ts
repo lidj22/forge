@@ -376,6 +376,7 @@ export class AgentWorker extends EventEmitter {
   /** Set the bus message ID being processed — smith marks it done/failed on completion */
   setProcessingMessage(messageId: string): void {
     this.currentMessageId = messageId;
+    this.state.currentMessageId = messageId;
   }
 
   /** Get the current message ID being processed */
@@ -383,20 +384,21 @@ export class AgentWorker extends EventEmitter {
     return this.currentMessageId;
   }
 
-  /** Mark current message as done and clear */
+  /** Mark current message as done — keep messageId for causedBy tracing */
   private markMessageDone(): void {
     if (this.currentMessageId && this.onMessageDone) {
       this.onMessageDone(this.currentMessageId);
     }
-    this.currentMessageId = null;
+    // Don't clear currentMessageId — it's needed by handleAgentDone for causedBy.
+    // It gets overwritten when next message is set via setProcessingMessage().
   }
 
-  /** Mark current message as failed and clear */
+  /** Mark current message as failed — keep messageId for error tracing */
   private markMessageFailed(): void {
     if (this.currentMessageId && this.onMessageFailed) {
       this.onMessageFailed(this.currentMessageId);
     }
-    this.currentMessageId = null;
+    // Don't clear — same reason as markMessageDone.
   }
 
   private waitForWake(): Promise<DaemonWakeReason> {
@@ -514,7 +516,7 @@ export class AgentWorker extends EventEmitter {
 
   /** Get current state snapshot (immutable copy) */
   getState(): Readonly<AgentState> {
-    return { ...this.state };
+    return { ...this.state, currentMessageId: this.currentMessageId || this.state.currentMessageId };
   }
 
   /** Get the config */
