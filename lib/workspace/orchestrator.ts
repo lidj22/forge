@@ -1561,6 +1561,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
           return true;
         }
 
+        // System messages (from _watch, _system, user) bypass causedBy rules
+        if (m.from.startsWith('_') || m.from === 'user') return true;
+
         // Notifications: check causedBy for loop prevention
         if (m.causedBy) {
           // Rule 1: Is this a response to something I sent? → accept (for verification)
