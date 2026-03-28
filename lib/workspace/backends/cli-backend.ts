@@ -471,8 +471,8 @@ export class CliBackend implements AgentBackend {
       prompt = `## Upstream agent output:\n${upstreamContext}\n\n---\n\n${prompt}`;
     }
 
-    // Bus marker protocol (compact, no realistic examples to prevent copying)
-    prompt += `\n\n---\nTo communicate with other agents, write on its own line:\n[SEND:AgentLabel:action] your actual message here\nWhere AgentLabel is the target agent name, action is one of: fix_request, update_request, question, info_request\nOnly use this when you have a REAL issue to report. Do NOT copy examples.`;
+    // Note: [SEND:] bus markers disabled. Agent communication now uses forge skills (/forge-send, /forge-inbox).
+    // Phase 2 will add ticket system + causedBy protocol for structured agent-to-agent feedback.
 
     return prompt;
   }

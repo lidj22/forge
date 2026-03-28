@@ -131,12 +131,63 @@ export class WorkspaceOrchestrator extends EventEmitter {
     return null;
   }
 
+  /** Detect if adding dependsOn edges would create a cycle in the DAG */
+  private detectCycle(agentId: string, dependsOn: string[]): string | null {
+    // Build adjacency: agent → agents it depends on
+    const deps = new Map<string, string[]>();
+    for (const [id, entry] of this.agents) {
+      if (id !== agentId) deps.set(id, [...entry.config.dependsOn]);
+    }
+    deps.set(agentId, [...dependsOn]);
+
+    // DFS cycle detection
+    const visited = new Set<string>();
+    const inStack = new Set<string>();
+
+    const dfs = (node: string): string | null => {
+      if (inStack.has(node)) return node; // cycle found
+      if (visited.has(node)) return null;
+      visited.add(node);
+      inStack.add(node);
+      for (const dep of deps.get(node) || []) {
+        const cycle = dfs(dep);
+        if (cycle) return cycle;
+      }
+      inStack.delete(node);
+      return null;
+    };
+
+    for (const id of deps.keys()) {
+      const cycle = dfs(id);
+      if (cycle) {
+        const cycleName = this.agents.get(cycle)?.config.label || cycle;
+        return `Circular dependency detected involving "${cycleName}". Dependencies must form a DAG (no cycles).`;
+      }
+    }
+    return null;
+  }
+
+  /** Check if agentA is upstream of agentB (A is in B's dependency chain) */
+  isUpstream(agentA: string, agentB: string): boolean {
+    const visited = new Set<string>();
+    const check = (current: string): boolean => {
+      if (current === agentA) return true;
+      if (visited.has(current)) return false;
+      visited.add(current);
+      const entry = this.agents.get(current);
+      if (!entry) return false;
+      return entry.config.dependsOn.some(dep => check(dep));
+    };
+    return check(agentB);
+  }
+
   addAgent(config: WorkspaceAgentConfig): void {
     const conflict = this.validateOutputs(config);
-    if (conflict) {
-      throw new Error(conflict);
-      // Still add but warn — don't block
-    }
+    if (conflict) throw new Error(conflict);
+
+    // Check DAG cycle before adding
+    const cycleErr = this.detectCycle(config.id, config.dependsOn);
+    if (cycleErr) throw new Error(cycleErr);
 
     const state: AgentState = {
       smithStatus: 'down',
@@ -175,6 +226,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
     const conflict = this.validateOutputs(config, id);
     if (conflict) throw new Error(conflict);
+    const cycleErr = this.detectCycle(id, config.dependsOn);
+    if (cycleErr) throw new Error(cycleErr);
     if (entry.worker && entry.state.taskStatus === 'running') {
       entry.worker.stop();
     }
@@ -435,21 +488,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
         }
       }
 
-      // On done → parse bus markers + notify + trigger downstream
+      // On done → notify + trigger downstream (or reply to sender if from downstream)
       if (event.type === 'done') {
-        const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
-        console.log(`[workspace] Agent "${config.label}" (${agentId}) completed. Artifacts: ${files.length}.`);
-
-        // Parse CLI output for bus markers: [SEND:TargetLabel:action] content
-        this.parseBusMarkers(agentId, entry.state.history);
-
-        this.bus.notifyTaskComplete(agentId, files, event.summary);
-
-        // Trigger idle downstream agents (first run)
-        this.broadcastCompletion(agentId);
-
-        // Notify done downstream agents to re-validate (they already ran but upstream changed)
-        this.notifyDownstreamForRevalidation(agentId, files);
+        this.handleAgentDone(agentId, entry, event.summary);
 
         this.emitWorkspaceStatus();
         this.checkWorkspaceComplete();
@@ -656,17 +697,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
         if (step) this.bus.notifyStepComplete(agentId, step.label);
       }
       if (event.type === 'done') {
-        // Trigger message already marked done in task_status handler above
-        const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
-        this.parseBusMarkers(agentId, entry.state.history);
-        this.bus.notifyTaskComplete(agentId, files, event.summary);
-        this.broadcastCompletion(agentId);
-        this.emitWorkspaceStatus();
-
-        // Message loop will auto-consume next pending message
+        this.handleAgentDone(agentId, entry, event.summary);
       }
       if (event.type === 'error') {
-        // Trigger message already marked failed in task_status handler above
         this.bus.notifyError(agentId, event.error);
         this.emitWorkspaceStatus();
       }
@@ -856,11 +889,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         this.updateAgentLiveness(agentId);
       }
       if (event.type === 'done') {
-        const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
-        this.parseBusMarkers(agentId, entry.state.history);
-        this.bus.notifyTaskComplete(agentId, files, event.summary);
-        this.broadcastCompletion(agentId);
-        this.emitWorkspaceStatus();
+        this.handleAgentDone(agentId, entry, event.summary);
       }
       if (event.type === 'error') {
         this.bus.notifyError(agentId, event.error);
@@ -1261,6 +1290,36 @@ export class WorkspaceOrchestrator extends EventEmitter {
    * Replaces direct triggerDownstream — all execution is now message-driven.
    * If no artifacts/changes, no message is sent → downstream stays idle.
    */
+  /** Unified done handler: broadcast downstream or reply to sender based on message source */
+  private handleAgentDone(agentId: string, entry: { config: WorkspaceAgentConfig; worker: AgentWorker | null; state: AgentState }, summary?: string): void {
+    const files = entry.state.artifacts.filter(a => a.path).map(a => a.path!);
+    console.log(`[workspace] Agent "${entry.config.label}" (${agentId}) completed. Artifacts: ${files.length}.`);
+
+    this.bus.notifyTaskComplete(agentId, files, summary);
+
+    // Check what message triggered this execution
+    const processedMsgId = entry.worker?.getCurrentMessageId?.();
+    const processedMsg = processedMsgId ? this.bus.getLog().find(m => m.id === processedMsgId) : null;
+
+    if (processedMsg && !this.isUpstream(processedMsg.from, agentId)) {
+      // Processed a message from downstream (or peer) → only reply to sender, don't broadcast
+      const senderLabel = this.agents.get(processedMsg.from)?.config.label || processedMsg.from;
+      console.log(`[bus] ${entry.config.label} → ${senderLabel}: reply to downstream request`);
+      this.bus.send(agentId, processedMsg.from, 'notify', {
+        action: 'request_complete',
+        content: `${entry.config.label} completed processing your request. ${files.length} files changed.`,
+        files,
+      });
+    } else {
+      // Normal upstream completion or initial execution → broadcast to all downstream
+      this.broadcastCompletion(agentId);
+      this.notifyDownstreamForRevalidation(agentId, files);
+    }
+
+    this.emitWorkspaceStatus();
+    this.checkWorkspaceComplete?.();
+  }
+
   private broadcastCompletion(completedAgentId: string): void {
     const completed = this.agents.get(completedAgentId);
     if (!completed) return;

@@ -377,6 +377,11 @@ export class AgentWorker extends EventEmitter {
     this.currentMessageId = messageId;
   }
 
+  /** Get the current message ID being processed */
+  getCurrentMessageId(): string | null {
+    return this.currentMessageId;
+  }
+
   /** Mark current message as done and clear */
   private markMessageDone(): void {
     if (this.currentMessageId && this.onMessageDone) {
