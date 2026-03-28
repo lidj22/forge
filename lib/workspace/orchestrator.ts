@@ -1311,14 +1311,13 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const processedMsg = causedBy ? this.bus.getLog().find(m => m.id === causedBy.messageId) : null;
 
     if (processedMsg && !this.isUpstream(processedMsg.from, agentId)) {
-      // Processed a message from downstream (or peer) → only reply to sender, don't broadcast
+      // Processed a message from downstream — no extra reply needed.
+      // The original message is already marked done via markMessageDone().
+      // Sender can check their outbox message status. Only broadcast to downstream.
       const senderLabel = this.agents.get(processedMsg.from)?.config.label || processedMsg.from;
-      console.log(`[bus] ${entry.config.label} → ${senderLabel}: reply to downstream request`);
-      this.bus.send(agentId, processedMsg.from, 'notify', {
-        action: 'request_complete',
-        content: `${entry.config.label} completed processing your request. ${files.length} files changed.`,
-        files,
-      }, { category: 'notification', causedBy });
+      console.log(`[bus] ${entry.config.label}: processed request from ${senderLabel} — marked done, no reply`);
+      // Still broadcast to own downstream (e.g., QA processed Engineer's msg → notify Reviewer)
+      this.broadcastCompletion(agentId, causedBy);
     } else {
       // Normal upstream completion or initial execution → broadcast to all downstream
       this.broadcastCompletion(agentId, causedBy);
