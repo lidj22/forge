@@ -1359,7 +1359,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // ── Store message in agent history ──
     target.state.history.push(logEntry);
 
-    // ── Manual mode → mark done (user handles in terminal) ──
+    // ── Manual mode → store in inbox (user handles in terminal) ──
     if (target.state.mode === 'manual') {
       ackAndDeliver();
       console.log(`[bus] ${target.config.label}: received ${action} in manual mode — stored in inbox`);
@@ -1385,7 +1385,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         return;
       }
 
-      // Skip if manual (user is driving) or running (already busy)
+      // Skip if manual (user in terminal) or running (already busy)
       if (entry.state.mode === 'manual') return;
       if (entry.state.taskStatus === 'running') return;
 

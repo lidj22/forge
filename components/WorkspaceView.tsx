@@ -1285,7 +1285,7 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
   const taskStatus = state?.taskStatus || 'idle';
   const mode = state?.mode || 'auto';
   const smithInfo = SMITH_STATUS[smithStatus] || SMITH_STATUS.down;
-  const taskInfo = mode === 'manual' ? { label: 'manual', color: '#d2a8ff' } : (TASK_STATUS[taskStatus] || TASK_STATUS.idle);
+  const taskInfo = TASK_STATUS[taskStatus] || TASK_STATUS.idle;
   const currentStep = state?.currentStep;
   const step = currentStep !== undefined ? config.steps[currentStep] : undefined;
   const isApprovalPending = taskStatus === 'idle' && smithStatus === 'active'; // approximation, actual check would use approvalQueue
@@ -1312,8 +1312,13 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
             {mode === 'manual' && <span className="text-[7px] text-green-400">⌨️</span>}
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: taskInfo.color, boxShadow: taskInfo.glow ? `0 0 4px ${taskInfo.color}` : 'none' }} />
-            <span className="text-[7px]" style={{ color: taskInfo.color }}>{taskInfo.label}</span>
+            {mode === 'manual' ? (<>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#d2a8ff' }} />
+              <span className="text-[7px]" style={{ color: '#d2a8ff' }}>manual</span>
+            </>) : (<>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: taskInfo.color, boxShadow: taskInfo.glow ? `0 0 4px ${taskInfo.color}` : 'none' }} />
+              <span className="text-[7px]" style={{ color: taskInfo.color }}>{taskInfo.label}</span>
+            </>)}
           </div>
         </div>
       </div>
