@@ -353,8 +353,7 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         const { messageId } = body;
         if (!messageId) return jsonError(res, 'messageId required');
         const abortMsg = orch.getBus().abortMessage(messageId);
-        if (!abortMsg) return jsonError(res, 'Message not found or not pending');
-        return json(res, { ok: true, messageId: abortMsg.id });
+        return json(res, { ok: true, messageId, aborted: !!abortMsg });
       }
       case 'delete_message': {
         const { messageId } = body;

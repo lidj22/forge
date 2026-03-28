@@ -752,9 +752,9 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
 
   const handleAbortAllPending = async () => {
     const pendingMsgs = messages.filter(m => m.status === 'pending');
-    for (const m of pendingMsgs) {
-      await wsApi(workspaceId, 'abort_message', { messageId: m.id });
-    }
+    await Promise.all(pendingMsgs.map(m =>
+      wsApi(workspaceId, 'abort_message', { messageId: m.id }).catch(() => {})
+    ));
   };
 
   return (
