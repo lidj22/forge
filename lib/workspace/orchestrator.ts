@@ -28,7 +28,9 @@ import type {
 import { AgentWorker } from './agent-worker';
 import { AgentBus } from './agent-bus';
 import { WatchManager } from './watch-manager';
-import { ApiBackend } from './backends/api-backend';
+// ApiBackend loaded dynamically — its dependency chain uses @/src path aliases
+// that only work in Next.js context, not in standalone tsx process
+// import { ApiBackend } from './backends/api-backend';
 import { CliBackend } from './backends/cli-backend';
 import { appendAgentLog, saveWorkspace, saveWorkspaceSync, startAutoSave, stopAutoSave } from './persistence';
 import { hasForgeSkills, installForgeSkills } from './skill-installer';
@@ -1351,7 +1353,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
   private createBackend(config: WorkspaceAgentConfig, agentId?: string) {
     switch (config.backend) {
       case 'api':
-        return new ApiBackend();
+        // TODO: ApiBackend uses @/src path aliases that don't work in standalone tsx.
+        // Need to refactor api-backend imports before enabling.
+        throw new Error('API backend not yet supported in workspace daemon. Use CLI backend instead.');
       case 'cli':
       default: {
         // Resume existing claude session if available
