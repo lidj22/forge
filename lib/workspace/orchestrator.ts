@@ -1468,9 +1468,11 @@ export class WorkspaceOrchestrator extends EventEmitter {
         return;
       }
 
-      // Skip if already processing a message (running status in bus)
-      const hasRunning = this.bus.getLog().some(m => m.to === agentId && m.status === 'running' && m.type !== 'ack');
-      if (hasRunning) return;
+      // Skip if worker is currently processing a message
+      if (entry.worker?.getCurrentMessageId()) {
+        const currentMsg = this.bus.getLog().find(m => m.id === entry.worker!.getCurrentMessageId());
+        if (currentMsg && currentMsg.status === 'running') return;
+      }
 
       // Find next pending message, applying causedBy rules
       const allPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
