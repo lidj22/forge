@@ -272,8 +272,15 @@ export class WatchManager extends EventEmitter {
 
     this.snapshots.set(agentId, newSnapshot);
 
-    // Don't alert on initial run (just building baseline snapshot)
-    if (initialRun || allChanges.length === 0) return;
+    if (initialRun) {
+      console.log(`[watch] ${config.label}: baseline snapshot built (${Object.keys(newSnapshot.files).length} files)`);
+      return;
+    }
+
+    if (allChanges.length === 0) {
+      console.log(`[watch] ${config.label}: checked — no changes`);
+      return;
+    }
 
     // Build report
     const summary = allChanges.map(c =>
