@@ -988,15 +988,15 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!this.daemonActive) return;
     const entry = this.agents.get(agentId);
     if (!entry || entry.config.type === 'input') return;
-    if (entry.worker) return; // already has a worker
 
-    // Back to auto mode, enter listening (don't execute steps — wait for messages)
+    // Back to auto mode
     entry.state.mode = 'auto';
     entry.state.error = undefined;
     this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active', mode: 'auto' } satisfies WorkerEvent);
+    this.emitAgentsChanged();
 
-    this.enterDaemonListening(agentId);
-    this.startMessageLoop(agentId);
+    // Worker and message loop are still running (setManualMode doesn't stop them)
+    // Just changing mode back to 'auto' is enough — message loop will resume consuming
   }
 
   /** Complete a manual agent — called by forge-done skill from terminal */
