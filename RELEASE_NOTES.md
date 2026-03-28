@@ -1,11 +1,11 @@
-# Forge v0.5.3
+# Forge v0.5.4
 
 Released: 2026-03-28
 
-## Changes since v0.5.2
+## Changes since v0.5.3
 
 ### Bug Fixes
-- fix: last @/lib alias in cli-backend → relative path
+- fix: remove static ApiBackend import to fix standalone daemon crash
 
 
-**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.5.2...v0.5.3
+**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.5.3...v0.5.4
