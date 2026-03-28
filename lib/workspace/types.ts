@@ -141,7 +141,7 @@ export interface BusMessage {
   };
   timestamp: number;
   // Delivery tracking
-  status?: 'pending' | 'running' | 'done' | 'failed';
+  status?: 'pending' | 'pending_approval' | 'running' | 'done' | 'failed';
   retries?: number;
   // Message classification
   category?: MessageCategory;        // 'notification' (default, follows DAG) | 'ticket' (1-to-1, ignores DAG)

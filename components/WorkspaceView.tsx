@@ -1001,7 +1001,7 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
                   }`}>{msg.ticketStatus}</span>
                 )}
                 {/* Message delivery status */}
-                <span className={`text-[7px] ${msg.status === 'done' ? 'text-green-500' : msg.status === 'running' ? 'text-blue-400' : msg.status === 'failed' ? 'text-red-500' : 'text-yellow-500'}`}>
+                <span className={`text-[7px] ${msg.status === 'done' ? 'text-green-500' : msg.status === 'running' ? 'text-blue-400' : msg.status === 'failed' ? 'text-red-500' : msg.status === 'pending_approval' ? 'text-orange-400' : 'text-yellow-500'}`}>
                   {msg.status || 'pending'}
                 </span>
                 {/* Retry count for tickets */}
@@ -1015,6 +1015,18 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
                   </span>
                 )}
                 {/* Actions */}
+                {msg.status === 'pending_approval' && (
+                  <div className="flex gap-1 ml-auto">
+                    <button onClick={() => wsApi(workspaceId, 'approve_message', { messageId: msg.id })}
+                      className="text-[7px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30">
+                      ✓ Approve
+                    </button>
+                    <button onClick={() => wsApi(workspaceId, 'reject_message', { messageId: msg.id })}
+                      className="text-[7px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">
+                      ✕ Reject
+                    </button>
+                  </div>
+                )}
                 {msg.status === 'pending' && msg.type !== 'ack' && (
                   <button onClick={() => wsApi(workspaceId, 'abort_message', { messageId: msg.id })}
                     className="text-[7px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 ml-auto">

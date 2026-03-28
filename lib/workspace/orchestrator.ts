@@ -999,12 +999,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
     }
 
     if (action === 'approve') {
-      // Create pending approval — user must click to trigger analysis
-      this.bus.send('_watch', agentId, 'notify', {
+      // Create message with pending_approval status — user must approve to execute
+      const msg = this.bus.send('_watch', agentId, 'notify', {
         action: 'watch_changes',
         content: `Watch detected changes (awaiting approval):\n${summary}`,
       });
-      this.approvalQueue.add(agentId);
+      msg.status = 'pending_approval';
       this.emit('event', { type: 'approval_required', agentId, upstreamId: '_watch' } satisfies OrchestratorEvent);
       console.log(`[watch] ${entry.config.label}: changes detected, awaiting approval`);
     }
@@ -1543,6 +1543,16 @@ export class WorkspaceOrchestrator extends EventEmitter {
       if (entry.worker?.getCurrentMessageId()) {
         const currentMsg = this.bus.getLog().find(m => m.id === entry.worker!.getCurrentMessageId());
         if (currentMsg && currentMsg.status === 'running') return;
+      }
+
+      // If agent requires approval, convert new pending messages to pending_approval
+      if (entry.config.requiresApproval) {
+        const newPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
+        for (const m of newPending) {
+          m.status = 'pending_approval';
+          this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'pending_approval' } as any);
+        }
+        if (newPending.length > 0) return; // all converted, wait for user approval
       }
 
       // Find next pending message, applying causedBy rules
