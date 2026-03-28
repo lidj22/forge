@@ -1276,6 +1276,7 @@ const MemoTerminalPane = memo(function TerminalPane({
     const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 
     const term = new Terminal({
+      allowProposedApi: true,
       cursorBlink: true,
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
