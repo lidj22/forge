@@ -199,7 +199,12 @@ export interface TerminalLaunchInfo {
 export function resolveTerminalLaunch(agentId?: string): TerminalLaunchInfo {
   const settings = loadSettings();
   const agentCfg = settings.agents?.[agentId || 'claude'] || {};
-  const cliType = agentCfg.cliType || (agentId === 'codex' ? 'codex' : agentId === 'aider' ? 'aider' : 'claude-code');
+  // Resolve cliType: own cliType → base agent's cliType → base agent name guessing → agentId name guessing
+  const baseId = agentCfg.base;
+  const baseCfg = baseId ? (settings.agents?.[baseId] || {}) : {};
+  const cliType = agentCfg.cliType || baseCfg.cliType
+    || (baseId === 'codex' ? 'codex' : baseId === 'aider' ? 'aider' : undefined)
+    || (agentId === 'codex' ? 'codex' : agentId === 'aider' ? 'aider' : 'claude-code');
 
   // Determine CLI command and capabilities from cliType
   const cliMap: Record<string, { cmd: string; session: boolean; resume: string }> = {
@@ -210,10 +215,15 @@ export function resolveTerminalLaunch(agentId?: string): TerminalLaunchInfo {
   };
   const cli = cliMap[cliType] || cliMap['claude-code'];
 
-  // Resolve profile if linked
+  // Resolve env/model: either from this agent's own profile fields, or from linked profile
   let env: Record<string, string> | undefined;
   let model: string | undefined;
-  if (agentCfg.profile) {
+  if (agentCfg.base || agentCfg.env || agentCfg.model) {
+    // This agent IS a profile — read env/model directly
+    if (agentCfg.env) env = { ...agentCfg.env };
+    if (agentCfg.model) model = agentCfg.model;
+  } else if (agentCfg.profile) {
+    // Agent links to a separate profile — read from that
     const profileCfg = settings.agents?.[agentCfg.profile];
     if (profileCfg) {
       if (profileCfg.env) env = { ...profileCfg.env };

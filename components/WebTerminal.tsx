@@ -880,22 +880,41 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                                           setShowNewTabModal(false); setExpandedRoot(null);
                                           let cmd: string;
                                           try {
-                                            if (a.id === 'claude') {
-                                              let hasSession = false;
+                                            // Resolve terminal launch info (reads profile env/model)
+                                            const resolveRes = await fetch(`/api/agents?resolve=${encodeURIComponent(a.id)}`);
+                                            const info = await resolveRes.json();
+                                            const cliCmd = info.cliCmd || 'claude';
+
+                                            // Build env exports from profile
+                                            const profileEnv = { ...(info.env || {}), ...(info.model ? { CLAUDE_MODEL: info.model } : {}) };
+                                            const envEntries = Object.entries(profileEnv).filter(([k]) => k !== 'CLAUDE_MODEL');
+                                            const envExports = envEntries.length > 0
+                                              ? envEntries.map(([k, v]) => `export ${k}="${v}"`).join(' && ') + ' && '
+                                              : '';
+
+                                            // Model flag (claude-code only)
+                                            const modelFlag = info.supportsSession && profileEnv.CLAUDE_MODEL ? ` --model ${profileEnv.CLAUDE_MODEL}` : '';
+
+                                            // Resume flag (claude-code only)
+                                            let resumeFlag = '';
+                                            if (info.supportsSession) {
                                               try {
                                                 const sRes = await fetch(`/api/claude-sessions/${encodeURIComponent(p.name)}`);
                                                 const sData = await sRes.json();
-                                                hasSession = Array.isArray(sData) ? sData.length > 0 : false;
+                                                if (Array.isArray(sData) && sData.length > 0) resumeFlag = ' -c';
                                               } catch {}
-                                              const sf = skipPermissions ? ' --dangerously-skip-permissions' : '';
-                                              const rf = hasSession ? ' -c' : '';
-                                              cmd = `cd "${p.path}" && claude${rf}${sf}\n`;
-                                            } else {
+                                            }
+
+                                            // Skip permissions flag
+                                            let sf = '';
+                                            if (skipPermissions) {
                                               const agentRes = await fetch('/api/agents');
                                               const agentData = await agentRes.json();
                                               const cfg = (agentData.agents || []).find((ag: any) => ag.id === a.id);
-                                              cmd = `cd "${p.path}" && ${cfg?.path || a.id}\n`;
+                                              sf = cfg?.skipPermissionsFlag ? ` ${cfg.skipPermissionsFlag}` : (cliCmd === 'claude' ? ' --dangerously-skip-permissions' : '');
                                             }
+
+                                            cmd = `${envExports}cd "${p.path}" && ${cliCmd}${resumeFlag}${modelFlag}${sf}\n`;
                                           } catch {
                                             cmd = `cd "${p.path}" && ${a.id}\n`;
                                           }

@@ -271,17 +271,6 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         const agentState = orch.getAgentState(agentId);
         const agentConfig = orch.getSnapshot().agents.find(a => a.id === agentId);
         if (!agentState || !agentConfig) return jsonError(res, 'Agent not found', 404);
-        if (agentState.taskStatus === 'running') return jsonError(res, 'Cannot open terminal while agent is running. Wait for it to finish.');
-        const hasPending = orch.getBus().getPendingMessagesFor(agentId).length > 0;
-        if (hasPending) return jsonError(res, 'Agent has pending messages being processed. Wait for execution to complete.');
-
-        if (agentState.mode === 'manual') {
-          return json(res, { ok: true, mode: 'manual', alreadyManual: true });
-        }
-
-        orch.setManualMode(agentId);
-        // Skills call Next.js API (/api/workspace/.../smith), so use FORGE_PORT not daemon PORT
-        const result = installForgeSkills(orch.projectPath, id, agentId, FORGE_PORT);
 
         // Resolve launch info using shared logic (same as VibeCoding terminal)
         let launchInfo: any = { cliCmd: 'claude', cliType: 'claude-code', supportsSession: true };
@@ -289,6 +278,23 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
           const { resolveTerminalLaunch } = await import('./agents/index.js');
           launchInfo = resolveTerminalLaunch(agentConfig.agentId);
         } catch {}
+
+        // resolveOnly: just return launch info without side effects
+        if (body.resolveOnly) {
+          return json(res, { ok: true, ...launchInfo });
+        }
+
+        if (agentState.taskStatus === 'running') return jsonError(res, 'Cannot open terminal while agent is running. Wait for it to finish.');
+        const hasPending = orch.getBus().getPendingMessagesFor(agentId).length > 0;
+        if (hasPending) return jsonError(res, 'Agent has pending messages being processed. Wait for execution to complete.');
+
+        if (agentState.mode === 'manual') {
+          return json(res, { ok: true, mode: 'manual', alreadyManual: true, ...launchInfo });
+        }
+
+        orch.setManualMode(agentId);
+        // Skills call Next.js API (/api/workspace/.../smith), so use FORGE_PORT not daemon PORT
+        const result = installForgeSkills(orch.projectPath, id, agentId, FORGE_PORT);
 
         return json(res, {
           ok: true,

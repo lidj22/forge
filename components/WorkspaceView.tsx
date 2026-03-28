@@ -849,16 +849,15 @@ function BusPanel({ busLog, agents, onClose }: {
 
 // ─── Terminal Launch Dialog ───────────────────────────────
 
-function TerminalLaunchDialog({ agent, workDir, sessName, projectPath, workspaceId, onLaunch, onCancel }: {
+function TerminalLaunchDialog({ agent, workDir, sessName, projectPath, workspaceId, supportsSession, onLaunch, onCancel }: {
   agent: AgentConfig; workDir?: string; sessName: string; projectPath: string; workspaceId: string;
+  supportsSession?: boolean;
   onLaunch: (resumeMode: boolean, sessionId?: string) => void; onCancel: () => void;
 }) {
   const [sessions, setSessions] = useState<{ id: string; modified: string; size: number }[]>([]);
   const [showSessions, setShowSessions] = useState(false);
-  // Check if this agent uses claude (directly or via profile)
-  const knownClis = ['claude', 'codex', 'aider'];
-  const cli = agent.agentId || 'claude';
-  const isClaude = cli === 'claude' || !knownClis.includes(cli); // profiles default to claude
+  // Use resolved supportsSession from API (defaults to true for backwards compat)
+  const isClaude = supportsSession !== false;
 
   // Fetch recent sessions (only for claude-based agents)
   useEffect(() => {
@@ -896,7 +895,7 @@ function TerminalLaunchDialog({ agent, workDir, sessName, projectPath, workspace
           <button onClick={() => onLaunch(false)}
             className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#58a6ff] hover:bg-[#161b22] transition-colors">
             <div className="text-xs text-white font-semibold">{isClaude ? 'New Session' : 'Open Terminal'}</div>
-            <div className="text-[9px] text-gray-500">{isClaude ? 'Start fresh claude session' : `Launch ${cli}`}</div>
+            <div className="text-[9px] text-gray-500">{isClaude ? 'Start fresh claude session' : `Launch ${agent.agentId || 'agent'}`}</div>
           </button>
 
           {isClaude && sessions.length > 0 && (
@@ -1411,7 +1410,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
   const [inboxTarget, setInboxTarget] = useState<{ id: string; label: string } | null>(null);
   const [showBusPanel, setShowBusPanel] = useState(false);
   const [floatingTerminals, setFloatingTerminals] = useState<{ agentId: string; label: string; icon: string; cliId: string; cliCmd?: string; cliType?: string; workDir?: string; tmuxSession?: string; sessionName: string; resumeMode?: boolean; resumeSessionId?: string; profileEnv?: Record<string, string> }[]>([]);
-  const [termLaunchDialog, setTermLaunchDialog] = useState<{ agent: AgentConfig; sessName: string; workDir?: string; sessions: string[] } | null>(null);
+  const [termLaunchDialog, setTermLaunchDialog] = useState<{ agent: AgentConfig; sessName: string; workDir?: string; sessions: string[]; supportsSession?: boolean } | null>(null);
 
   // Expose focusAgent to parent
   useImperativeHandle(ref, () => ({
@@ -1553,8 +1552,12 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 return;
               }
 
-              // Show launch dialog — sessions loaded async inside
-              setTermLaunchDialog({ agent, sessName, workDir, sessions: [] });
+              // Resolve terminal launch info to determine supportsSession
+              const resolveRes = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id, resolveOnly: true }).catch(() => ({})) as any;
+              const supportsSession = resolveRes?.supportsSession ?? true;
+
+              // Show launch dialog with resolved info
+              setTermLaunchDialog({ agent, sessName, workDir, sessions: [], supportsSession });
             },
           } satisfies AgentNodeData,
         };
@@ -1873,6 +1876,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           sessName={termLaunchDialog.sessName}
           projectPath={projectPath}
           workspaceId={workspaceId}
+          supportsSession={termLaunchDialog.supportsSession}
           onLaunch={async (resumeMode, sessionId) => {
             const { agent, sessName, workDir } = termLaunchDialog;
             setTermLaunchDialog(null);
@@ -1885,7 +1889,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 cliType: res.cliType || 'claude-code',
                 workDir,
                 sessionName: sessName, resumeMode, resumeSessionId: sessionId,
-                profileEnv: res.profileEnv,
+                profileEnv: { ...(res.env || {}), ...(res.model ? { CLAUDE_MODEL: res.model } : {}) },
               }]);
             }
           }}
