@@ -1620,13 +1620,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
 
       // If agent requires approval, convert new pending messages to pending_approval
+      // Skip messages that were already approved by user (have _approved flag)
       if (entry.config.requiresApproval) {
-        const newPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack');
+        const newPending = this.bus.getPendingMessagesFor(agentId).filter(m => m.from !== agentId && m.type !== 'ack' && !(m as any)._approved);
         for (const m of newPending) {
           m.status = 'pending_approval';
           this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'pending_approval' } as any);
         }
-        if (newPending.length > 0) return; // all converted, wait for user approval
+        if (newPending.length > 0) return;
       }
 
       // Find next pending message, applying causedBy rules

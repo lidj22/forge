@@ -367,6 +367,7 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         if (approveMsg.status !== 'pending_approval') return jsonError(res, 'Message is not pending approval');
         if (body.content) approveMsg.payload.content = body.content;
         approveMsg.status = 'pending';
+        (approveMsg as any)._approved = true;
         orch.emit('event', { type: 'bus_message_status', messageId, status: 'pending' });
         return json(res, { ok: true });
       }
