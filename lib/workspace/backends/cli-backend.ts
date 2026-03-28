@@ -7,9 +7,12 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { getAgent } from '@/lib/agents';
 import type { AgentBackend, AgentStep, StepExecutionParams, StepExecutionResult, Artifact } from '../types';
 import type { TaskLogEntry } from '@/src/types';
+
+const esmRequire = createRequire(import.meta.url);
 
 // ─── Stream-JSON parser (reused from task-manager pattern) ──
 
@@ -339,7 +342,7 @@ export class CliBackend implements AgentBackend {
     reject: (e: Error) => void,
   ): void {
     try {
-      const pty = require('node-pty');
+      const pty = esmRequire('node-pty');
       const stripAnsi = (s: string) => s
         .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
         .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
