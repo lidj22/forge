@@ -720,6 +720,7 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
   const labelMap = new Map(agents.map(a => [a.id, `${a.icon} ${a.label}`]));
   const getLabel = (id: string) => labelMap.get(id) || id;
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Filter messages related to this agent, exclude locally deleted
   const inbox = busLog.filter(m => m.to === agentId && m.type !== 'ack' && !deletedIds.has(m.id));
@@ -730,6 +731,23 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
   const handleDelete = async (msgId: string) => {
     await wsApi(workspaceId, 'delete_message', { messageId: msgId });
     setDeletedIds(prev => new Set(prev).add(msgId));
+  };
+
+  const toggleSelect = (msgId: string) => {
+    setSelected(prev => { const s = new Set(prev); s.has(msgId) ? s.delete(msgId) : s.add(msgId); return s; });
+  };
+
+  const selectAll = () => {
+    const deletable = messages.filter(m => m.status === 'done' || m.status === 'failed');
+    setSelected(new Set(deletable.map(m => m.id)));
+  };
+
+  const handleBatchDelete = async () => {
+    for (const id of selected) {
+      await wsApi(workspaceId, 'delete_message', { messageId: id });
+      setDeletedIds(prev => new Set(prev).add(id));
+    }
+    setSelected(new Set());
   };
 
   return (
@@ -749,6 +767,25 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
               Outbox ({outbox.length})
             </button>
           </div>
+          {selected.size > 0 && (
+            <div className="flex items-center gap-2 ml-3">
+              <span className="text-[9px] text-gray-400">{selected.size} selected</span>
+              <button onClick={handleBatchDelete}
+                className="text-[8px] px-2 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">
+                Delete selected
+              </button>
+              <button onClick={() => setSelected(new Set())}
+                className="text-[8px] px-2 py-0.5 rounded bg-gray-600/20 text-gray-400 hover:bg-gray-600/30">
+                Clear
+              </button>
+            </div>
+          )}
+          {selected.size === 0 && messages.some(m => m.status === 'done' || m.status === 'failed') && (
+            <button onClick={selectAll}
+              className="text-[8px] px-2 py-0.5 rounded text-gray-500 hover:text-gray-300 ml-3">
+              Select all completed
+            </button>
+          )}
           <button onClick={onClose} className="text-gray-500 hover:text-white text-sm ml-auto">✕</button>
         </div>
         <div className="flex-1 overflow-auto p-3 space-y-1.5">
@@ -757,12 +794,18 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
           )}
           {[...messages].reverse().map((msg, i) => {
             const isTicket = msg.category === 'ticket';
+            const canSelect = msg.status === 'done' || msg.status === 'failed';
             return (
-            <div key={i} className="px-3 py-2 rounded text-[10px]" style={{
+            <div key={i} className="flex items-start gap-2 px-3 py-2 rounded text-[10px]" style={{
               background: '#161b22',
               border: `1px solid ${isTicket ? '#6e40c9' : '#21262d'}`,
               borderLeft: isTicket ? '3px solid #a371f7' : undefined,
             }}>
+              {canSelect && (
+                <input type="checkbox" checked={selected.has(msg.id)} onChange={() => toggleSelect(msg.id)}
+                  className="mt-1 shrink-0 accent-[#58a6ff]" />
+              )}
+              <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <span className="text-[8px] text-gray-600">{new Date(msg.timestamp).toLocaleString()}</span>
                 {tab === 'inbox' ? (
@@ -830,6 +873,7 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
               {msg.payload?.files?.length > 0 && (
                 <div className="text-[8px] text-gray-600 mt-1">Files: {msg.payload.files.join(', ')}</div>
               )}
+              </div>
             </div>
             );
           })}
