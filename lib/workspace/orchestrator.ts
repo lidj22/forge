@@ -245,6 +245,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
     entry.state.taskStatus = 'idle';
     entry.state.error = undefined;
     entry.worker = null;
+    // Restart watch if config changed
+    if (this.daemonActive) {
+      this.watchManager.startWatch(id, config);
+    }
     this.saveNow();
     this.emitAgentsChanged();
     // Push status update so frontend reflects the reset
