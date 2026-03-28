@@ -976,8 +976,15 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     if (action === 'analyze') {
       // Auto-wake agent to analyze changes (skip if busy/manual)
-      if (entry.state.mode === 'manual' || entry.state.taskStatus === 'running') return;
-      if (!entry.worker?.isListening()) return;
+      if (entry.state.mode === 'manual' || entry.state.taskStatus === 'running') {
+        console.log(`[watch] ${entry.config.label}: skipped analyze (mode=${entry.state.mode} task=${entry.state.taskStatus})`);
+        return;
+      }
+      if (!entry.worker?.isListening()) {
+        console.log(`[watch] ${entry.config.label}: skipped analyze (worker=${!!entry.worker} listening=${entry.worker?.isListening()})`);
+        return;
+      }
+      console.log(`[watch] ${entry.config.label}: triggering analyze`);
 
       const prompt = entry.config.watch?.prompt || 'Analyze the following changes and produce a report:';
       const logEntry = {
