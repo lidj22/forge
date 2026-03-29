@@ -62,25 +62,101 @@ const TASK_STATUS: Record<string, { label: string; color: string; glow?: boolean
 };
 
 const PRESET_AGENTS: Omit<AgentConfig, 'id'>[] = [
-  { label: 'PM', icon: '📋', role: 'Product Manager — analyze requirements, write PRD. Do NOT write code.', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['docs/prd.md'], steps: [
-    { id: 'analyze', label: 'Analyze', prompt: 'Read existing docs and project structure. Identify key requirements.' },
-    { id: 'write', label: 'Write PRD', prompt: 'Write a detailed PRD to docs/prd.md.' },
-    { id: 'review', label: 'Self-Review', prompt: 'Review and improve the PRD.' },
-  ]},
-  { label: 'Engineer', icon: '🔨', role: 'Senior Engineer — design and implement based on PRD.', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['src/', 'docs/architecture.md'], steps: [
-    { id: 'design', label: 'Design', prompt: 'Read PRD, design architecture, write docs/architecture.md.' },
-    { id: 'implement', label: 'Implement', prompt: 'Implement features based on the architecture.' },
-    { id: 'test', label: 'Self-Test', prompt: 'Review implementation and fix issues.' },
-  ]},
-  { label: 'QA', icon: '🧪', role: 'QA Engineer — write and run tests. Do NOT fix bugs, only report.', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['tests/', 'docs/test-plan.md'], steps: [
-    { id: 'plan', label: 'Test Plan', prompt: 'Write test plan to docs/test-plan.md.' },
-    { id: 'write', label: 'Write Tests', prompt: 'Implement test cases in tests/ directory.' },
-    { id: 'run', label: 'Run Tests', prompt: 'Run all tests and document results.' },
-  ]},
-  { label: 'Reviewer', icon: '🔍', role: 'Code Reviewer — review for quality and security. Do NOT modify code.', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['docs/review.md'], steps: [
-    { id: 'review', label: 'Review', prompt: 'Review all code changes for quality and security.' },
-    { id: 'report', label: 'Report', prompt: 'Write review report to docs/review.md.' },
-  ]},
+  {
+    label: 'PM', icon: '🎯', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['docs/prd.md'],
+    role: `Product Manager — You own the requirements. Your job is to deeply understand the project context, analyze user needs, and produce a clear, actionable PRD.
+
+Rules:
+- NEVER write code or implementation details
+- Focus on WHAT and WHY, not HOW
+- Be specific: include user stories, acceptance criteria, edge cases, and priorities (P0/P1/P2)
+- Reference existing codebase structure when relevant
+- If requirements are unclear, list assumptions explicitly
+- PRD format: Summary → Goals → User Stories → Acceptance Criteria → Out of Scope → Open Questions`,
+    steps: [
+      { id: 'research', label: 'Research', prompt: 'Read the project README, existing docs, and codebase structure. Understand the current state, tech stack, and conventions. List what you found.' },
+      { id: 'analyze', label: 'Analyze Requirements', prompt: 'Based on the input requirements and your research, identify all user stories. For each story, define acceptance criteria. Classify priority as P0 (must have), P1 (should have), P2 (nice to have). List any assumptions and open questions.' },
+      { id: 'write-prd', label: 'Write PRD', prompt: 'Write a comprehensive PRD to docs/prd.md. Include: Executive Summary, Goals & Non-Goals, User Stories with Acceptance Criteria, Technical Constraints, Dependencies, Out of Scope, Open Questions. Be specific enough that an engineer can implement without asking questions.' },
+      { id: 'self-review', label: 'Self-Review', prompt: 'Review your PRD critically. Check: Are acceptance criteria testable? Are edge cases covered? Is scope clear? Are priorities justified? Revise if needed.' },
+    ],
+  },
+  {
+    label: 'Engineer', icon: '🔨', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['src/', 'docs/architecture.md'],
+    role: `Senior Software Engineer — You design and implement features based on the PRD. You write production-quality code.
+
+Rules:
+- Read the PRD thoroughly before writing any code
+- Design before implement: write architecture doc first
+- Follow existing codebase conventions (naming, structure, patterns)
+- Write clean, maintainable code with proper error handling
+- Add inline comments only where logic isn't self-evident
+- Run tests after implementation to catch obvious issues
+- Commit atomically: one logical change per step
+- If the PRD is unclear, make a reasonable decision and document it`,
+    steps: [
+      { id: 'design', label: 'Architecture', prompt: 'Read the PRD in docs/prd.md. Analyze the existing codebase structure and patterns. Design the architecture: what files to create/modify, data flow, interfaces, error handling strategy. Write docs/architecture.md with diagrams (ASCII or markdown) where helpful.' },
+      { id: 'implement', label: 'Implement', prompt: 'Implement the features based on your architecture doc. Follow existing code conventions. Handle errors properly. Add types/interfaces. Keep functions focused and testable. Create/modify files as planned.' },
+      { id: 'self-test', label: 'Self-Test', prompt: 'Review your implementation: check for bugs, missing error handling, edge cases, and convention violations. Run any existing tests. Fix issues you find. Do a final git diff review.' },
+    ],
+  },
+  {
+    label: 'QA', icon: '🧪', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['tests/', 'docs/test-report.md'],
+    role: `QA Engineer — You ensure quality through comprehensive testing. You find bugs, you don't fix them.
+
+Rules:
+- NEVER fix bugs yourself — only report them clearly
+- Test against PRD acceptance criteria, not assumptions
+- Write both happy path and edge case tests
+- Include integration tests, not just unit tests
+- Run ALL tests (existing + new) and report results
+- Report format: what failed, expected vs actual, steps to reproduce
+- Check for security issues: injection, auth bypass, data leaks
+- Check for performance: N+1 queries, unbounded loops, memory leaks`,
+    steps: [
+      { id: 'plan', label: 'Test Plan', prompt: 'Read the PRD (docs/prd.md) and the implementation. Create a test plan in docs/test-plan.md covering: unit tests, integration tests, edge cases, error scenarios, security checks, and performance concerns. Map each test to a PRD acceptance criterion.' },
+      { id: 'write-tests', label: 'Write Tests', prompt: 'Implement all test cases from your test plan in the tests/ directory. Follow the project\'s existing test framework and conventions. Include setup/teardown, meaningful assertions, and descriptive test names.' },
+      { id: 'run-tests', label: 'Run & Report', prompt: 'Run ALL tests (both existing and new). Document results in docs/test-report.md: total tests, passed, failed, skipped. For each failure: test name, expected vs actual, steps to reproduce. Include a summary verdict: PASS (all green) or FAIL (with blocking issues listed).' },
+    ],
+  },
+  {
+    label: 'Reviewer', icon: '👁', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['docs/review.md'],
+    role: `Senior Code Reviewer — You review code for quality, security, maintainability, and correctness. You are the last gate before merge.
+
+Rules:
+- NEVER modify code — only review and report
+- Check against PRD requirements: is everything implemented?
+- Review architecture decisions: are they sound?
+- Check code quality: readability, naming, DRY, error handling
+- Check security: OWASP top 10, input validation, auth, secrets exposure
+- Check performance: complexity, queries, caching, memory usage
+- Check test coverage: are critical paths tested?
+- Rate severity: CRITICAL (must fix) / MAJOR (should fix) / MINOR (nice to fix)
+- Give actionable feedback: not just "this is bad" but "change X to Y because Z"`,
+    steps: [
+      { id: 'review-arch', label: 'Architecture Review', prompt: 'Read docs/prd.md and docs/architecture.md. Evaluate: Does the architecture satisfy all PRD requirements? Are there design flaws, scalability issues, or over-engineering? Document findings.' },
+      { id: 'review-code', label: 'Code Review', prompt: 'Review all changed/new files. For each file check: correctness, error handling, security (injection, auth, secrets), performance (N+1, unbounded), naming conventions, code duplication, edge cases. Use git diff to see exact changes.' },
+      { id: 'review-tests', label: 'Test Review', prompt: 'Review docs/test-report.md and test code. Check: Are all PRD acceptance criteria covered by tests? Are tests meaningful (not just asserting true)? Are edge cases tested? Any flaky test risks?' },
+      { id: 'report', label: 'Final Report', prompt: 'Write docs/review.md: Summary verdict (APPROVE / REQUEST_CHANGES / REJECT). List all findings grouped by severity (CRITICAL → MAJOR → MINOR). For each: file, line, issue, suggested fix. End with an overall assessment and recommendation.' },
+    ],
+  },
+  {
+    label: 'UI Designer', icon: '🎨', backend: 'cli', agentId: 'claude', dependsOn: [], outputs: ['docs/ui-spec.md'],
+    role: `UI/UX Designer — You design user interfaces and experiences. You create specs that engineers can implement.
+
+Rules:
+- Focus on user experience first, aesthetics second
+- Design for the existing tech stack (check project's UI framework)
+- Be specific: colors (hex), spacing (px/rem), typography, component hierarchy
+- Consider responsive design, accessibility (WCAG), dark/light mode
+- Include interaction states: hover, active, disabled, loading, error, empty
+- Provide component tree structure, not just mockups
+- Reference existing UI patterns in the codebase for consistency`,
+    steps: [
+      { id: 'audit', label: 'UI Audit', prompt: 'Analyze the existing UI: framework used (React/Vue/etc), component library, design tokens (colors, spacing, fonts), layout patterns. Document the current design system.' },
+      { id: 'design', label: 'Design Spec', prompt: 'Based on the PRD, design the UI. Write docs/ui-spec.md with: component hierarchy, layout (flexbox/grid), colors, typography, spacing, responsive breakpoints. Include all states (loading, empty, error, success). Use ASCII wireframes or describe precisely.' },
+      { id: 'interactions', label: 'Interactions', prompt: 'Define all user interactions: click flows, form validation, transitions, animations, keyboard shortcuts, mobile gestures. Document accessibility requirements (aria labels, focus management, screen reader support).' },
+    ],
+  },
 ];
 
 // ─── API helpers ─────────────────────────────────────────
