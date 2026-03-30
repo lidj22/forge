@@ -334,22 +334,24 @@ function SessionTargetSelector({ target, agents, projectPath, onChange }: {
 }) {
   const [sessions, setSessions] = useState<{ id: string; modified: string; label: string }[]>([]);
 
-  // Load sessions when agent changes
+  // Load sessions and resolve fixedSessionId
   useEffect(() => {
     if (!projectPath) return;
     const pName = (projectPath || '').replace(/\/+$/, '').split('/').pop() || '';
-    fetch(`/api/claude-sessions/${encodeURIComponent(pName)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          setSessions(data.map((s: any, i: number) => ({
-            id: s.sessionId || s.id || '',
-            modified: s.modified || '',
-            label: i === 0 ? `${(s.sessionId || '').slice(0, 8)} (latest)` : (s.sessionId || '').slice(0, 8),
-          })));
-        }
-      })
-      .catch(() => {});
+    Promise.all([
+      fetch(`/api/claude-sessions/${encodeURIComponent(pName)}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/workspace?projectPath=${encodeURIComponent(projectPath)}`).then(r => r.json()).catch(() => null),
+    ]).then(([data, ws]) => {
+      const fixedId = ws?.agents?.find((a: any) => a.primary)?.fixedSessionId || '';
+      if (Array.isArray(data)) {
+        setSessions(data.map((s: any, i: number) => {
+          const sid = s.sessionId || s.id || '';
+          const isBound = sid === fixedId;
+          const label = isBound ? `${sid.slice(0, 8)} (fixed)` : i === 0 ? `${sid.slice(0, 8)} (latest)` : sid.slice(0, 8);
+          return { id: sid, modified: s.modified || '', label };
+        }));
+      }
+    });
   }, [projectPath]);
 
   return (
@@ -1713,7 +1715,7 @@ function FloatingTerminalInline({ agentLabel, agentIcon, projectPath, agentCliId
           existingSession: existingSession || undefined,
         }));
       };
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
           const msg = JSON.parse(typeof event.data === 'string' ? event.data : decoder.decode(event.data));
           if (msg.type === 'data') {
@@ -1726,9 +1728,6 @@ function FloatingTerminalInline({ agentLabel, agentIcon, projectPath, agentCliId
               const targetDir = workDir ? `${projectPath}/${workDir}` : projectPath;
               const cdCmd = `mkdir -p "${targetDir}" && cd "${targetDir}"`;
               const isClaude = (cliType || 'claude-code') === 'claude-code';
-              const resumeFlag = isClaude
-                ? (resumeSessionId ? ` --resume ${resumeSessionId}` : ' -c')
-                : '';
               const modelFlag = isClaude && profileEnv?.CLAUDE_MODEL ? ` --model ${profileEnv.CLAUDE_MODEL}` : '';
               const envWithoutModel = profileEnv ? Object.fromEntries(
                 Object.entries(profileEnv).filter(([k]) => k !== 'CLAUDE_MODEL')
@@ -1736,6 +1735,15 @@ function FloatingTerminalInline({ agentLabel, agentIcon, projectPath, agentCliId
               const envExportsClean = Object.keys(envWithoutModel).length > 0
                 ? Object.entries(envWithoutModel).map(([k, v]) => `export ${k}="${v}"`).join(' && ') + ' && '
                 : '';
+              // Resolve fixedSession if no explicit resumeSessionId
+              let resumeId = resumeSessionId;
+              if (isClaude && !resumeId) {
+                try {
+                  const { resolveFixedSession } = await import('@/lib/session-utils');
+                  resumeId = (await resolveFixedSession(projectPath)) || undefined;
+                } catch {}
+              }
+              const resumeFlag = isClaude ? (resumeId ? ` --resume ${resumeId}` : ' -c') : '';
               const cmd = `${envExportsClean}${cdCmd} && ${cli}${resumeFlag}${modelFlag}\n`;
               setTimeout(() => {
                 if (!disposed && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data: cmd }));
@@ -1833,7 +1841,7 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliC
       };
 
       let launched = false;
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         if (disposed) return;
         try {
           const msg = JSON.parse(event.data);
@@ -1875,17 +1883,22 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliC
 
             const cdCmd = `mkdir -p "${targetDir}" && cd "${targetDir}"`;
             const isClaude = (cliType || 'claude-code') === 'claude-code';
-            const resumeFlag = isClaude
-              ? (resumeSessionId ? ` --resume ${resumeSessionId}` : ' -c')
-              : '';
             const modelFlag = isClaude && profileEnv?.CLAUDE_MODEL ? ` --model ${profileEnv.CLAUDE_MODEL}` : '';
-            // Remove CLAUDE_MODEL from env exports (passed via --model flag instead)
             const envWithoutModel = profileEnv ? Object.fromEntries(
               Object.entries(profileEnv).filter(([k]) => k !== 'CLAUDE_MODEL')
             ) : {};
             const envExportsClean = Object.keys(envWithoutModel).length > 0
               ? Object.entries(envWithoutModel).map(([k, v]) => `export ${k}="${v}"`).join(' && ') + ' && '
               : '';
+            // Resolve fixedSession if no explicit resumeSessionId
+            let resumeId = resumeSessionId;
+            if (isClaude && !resumeId) {
+              try {
+                const { resolveFixedSession } = await import('@/lib/session-utils');
+                resumeId = (await resolveFixedSession(projectPath)) || undefined;
+              } catch {}
+            }
+            const resumeFlag = isClaude ? (resumeId ? ` --resume ${resumeId}` : ' -c') : '';
             const cmd = `${envExportsClean}${cdCmd} && ${cli}${resumeFlag}${modelFlag}\n`;
             setTimeout(() => {
               if (!disposed && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data: cmd }));

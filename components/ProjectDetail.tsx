@@ -1550,7 +1550,12 @@ function AgentTerminalButton({ projectPath, projectName }: { projectPath: string
               </button>
 
               {sessions.length > 0 && (
-                <button onClick={() => openWithAgent(launchDialog.agentId, true, undefined, launchDialog.env, launchDialog.model)}
+                <button onClick={async () => {
+                  // Use fixedSession if available, otherwise latest session
+                  const { resolveFixedSession } = await import('@/lib/session-utils');
+                  const fixedId = await resolveFixedSession(projectPath);
+                  openWithAgent(launchDialog.agentId, true, fixedId || sessions[0].id, launchDialog.env, launchDialog.model);
+                }}
                   className="w-full text-left px-3 py-2 rounded border border-[#30363d] hover:border-[#3fb950] hover:bg-[#161b22] transition-colors">
                   <div className="text-xs text-white font-semibold">Resume Latest</div>
                   <div className="text-[9px] text-gray-500">{sessions[0].id.slice(0, 8)} · {formatTime(sessions[0].modified)} · {formatSize(sessions[0].size)}</div>
