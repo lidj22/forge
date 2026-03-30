@@ -231,7 +231,23 @@ export class WorkspaceOrchestrator extends EventEmitter {
       config.persistentSession = true;
       config.workDir = './';
     }
+    // Auto-bind latest CLI session if persistentSession enabled and no fixedSessionId
+    if (config.persistentSession && !config.fixedSessionId) {
+      config.fixedSessionId = this.findLatestCliSession(config.workDir) || undefined;
+      if (config.fixedSessionId) {
+        console.log(`[workspace] ${config.label}: auto-bound to CLI session ${config.fixedSessionId}`);
+      }
+    }
     this.agents.set(config.id, { config, worker: null, state });
+    // If daemon active, start persistent session + worker
+    if (this.daemonActive && config.type !== 'input' && config.persistentSession) {
+      this.enterDaemonListening(config.id);
+      const entry = this.agents.get(config.id)!;
+      entry.state.smithStatus = 'active';
+      this.ensurePersistentSession(config.id, config).then(() => {
+        this.startMessageLoop(config.id);
+      });
+    }
     this.saveNow();
     this.emitAgentsChanged();
   }
@@ -291,6 +307,13 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (config.primary) {
       config.persistentSession = true;
       config.workDir = './';
+    }
+    // Auto-bind latest CLI session if persistentSession enabled and no fixedSessionId
+    if (config.persistentSession && !config.fixedSessionId) {
+      config.fixedSessionId = this.findLatestCliSession(config.workDir) || undefined;
+      if (config.fixedSessionId) {
+        console.log(`[workspace] ${config.label}: auto-bound to CLI session ${config.fixedSessionId}`);
+      }
     }
     if (entry.worker && entry.state.taskStatus === 'running') {
       entry.worker.stop();
