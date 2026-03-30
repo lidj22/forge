@@ -888,7 +888,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
     for (const [id, entry] of this.agents) {
       if (entry.config.type === 'input' || !entry.config.persistentSession) continue;
       await this.ensurePersistentSession(id, entry.config);
-      this.startMessageLoop(id);
+      // Only start message loop if session was created successfully
+      if (entry.state.smithStatus === 'active') {
+        this.startMessageLoop(id);
+      } else {
+        console.log(`[daemon] ${entry.config.label}: skipped message loop (smith=${entry.state.smithStatus})`);
+      }
     }
 
     // Start watch loops for agents with watch config
