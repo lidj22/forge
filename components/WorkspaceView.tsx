@@ -373,6 +373,58 @@ function SessionTargetSelector({ target, agents, projectPath, onChange }: {
   );
 }
 
+// ─── Fixed Session Picker ────────────────────────────────
+
+function FixedSessionPicker({ projectPath, value, onChange }: { projectPath?: string; value: string; onChange: (v: string) => void }) {
+  const [sessions, setSessions] = useState<{ id: string; modified: string; size: number }[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!projectPath) return;
+    const pName = projectPath.replace(/\/+$/, '').split('/').pop() || '';
+    fetch(`/api/claude-sessions/${encodeURIComponent(pName)}`)
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setSessions(data.map((s: any) => ({ id: s.sessionId || s.id || '', modified: s.modified || '', size: s.size || 0 }))); })
+      .catch(() => {});
+  }, [projectPath]);
+
+  const formatTime = (iso: string) => {
+    if (!iso) return '';
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return new Date(iso).toLocaleDateString();
+  };
+  const formatSize = (b: number) => b < 1024 ? `${b}B` : b < 1048576 ? `${(b / 1024).toFixed(0)}KB` : `${(b / 1048576).toFixed(1)}MB`;
+
+  const copyId = () => {
+    if (!value) return;
+    navigator.clipboard.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
+  };
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <label className="text-[9px] text-gray-500">Bound Session {value ? '' : '(auto-detect on first start)'}</label>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="text-[10px] bg-[#161b22] border border-[#30363d] rounded px-2 py-1 text-gray-400 font-mono focus:outline-none focus:border-[#58a6ff]">
+        <option value="">Auto-detect (latest session)</option>
+        {sessions.map(s => (
+          <option key={s.id} value={s.id}>
+            {s.id.slice(0, 8)} · {formatTime(s.modified)} · {formatSize(s.size)}
+          </option>
+        ))}
+      </select>
+      {value && (
+        <div className="flex items-center gap-1 mt-0.5">
+          <code className="text-[8px] text-gray-500 font-mono bg-[#0d1117] px-1.5 py-0.5 rounded border border-[#21262d] flex-1 overflow-hidden text-ellipsis select-all">{value}</code>
+          <button onClick={copyId} className="text-[8px] px-1.5 py-0.5 rounded bg-[#30363d] text-gray-400 hover:text-white shrink-0">{copied ? '✓' : 'Copy'}</button>
+          <button onClick={() => onChange('')} className="text-[8px] px-1.5 py-0.5 rounded text-gray-600 hover:text-red-400 shrink-0">Clear</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Agent Config Modal ──────────────────────────────────
 
 function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfirm, onCancel }: {
@@ -641,18 +693,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
                 <label htmlFor="skipPermissions" className="text-[9px] text-gray-400">Skip permissions (auto-approve all tool calls)</label>
               </div>
               {/* Fixed Session ID */}
-              <div className="flex flex-col gap-0.5">
-                <label className="text-[9px] text-gray-500">Bound Session ID {fixedSessionId ? '' : '(auto-detect on first start)'}</label>
-                <div className="flex items-center gap-1">
-                  <input value={fixedSessionId} onChange={e => setFixedSessionId(e.target.value)}
-                    placeholder="auto-detect"
-                    className="flex-1 text-[10px] bg-[#161b22] border border-[#30363d] rounded px-2 py-0.5 text-gray-400 font-mono focus:outline-none focus:border-[#58a6ff] placeholder-gray-700" />
-                  {fixedSessionId && (
-                    <button onClick={() => setFixedSessionId('')}
-                      className="text-[8px] px-1.5 py-0.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-600/10">clear</button>
-                  )}
-                </div>
-              </div>
+              <FixedSessionPicker projectPath={projectPath} value={fixedSessionId} onChange={setFixedSessionId} />
             </div>
           )}
 
