@@ -1784,8 +1784,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
   /** Resolve the CLI session directory for a given project path */
   private getCliSessionDir(workDir?: string): string {
     const projectPath = workDir && workDir !== './' && workDir !== '.'
-      ? `${this.projectPath}/${workDir}` : this.projectPath;
-    const encoded = projectPath.replace(/\//g, '-');
+      ? join(this.projectPath, workDir) : this.projectPath;
+    const encoded = resolve(projectPath).replace(/\//g, '-');
     return join(homedir(), '.claude', 'projects', encoded);
   }
 

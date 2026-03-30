@@ -14,7 +14,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { WorkspaceOrchestrator, type OrchestratorEvent } from './workspace/orchestrator';
 import { loadWorkspace, saveWorkspace, findWorkspaceByProject } from './workspace/persistence';
@@ -648,8 +648,8 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
       try {
         const agentConfig = agentId ? orch.getSnapshot().agents.find(a => a.id === agentId) : null;
         const agentWorkDir = agentConfig?.workDir && agentConfig.workDir !== './' && agentConfig.workDir !== '.'
-          ? `${orch.projectPath}/${agentConfig.workDir}` : orch.projectPath;
-        const encoded = agentWorkDir.replace(/\//g, '-');
+          ? join(orch.projectPath, agentConfig.workDir) : orch.projectPath;
+        const encoded = resolve(agentWorkDir).replace(/\//g, '-');
         const sessDir = join(homedir(), '.claude', 'projects', encoded);
         const entries = readdirSync(sessDir);
         const files = entries
