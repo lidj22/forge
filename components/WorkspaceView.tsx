@@ -1774,7 +1774,7 @@ function FloatingTerminalInline({ agentLabel, agentIcon, projectPath, agentCliId
   return <div ref={containerRef} className="w-full h-full" style={{ background: '#0d1117' }} />;
 }
 
-function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliCmd: cliCmdProp, cliType, workDir, preferredSessionName, existingSession, resumeMode, resumeSessionId, profileEnv, isPrimary, skipPermissions, onSessionReady, onClose }: {
+function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliCmd: cliCmdProp, cliType, workDir, preferredSessionName, existingSession, resumeMode, resumeSessionId, profileEnv, isPrimary, skipPermissions, persistentSession, onSessionReady, onClose }: {
   agentLabel: string;
   agentIcon: string;
   projectPath: string;
@@ -1789,6 +1789,7 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliC
   profileEnv?: Record<string, string>;
   isPrimary?: boolean;
   skipPermissions?: boolean;
+  persistentSession?: boolean;
   onSessionReady?: (name: string) => void;
   onClose: (killSession: boolean) => void;
 }) {
@@ -1997,19 +1998,21 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliC
               <button onClick={() => { setShowCloseDialog(false); onClose(false); }}
                 className="flex-1 px-3 py-1.5 text-[11px] rounded bg-[#2a2a4a] text-gray-300 hover:bg-[#3a3a5a] hover:text-white">
                 Suspend
-                <span className="block text-[9px] text-gray-500 mt-0.5">Session keeps running</span>
+                <span className="block text-[9px] text-gray-500 mt-0.5">Hide panel, session keeps running</span>
               </button>
-              <button onClick={() => {
-                setShowCloseDialog(false);
-                if (wsRef.current?.readyState === WebSocket.OPEN && sessionNameRef.current) {
-                  wsRef.current.send(JSON.stringify({ type: 'kill', sessionName: sessionNameRef.current }));
-                }
-                onClose(true);
-              }}
-                className="flex-1 px-3 py-1.5 text-[11px] rounded bg-red-500/20 text-red-400 hover:bg-red-500/30">
-                Kill Session
-                <span className="block text-[9px] text-red-400/60 mt-0.5">End session, back to auto</span>
-              </button>
+              {!persistentSession && (
+                <button onClick={() => {
+                  setShowCloseDialog(false);
+                  if (wsRef.current?.readyState === WebSocket.OPEN && sessionNameRef.current) {
+                    wsRef.current.send(JSON.stringify({ type: 'kill', sessionName: sessionNameRef.current }));
+                  }
+                  onClose(true);
+                }}
+                  className="flex-1 px-3 py-1.5 text-[11px] rounded bg-red-500/20 text-red-400 hover:bg-red-500/30">
+                  Kill Session
+                  <span className="block text-[9px] text-red-400/60 mt-0.5">End session permanently</span>
+                </button>
+              )}
             </div>
             <button onClick={() => setShowCloseDialog(false)}
               className="w-full mt-2 px-3 py-1 text-[10px] text-gray-500 hover:text-gray-300">
@@ -2156,9 +2159,10 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
           </div>
           <div className="flex items-center gap-1">
             {(() => {
-              const isActive = smithStatus === 'active';
-              const color = hasTmux ? '#3fb950' : (!isActive && config.persistentSession) ? '#f0883e' : '#484f58';
-              const label = hasTmux ? 'terminal' : (!isActive && config.persistentSession) ? 'terminal (pending)' : 'headless';
+              // Execution mode is determined by config, not tmux state
+              const isTerminalMode = config.persistentSession;
+              const color = isTerminalMode ? (hasTmux ? '#3fb950' : '#f0883e') : '#484f58';
+              const label = isTerminalMode ? (hasTmux ? 'terminal' : 'terminal (down)') : 'headless';
               return (<>
                 <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
                 <span className="text-[7px] font-medium" style={{ color }}>{label}</span>
@@ -2274,7 +2278,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
   const [memoryTarget, setMemoryTarget] = useState<{ id: string; label: string } | null>(null);
   const [inboxTarget, setInboxTarget] = useState<{ id: string; label: string } | null>(null);
   const [showBusPanel, setShowBusPanel] = useState(false);
-  const [floatingTerminals, setFloatingTerminals] = useState<{ agentId: string; label: string; icon: string; cliId: string; cliCmd?: string; cliType?: string; workDir?: string; tmuxSession?: string; sessionName: string; resumeMode?: boolean; resumeSessionId?: string; profileEnv?: Record<string, string>; isPrimary?: boolean; skipPermissions?: boolean }[]>([]);
+  const [floatingTerminals, setFloatingTerminals] = useState<{ agentId: string; label: string; icon: string; cliId: string; cliCmd?: string; cliType?: string; workDir?: string; tmuxSession?: string; sessionName: string; resumeMode?: boolean; resumeSessionId?: string; profileEnv?: Record<string, string>; isPrimary?: boolean; skipPermissions?: boolean; persistentSession?: boolean }[]>([]);
   const [termLaunchDialog, setTermLaunchDialog] = useState<{ agent: AgentConfig; sessName: string; workDir?: string; sessions: string[]; supportsSession?: boolean } | null>(null);
 
   // Expose focusAgent to parent
@@ -2408,7 +2412,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                   agentId: agent.id, label: agent.label, icon: agent.icon,
                   cliId: agent.agentId || 'claude', ...launchInfo, workDir,
                   tmuxSession: existingTmux, sessionName: sessName,
-                  isPrimary: agent.primary, skipPermissions: agent.skipPermissions !== false,
+                  isPrimary: agent.primary, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession,
                 }]);
                 return;
               }
@@ -2420,7 +2424,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                   agentId: agent.id, label: agent.label, icon: agent.icon,
                   cliId: agent.agentId || 'claude', ...launchInfo, workDir,
                   tmuxSession: res?.tmuxSession || sessName, sessionName: sessName,
-                  isPrimary: true, skipPermissions: agent.skipPermissions !== false,
+                  isPrimary: true, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession,
                 }]);
                 return;
               }
@@ -2797,7 +2801,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 cliCmd: res.cliCmd || 'claude',
                 cliType: res.cliType || 'claude-code',
                 workDir,
-                sessionName: sessName, resumeMode, resumeSessionId: sessionId, isPrimary: false, skipPermissions: agent.skipPermissions !== false,
+                sessionName: sessName, resumeMode, resumeSessionId: sessionId, isPrimary: false, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession,
                 profileEnv: {
                   ...(res.env || {}),
                   ...(res.model ? { CLAUDE_MODEL: res.model } : {}),
@@ -2830,6 +2834,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           profileEnv={ft.profileEnv}
           isPrimary={ft.isPrimary}
           skipPermissions={ft.skipPermissions}
+          persistentSession={ft.persistentSession}
           onSessionReady={(name) => {
             if (workspaceId) wsApi(workspaceId, 'set_tmux_session', { agentId: ft.agentId, sessionName: name });
             setFloatingTerminals(prev => prev.map(t => t.agentId === ft.agentId ? { ...t, tmuxSession: name } : t));

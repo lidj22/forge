@@ -1128,6 +1128,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
           }
         }
       }
+
+      // Check 6: persistentSession agent without tmux → auto-restart terminal
+      if (entry.config.persistentSession && !entry.state.tmuxSession) {
+        console.log(`[health] ${entry.config.label}: persistentSession but no tmux — restarting terminal`);
+        this.ensurePersistentSession(id, entry.config).catch(err => {
+          console.error(`[health] ${entry.config.label}: failed to restart terminal: ${err.message}`);
+        });
+      }
     }
 
     // ── Forge Agent: autonomous bus monitor ──
@@ -2134,9 +2142,18 @@ export class WorkspaceOrchestrator extends EventEmitter {
       const hasRunning = this.bus.getLog().some(m => m.to === agentId && m.status === 'running' && m.type !== 'ack');
       if (hasRunning) return;
 
-      // Has tmux session → will use terminal inject; otherwise need worker ready
-      const hasTmux = entry.state.tmuxSession && this.hasPersistentSession(agentId);
-      if (!hasTmux) {
+      // Execution path determined by config, not runtime tmux state
+      const isTerminalMode = entry.config.persistentSession;
+      if (isTerminalMode) {
+        // Terminal mode: need tmux session. If missing, skip this tick (health check will restart it)
+        if (!entry.state.tmuxSession) {
+          if (++debugTick % 15 === 0) {
+            console.log(`[inbox] ${entry.config.label}: terminal mode but no tmux session — waiting for auto-restart`);
+          }
+          return;
+        }
+      } else {
+        // Headless mode: need worker ready
         if (!entry.worker) {
           if (this.daemonActive) {
             console.log(`[inbox] ${entry.config.label}: no worker, recreating...`);
@@ -2208,8 +2225,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
         timestamp: new Date(nextMsg.timestamp).toISOString(),
       };
 
-      // Has tmux session → inject into terminal; otherwise → worker (claude -p)
-      if (hasTmux) {
+      // Terminal mode → inject; headless → worker (claude -p)
+      if (isTerminalMode) {
         const injected = this.injectIntoSession(agentId, nextMsg.payload.content || nextMsg.payload.action);
         if (injected) {
           this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '📺 Injected into terminal, monitoring for completion...', timestamp: new Date().toISOString() } } as any);
@@ -2217,16 +2234,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
           entry.state.currentMessageId = nextMsg.id;
           this.monitorTerminalCompletion(agentId, nextMsg.id, entry.state.tmuxSession!);
         } else {
-          // Terminal inject failed — fall back to worker
-          entry.state.tmuxSession = undefined; // clear dead session
-          if (entry.worker) {
-            entry.worker.setProcessingMessage(nextMsg.id);
-            entry.worker.wake({ type: 'bus_message', messages: [logEntry] });
-            this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '⚡ Executed via claude -p (terminal inject failed)', timestamp: new Date().toISOString() } } as any);
-          } else {
-            console.log(`[inbox] ${entry.config.label}: terminal inject failed, no worker — message stays pending`);
-            this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '⚠️ Terminal inject failed, no worker available — message stays pending', timestamp: new Date().toISOString() } } as any);
-          }
+          // Terminal inject failed — clear dead session, message stays pending
+          // Health check will auto-restart the terminal session
+          entry.state.tmuxSession = undefined;
+          nextMsg.status = 'pending' as any; // revert to pending for retry
+          this.emit('event', { type: 'bus_message_status', messageId: nextMsg.id, status: 'pending' } as any);
+          this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'warning', content: '⚠️ Terminal session down — waiting for auto-restart, message will retry', timestamp: new Date().toISOString() } } as any);
+          console.log(`[inbox] ${entry.config.label}: terminal inject failed, cleared session — waiting for health check restart`);
+          this.emitAgentsChanged();
         }
       } else {
         entry.worker!.setProcessingMessage(nextMsg.id);
