@@ -2054,10 +2054,15 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
             <span className="text-[7px]" style={{ color: smithInfo.color }}>{smithInfo.label}</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: hasTmux ? '#3fb950' : '#484f58' }} />
-            <span className="text-[7px] font-medium" style={{ color: hasTmux ? '#3fb950' : '#484f58' }}>
-              {hasTmux ? 'terminal' : 'headless'}
-            </span>
+            {(() => {
+              const isTerminal = hasTmux || config.persistentSession;
+              const color = hasTmux ? '#3fb950' : isTerminal ? '#f0883e' : '#484f58';
+              const label = hasTmux ? 'terminal' : isTerminal ? 'terminal (pending)' : 'headless';
+              return (<>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                <span className="text-[7px] font-medium" style={{ color }}>{label}</span>
+              </>);
+            })()}
           </div>
           <div className="flex items-center gap-1">
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: taskInfo.color, boxShadow: taskInfo.glow ? `0 0 4px ${taskInfo.color}` : 'none' }} />
