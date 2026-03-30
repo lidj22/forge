@@ -1,5 +1,5 @@
 ---
-description: Check and manage messages from other Forge Workspace agents (QA reports, review feedback, PM requests)
+description: "[FALLBACK — only use if MCP get_inbox tool is NOT available] Check messages from other Forge Workspace agents via HTTP API"
 ---
 
 # Forge Inbox

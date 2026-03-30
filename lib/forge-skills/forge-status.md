@@ -1,5 +1,5 @@
 ---
-description: Check the status of all agents in the Forge Workspace (who is running, done, waiting)
+description: "[FALLBACK — only use if MCP get_status tool is NOT available] Check agent statuses via HTTP API"
 ---
 
 # Forge Status

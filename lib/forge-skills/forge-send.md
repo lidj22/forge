@@ -1,5 +1,5 @@
 ---
-description: Send a message to another Forge Workspace agent immediately (notify QA of a fix, ask PM a question, etc.)
+description: "[FALLBACK — only use if MCP send_message tool is NOT available] Send a message to another Forge Workspace agent via HTTP API"
 ---
 
 # Forge Send
