@@ -206,8 +206,10 @@ function detectAgentLogChanges(workspaceId: string, targetAgentId: string, patte
   }
 }
 
+// Track which session file was used last (to detect file switch)
+const lastSessionFile = new Map<string, string>();
+
 function detectSessionChanges(projectPath: string, pattern: string | undefined, prevLineCount: number, contextChars = 500, sessionId?: string): { changes: WatchChange | null; lineCount: number } {
-  // Find session file for this project
   const claudeHome = join(homedir(), '.claude', 'projects');
   const encoded = projectPath.replace(/\//g, '-');
   const sessionDir = join(claudeHome, encoded);
@@ -217,11 +219,9 @@ function detectSessionChanges(projectPath: string, pattern: string | undefined, 
     let latestFile: string;
 
     if (sessionId) {
-      // Use specific session ID
       latestFile = join(sessionDir, `${sessionId}.jsonl`);
       if (!existsSync(latestFile)) return { changes: null, lineCount: prevLineCount };
     } else {
-      // Find most recently modified .jsonl file
       const files = readdirSync(sessionDir)
         .filter(f => f.endsWith('.jsonl'))
         .map(f => ({ name: f, mtime: statSync(join(sessionDir, f)).mtimeMs }))
@@ -229,7 +229,17 @@ function detectSessionChanges(projectPath: string, pattern: string | undefined, 
       if (files.length === 0) return { changes: null, lineCount: prevLineCount };
       latestFile = join(sessionDir, files[0].name);
     }
-    // Only read new bytes since last check (efficient for large 70MB+ files)
+    // Detect if session file changed (user started new session) → reset tracking
+    const cacheKey = `${projectPath}:${sessionId || 'latest'}`;
+    const prevFile = lastSessionFile.get(cacheKey);
+    if (prevFile && prevFile !== latestFile) {
+      // Session file switched — reset prevLineCount to read from start of new file
+      prevLineCount = 0;
+      console.log(`[watch] Session file switched: ${prevFile.split('/').pop()} → ${latestFile.split('/').pop()}`);
+    }
+    lastSessionFile.set(cacheKey, latestFile);
+
+    // Only read new bytes since last check (efficient for large files)
     const fd = openSync(latestFile, 'r');
     const fileSize = fstatSync(fd).size;
     if (fileSize <= prevLineCount) { closeSync(fd); return { changes: null, lineCount: fileSize }; }
