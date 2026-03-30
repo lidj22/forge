@@ -1596,29 +1596,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const causedBy = this.buildCausedBy(agentId, entry);
     const processedMsg = causedBy ? this.bus.getLog().find(m => m.id === causedBy.messageId) : null;
 
-    if (processedMsg) {
-      // Send result back to the original sender
-      const senderLabel = this.agents.get(processedMsg.from)?.config.label || processedMsg.from;
-      const replyContent = summary
-        ? `${entry.config.label} completed: ${summary.slice(0, 300)}`
-        : `${entry.config.label} completed processing your request.`;
-
-      // Only reply if sender is different from self and not the system
-      if (processedMsg.from !== agentId && processedMsg.from !== '_system') {
-        this.bus.send(agentId, processedMsg.from, 'notify', {
-          action: 'task_complete',
-          content: replyContent,
-          files,
-        }, { category: 'notification', causedBy });
-        console.log(`[bus] ${entry.config.label} → ${senderLabel}: sent completion reply`);
-      }
-
-      // Also broadcast to downstream
-      this.broadcastCompletion(agentId, causedBy);
-    } else {
-      // No triggering message — broadcast to all downstream
-      this.broadcastCompletion(agentId, causedBy);
-    }
+    // Broadcast completion to downstream agents (DAG-based)
+    // Reply to sender is NOT automatic — the agent itself decides
+    // whether to reply via check_outbox + send_message MCP tools.
+    this.broadcastCompletion(agentId, causedBy);
 
     this.emitWorkspaceStatus();
     this.checkWorkspaceComplete?.();
