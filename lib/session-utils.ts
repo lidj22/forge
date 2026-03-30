@@ -47,16 +47,3 @@ export async function getMcpFlag(projectPath: string): Promise<string> {
   return ` --mcp-config "${projectPath}/.forge/mcp.json"`;
 }
 
-/** Resolve FORGE env vars for a project (workspace ID + primary agent ID). */
-export async function getForgeEnvExports(projectPath: string): Promise<string> {
-  try {
-    const res = await fetch(`/api/workspace?projectPath=${encodeURIComponent(projectPath)}`);
-    const ws = await res.json();
-    if (!ws?.id) return '';
-    const primary = ws.agents?.find((a: any) => a.primary);
-    const agentId = primary?.id || '';
-    return `export FORGE_WORKSPACE_ID="${ws.id}" && export FORGE_AGENT_ID="${agentId}" && export FORGE_PORT="${window.location.port || 8403}" && `;
-  } catch {
-    return '';
-  }
-}

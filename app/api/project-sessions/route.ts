@@ -35,14 +35,27 @@ export async function POST(req: Request) {
   return NextResponse.json({ ok: true, projectPath, fixedSessionId });
 }
 
-/** Generate .forge/mcp.json in the project directory */
+/** Generate .forge/mcp.json in the project directory with workspace context baked in */
 function ensureMcpConfig(projectPath: string): void {
   try {
     const forgeDir = join(projectPath, '.forge');
     const configPath = join(forgeDir, 'mcp.json');
-    if (existsSync(configPath)) return; // already exists
     const mcpPort = Number(process.env.MCP_PORT) || 7830;
-    const config = { mcpServers: { forge: { url: `http://localhost:${mcpPort}/sse` } } };
+
+    // Resolve workspace + primary agent for this project
+    let wsParam = '';
+    try {
+      const { findWorkspaceByProject } = require('@/lib/workspace');
+      const ws = findWorkspaceByProject(projectPath);
+      if (ws) {
+        const primary = ws.agents?.find((a: any) => a.primary);
+        wsParam = `?workspaceId=${ws.id}${primary ? `&agentId=${primary.id}` : ''}`;
+      }
+    } catch {}
+
+    const config = { mcpServers: { forge: { url: `http://localhost:${mcpPort}/sse${wsParam}` } } };
+
+    // Always rewrite (workspace context may have changed)
     mkdirSync(forgeDir, { recursive: true });
     writeFileSync(configPath, JSON.stringify(config, null, 2));
   } catch {}

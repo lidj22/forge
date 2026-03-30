@@ -1,9 +1,15 @@
 /**
  * Forge MCP Server — agent communication bus via Model Context Protocol.
- * Replaces HTTP-based forge-send/forge-inbox/forge-status skills.
  *
- * Claude Code connects via: --mcp-config pointing to this server.
- * Agents call tools like send_message(), get_inbox(), get_status() instead of curl.
+ * Each Claude Code session connects with context baked into the SSE URL:
+ *   http://localhost:7830/sse?workspaceId=xxx&agentId=yyy
+ *
+ * The agent doesn't need to know IDs. It just calls:
+ *   send_message(to: "Reviewer", content: "fixed the bug")
+ *   get_inbox()
+ *   get_status()
+ *
+ * Forge resolves everything from the connection context.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -23,13 +29,23 @@ function getOrch(workspaceId: string): any {
   return _getOrchestrator(workspaceId);
 }
 
+// Per-session context (resolved from SSE URL params)
+interface SessionContext {
+  workspaceId: string;
+  agentId: string;
+}
+const sessionContexts = new Map<string, SessionContext>();
+
 // ─── MCP Server Definition ──────────────────────────────
 
-function createForgeMcpServer(): McpServer {
+function createForgeMcpServer(sessionId: string): McpServer {
   const server = new McpServer({
     name: 'forge',
     version: '1.0.0',
   });
+
+  // Helper: get context for this session
+  const ctx = () => sessionContexts.get(sessionId) || { workspaceId: '', agentId: '' };
 
   // ── send_message ──────────────────────────
   server.tool(
@@ -40,29 +56,22 @@ function createForgeMcpServer(): McpServer {
       content: z.string().describe('Message content'),
       action: z.string().optional().describe('Message type: fix_request, update_notify, question, review, info_request'),
     },
-    async (params, extra) => {
+    async (params) => {
       const { to, content, action = 'update_notify' } = params;
-      // Agent ID and workspace ID from client metadata (set via env vars)
-      const agentId = (extra as any)?.agentId || process.env.FORGE_AGENT_ID || '';
-      const workspaceId = (extra as any)?.workspaceId || process.env.FORGE_WORKSPACE_ID || '';
-      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace ID. Set FORGE_WORKSPACE_ID env var.' }] };
+      const { workspaceId, agentId } = ctx();
+      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace context. MCP URL missing workspaceId.' }] };
 
       try {
         const orch = getOrch(workspaceId);
-        // Find target agent by label
         const snapshot = orch.getSnapshot();
         const target = snapshot.agents.find((a: any) =>
           a.label.toLowerCase() === to.toLowerCase() || a.id === to
         );
         if (!target) {
-          return { content: [{ type: 'text', text: `Error: Agent "${to}" not found. Available: ${snapshot.agents.map((a: any) => a.label).join(', ')}` }] };
+          return { content: [{ type: 'text', text: `Agent "${to}" not found. Available: ${snapshot.agents.filter((a: any) => a.type !== 'input').map((a: any) => a.label).join(', ')}` }] };
         }
 
-        orch.getBus().send(agentId, target.id, 'notify', {
-          action,
-          content,
-        });
-
+        orch.getBus().send(agentId, target.id, 'notify', { action, content });
         return { content: [{ type: 'text', text: `Message sent to ${target.label}` }] };
       } catch (err: any) {
         return { content: [{ type: 'text', text: `Error: ${err.message}` }] };
@@ -75,10 +84,9 @@ function createForgeMcpServer(): McpServer {
     'get_inbox',
     'Check inbox messages from other agents',
     {},
-    async (_params, extra) => {
-      const agentId = (extra as any)?.agentId || process.env.FORGE_AGENT_ID || '';
-      const workspaceId = (extra as any)?.workspaceId || process.env.FORGE_WORKSPACE_ID || '';
-      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace ID' }] };
+    async () => {
+      const { workspaceId, agentId } = ctx();
+      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace context' }] };
 
       try {
         const orch = getOrch(workspaceId);
@@ -111,15 +119,13 @@ function createForgeMcpServer(): McpServer {
     {
       message_id: z.string().describe('Message ID (first 8 chars or full UUID)'),
     },
-    async (params, extra) => {
-      const agentId = (extra as any)?.agentId || process.env.FORGE_AGENT_ID || '';
-      const workspaceId = (extra as any)?.workspaceId || process.env.FORGE_WORKSPACE_ID || '';
-      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace ID' }] };
+    async (params) => {
+      const { workspaceId, agentId } = ctx();
+      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace context' }] };
 
       try {
         const orch = getOrch(workspaceId);
-        const bus = orch.getBus();
-        const msg = bus.getLog().find((m: any) =>
+        const msg = orch.getBus().getLog().find((m: any) =>
           (m.id === params.message_id || m.id.startsWith(params.message_id)) && m.to === agentId
         );
         if (!msg) return { content: [{ type: 'text', text: 'Message not found' }] };
@@ -137,9 +143,9 @@ function createForgeMcpServer(): McpServer {
     'get_status',
     'Get status of all agents in the workspace',
     {},
-    async (_params, extra) => {
-      const workspaceId = (extra as any)?.workspaceId || process.env.FORGE_WORKSPACE_ID || '';
-      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace ID' }] };
+    async () => {
+      const { workspaceId } = ctx();
+      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace context' }] };
 
       try {
         const orch = getOrch(workspaceId);
@@ -171,17 +177,15 @@ function createForgeMcpServer(): McpServer {
       summary: z.string().describe('Brief summary of what you accomplished'),
       files: z.array(z.string()).optional().describe('List of files changed'),
     },
-    async (params, extra) => {
-      const agentId = (extra as any)?.agentId || process.env.FORGE_AGENT_ID || '';
-      const workspaceId = (extra as any)?.workspaceId || process.env.FORGE_WORKSPACE_ID || '';
-      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace ID' }] };
+    async (params) => {
+      const { workspaceId, agentId } = ctx();
+      if (!workspaceId) return { content: [{ type: 'text', text: 'Error: No workspace context' }] };
 
       try {
         const orch = getOrch(workspaceId);
         const entry = orch.getSnapshot().agents.find((a: any) => a.id === agentId);
         if (!entry) return { content: [{ type: 'text', text: 'Agent not found in workspace' }] };
 
-        // Emit as done event
         orch.completeManualAgent(agentId, params.files || []);
 
         return { content: [{ type: 'text', text: `Progress synced: ${params.summary}` }] };
@@ -215,14 +219,21 @@ export async function startMcpServer(port: number): Promise<void> {
       const sessionId = transport.sessionId;
       transports.set(sessionId, transport);
 
+      // Extract workspace context from URL params
+      const workspaceId = url.searchParams.get('workspaceId') || '';
+      const agentId = url.searchParams.get('agentId') || '';
+      sessionContexts.set(sessionId, { workspaceId, agentId });
+
       transport.onclose = () => {
         transports.delete(sessionId);
+        sessionContexts.delete(sessionId);
       };
 
-      // Each session gets a fresh MCP server
-      const server = createForgeMcpServer();
+      // Each session gets its own MCP server with context
+      const server = createForgeMcpServer(sessionId);
       await server.connect(transport);
-      console.log(`[forge-mcp] Client connected: ${sessionId}`);
+      const agentLabel = workspaceId ? (getOrch(workspaceId)?.getSnapshot()?.agents?.find((a: any) => a.id === agentId)?.label || agentId) : 'unknown';
+      console.log(`[forge-mcp] Client connected: ${agentLabel} (ws=${workspaceId.slice(0, 8)}, session=${sessionId})`);
       return;
     }
 

@@ -1733,7 +1733,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
             const mcpConfig = {
               mcpServers: {
                 forge: {
-                  url: `http://localhost:${mcpPort}/sse`,
+                  url: `http://localhost:${mcpPort}/sse?workspaceId=${this.workspaceId}&agentId=${config.id}`,
                 },
               },
             };
@@ -1746,13 +1746,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
           }
         }
 
-        // Set agent env vars for MCP context
-        const agentEnv = `export FORGE_AGENT_ID="${config.id}" && export FORGE_WORKSPACE_ID="${this.workspaceId}" && export FORGE_PORT="${Number(process.env.PORT) || 8403}"`;
-
         execSync(`tmux new-session -d -s "${sessionName}" -c "${workDir}"`, { timeout: 5000 });
 
-        // Build CLI start command
-        const parts: string[] = [agentEnv];
+        // Build CLI start command (no FORGE env vars needed — MCP URL carries context)
+        const parts: string[] = [];
         if (envExports) parts.push(envExports.replace(/ && $/, ''));
         let cmd = cliCmd;
 
