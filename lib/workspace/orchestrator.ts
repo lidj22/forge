@@ -1173,13 +1173,23 @@ export class WorkspaceOrchestrator extends EventEmitter {
         }
       }
 
-      // Case 3: Pending too long (>2min) → agent not consuming
+      // Case 3: Pending too long (>2min) → try to restart message loop
       if (msg.status === 'pending') {
         const age = now - msg.timestamp;
         if (age > 120_000 && !this.forgeActedMessages.has(`pending-${msg.id}`)) {
           const targetEntry = this.agents.get(msg.to);
           const targetLabel = targetEntry?.config.label || msg.to;
-          console.log(`[forge-agent] Warning: ${targetLabel} has pending message ${msg.id.slice(0, 8)} for ${Math.round(age / 60000)}min`);
+
+          // If agent is active but not running a task, restart message loop
+          if (targetEntry && targetEntry.state.smithStatus === 'active' && targetEntry.state.taskStatus !== 'running') {
+            if (!this.messageLoopTimers.has(msg.to)) {
+              this.startMessageLoop(msg.to);
+              console.log(`[forge-agent] Restarted message loop for ${targetLabel} (pending ${Math.round(age / 60000)}min)`);
+            } else {
+              console.log(`[forge-agent] ${targetLabel} has pending message ${msg.id.slice(0, 8)} for ${Math.round(age / 60000)}min — loop running but not consuming`);
+            }
+          }
+
           this.emit('event', { type: 'log', agentId: msg.to, entry: { type: 'system', subtype: 'warning', content: `Pending message from ${this.agents.get(msg.from)?.config.label || msg.from} waiting for ${Math.round(age / 60000)}min`, timestamp: new Date().toISOString() } } as any);
           this.forgeActedMessages.add(`pending-${msg.id}`);
         }
