@@ -11,7 +11,8 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import type {
   WorkspaceAgentConfig,
@@ -1103,23 +1104,39 @@ export class WorkspaceOrchestrator extends EventEmitter {
         return;
       }
 
-      // Skip if target already has a pending/running message from this watch
+      const prompt = entry.config.watch?.prompt || 'Watch detected changes, please review:';
+      const message = `${prompt}\n\n${summary}`;
+
+      // If target has an open terminal (manual mode), inject directly into session
+      if (targetEntry.state.tmuxSession && targetEntry.state.mode === 'manual') {
+        try {
+          const tmpFile = `/tmp/forge-watch-${Date.now()}.txt`;
+          writeFileSync(tmpFile, message);
+          execSync(`tmux load-buffer ${tmpFile}`, { timeout: 5000 });
+          execSync(`tmux paste-buffer -t "${targetEntry.state.tmuxSession}"`, { timeout: 5000 });
+          execSync(`tmux send-keys -t "${targetEntry.state.tmuxSession}" Enter`, { timeout: 5000 });
+          try { unlinkSync(tmpFile); } catch {}
+          console.log(`[watch] ${entry.config.label} → ${targetEntry.config.label}: injected into terminal session`);
+        } catch (err: any) {
+          console.error(`[watch] Terminal inject failed: ${err.message}, falling back to bus`);
+          this.bus.send(agentId, targetId, 'notify', { action: 'watch_alert', content: message });
+        }
+        return;
+      }
+
+      // No terminal open — send via bus (will start new session)
       const hasPendingFromWatch = this.bus.getLog().some(m =>
         m.from === agentId && m.to === targetId &&
         (m.status === 'pending' || m.status === 'running' || m.status === 'pending_approval') &&
         m.type !== 'ack'
       );
       if (hasPendingFromWatch) {
-        console.log(`[watch] ${entry.config.label}: skipping send — target ${targetEntry.config.label} still processing previous message`);
+        console.log(`[watch] ${entry.config.label}: skipping bus send — target still processing`);
         return;
       }
 
-      const prompt = entry.config.watch?.prompt || 'Watch detected changes, please review:';
-      this.bus.send(agentId, targetId, 'notify', {
-        action: 'watch_alert',
-        content: `${prompt}\n\n${summary}`,
-      });
-      console.log(`[watch] ${entry.config.label} → ${targetEntry.config.label}: sent watch alert`);
+      this.bus.send(agentId, targetId, 'notify', { action: 'watch_alert', content: message });
+      console.log(`[watch] ${entry.config.label} → ${targetEntry.config.label}: sent via bus`);
     }
   }
 
