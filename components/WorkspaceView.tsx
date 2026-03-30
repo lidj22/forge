@@ -2109,13 +2109,14 @@ interface AgentNodeData {
   onShowMemory: () => void;
   onShowInbox: () => void;
   onOpenTerminal: () => void;
+  onSwitchSession: () => void;
   inboxPending?: number;
   inboxFailed?: number;
   [key: string]: unknown;
 }
 
 function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
-  const { config, state, colorIdx, previewLines, onRun, onPause, onStop, onRetry, onEdit, onRemove, onMessage, onApprove, onShowLog, onShowMemory, onShowInbox, onOpenTerminal, inboxPending = 0, inboxFailed = 0 } = data;
+  const { config, state, colorIdx, previewLines, onRun, onPause, onStop, onRetry, onEdit, onRemove, onMessage, onApprove, onShowLog, onShowMemory, onShowInbox, onOpenTerminal, onSwitchSession, inboxPending = 0, inboxFailed = 0 } = data;
   const c = COLORS[colorIdx % COLORS.length];
   const smithStatus = state?.smithStatus || 'down';
   const taskStatus = state?.taskStatus || 'idle';
@@ -2223,8 +2224,14 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
         )}
         <div className="flex-1" />
         {taskStatus !== 'running' && (
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onOpenTerminal(); }}
-            className="text-[9px] text-gray-600 hover:text-green-400 px-1" title="Open terminal">⌨️</button>
+          <span className="flex items-center">
+            <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onOpenTerminal(); }}
+              className="text-[9px] text-gray-600 hover:text-green-400 px-1" title="Open terminal">⌨️</button>
+            {hasTmux && !config.primary && (
+              <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onSwitchSession(); }}
+                className="text-[7px] text-gray-600 hover:text-yellow-400 -ml-1" title="Switch session">▾</button>
+            )}
+          </span>
         )}
         <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onShowInbox(); }}
           className="text-[9px] text-gray-600 hover:text-orange-400 px-1" title="Messages (inbox/outbox)">📨</button>
@@ -2431,6 +2438,18 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
 
               // Show launch dialog with resolved info
               setTermLaunchDialog({ agent, sessName, workDir, sessions: [], supportsSession });
+            },
+            onSwitchSession: async () => {
+              if (!workspaceId) return;
+              // Close existing terminal
+              setFloatingTerminals(prev => prev.filter(t => t.agentId !== agent.id));
+              if (agent.id) wsApi(workspaceId, 'close_terminal', { agentId: agent.id });
+              // Show launch dialog
+              const safeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
+              const sessName = `mw-forge-${safeName(projectName)}-${safeName(agent.label)}`;
+              const workDir = agent.workDir && agent.workDir !== './' && agent.workDir !== '.' ? agent.workDir : undefined;
+              const resolveRes = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id, resolveOnly: true }).catch(() => ({})) as any;
+              setTermLaunchDialog({ agent, sessName, workDir, sessions: [], supportsSession: resolveRes?.supportsSession ?? true });
             },
           } satisfies AgentNodeData,
         };
