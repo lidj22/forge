@@ -120,7 +120,9 @@ export default function SessionView({
       loadTree(true);
     }
     loadWatchers();
-    loadBoundSessions();
+    // Defer bound session loading to avoid blocking initial render
+    const t = setTimeout(loadBoundSessions, 500);
+    return () => clearTimeout(t);
   }, [loadTree, loadWatchers, loadBoundSessions, singleProject]);
 
   // Auto-expand project if only one or if pre-selected

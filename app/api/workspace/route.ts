@@ -6,21 +6,26 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-/** Auto-bind fixedSessionId for primary agent if missing */
+/** Auto-bind fixedSessionId for primary agent if missing. Cached to avoid repeated fs scans. */
+const bindCache = new Map<string, number>(); // wsId → timestamp of last check
+const BIND_CACHE_TTL = 30_000; // 30s
+
 function ensureSessionBound(ws: WorkspaceState): boolean {
   const primary = ws.agents.find((a: any) => a.primary && a.persistentSession && !a.fixedSessionId);
   if (!primary) return false;
+  // Skip if recently checked
+  const lastCheck = bindCache.get(ws.id);
+  if (lastCheck && Date.now() - lastCheck < BIND_CACHE_TTL) return false;
+  bindCache.set(ws.id, Date.now());
   try {
     const workDir = primary.workDir && primary.workDir !== './' && primary.workDir !== '.' ? `${ws.projectPath}/${primary.workDir}` : ws.projectPath;
     const dir = join(homedir(), '.claude', 'projects', workDir.replace(/\//g, '-'));
     if (!existsSync(dir)) return false;
     const files = readdirSync(dir).filter(f => f.endsWith('.jsonl'));
     if (files.length === 0) return false;
-    // Exclude sessions already bound to other agents
     const boundIds = new Set(ws.agents.filter((a: any) => a.fixedSessionId).map((a: any) => a.fixedSessionId));
     const available = files.filter(f => !boundIds.has(f.replace('.jsonl', '')));
     if (available.length === 0) return false;
-    // Pick latest by mtime
     const sorted = available.map(f => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime);
     (primary as any).fixedSessionId = sorted[0].name.replace('.jsonl', '');
     return true;
