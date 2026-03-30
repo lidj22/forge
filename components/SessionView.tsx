@@ -58,8 +58,8 @@ export default function SessionView({
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Map<string, Set<string>>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
-  // Workspace bound session: { projectPath → fixedSessionId }
-  const [boundSessions, setBoundSessions] = useState<Record<string, string>>({});
+  // Workspace bound session info per project
+  const [boundSessions, setBoundSessions] = useState<Record<string, { sessionId: string; workspaceId: string; agentId: string }>>({});
 
   // Load cached sessions tree
   const loadTree = useCallback(async (force = false) => {
@@ -93,14 +93,20 @@ export default function SessionView({
       const listRes = await fetch('/api/workspace');
       const summaries = await listRes.json();
       if (!Array.isArray(summaries)) return;
-      const bound: Record<string, string> = {};
+      const bound: Record<string, { sessionId: string; workspaceId: string; agentId: string }> = {};
       await Promise.all(summaries.map(async (s: any) => {
         try {
           const wsRes = await fetch(`/api/workspace?projectPath=${encodeURIComponent(s.projectPath)}`);
           const ws = await wsRes.json();
           if (ws?.agents) {
-            const primary = ws.agents.find((a: any) => a.primary && a.fixedSessionId);
-            if (primary) bound[ws.projectName] = primary.fixedSessionId;
+            const primary = ws.agents.find((a: any) => a.primary);
+            if (primary) {
+              bound[ws.projectName] = {
+                sessionId: primary.fixedSessionId || '',
+                workspaceId: ws.id,
+                agentId: primary.id,
+              };
+            }
           }
         } catch {}
       }));
@@ -431,6 +437,32 @@ export default function SessionView({
                       {/* Hover actions — hide in batch mode */}
                       {!batchMode && (
                         <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                          {/* Bind / unbind session */}
+                          {boundSessions[project] && boundSessions[project].sessionId !== s.sessionId && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const b = boundSessions[project];
+                                try {
+                                  const wsRes = await fetch(`/api/workspace?projectPath=${encodeURIComponent(projects.find(p => p.name === project)?.path || '')}`);
+                                  const ws = await wsRes.json();
+                                  const primary = ws?.agents?.find((a: any) => a.id === b.agentId);
+                                  if (primary) {
+                                    primary.fixedSessionId = s.sessionId;
+                                    await fetch(`/api/workspace/${b.workspaceId}/smith`, {
+                                      method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'update', agentId: b.agentId, config: primary }),
+                                    });
+                                    setBoundSessions(prev => ({ ...prev, [project]: { ...prev[project], sessionId: s.sessionId } }));
+                                  }
+                                } catch {}
+                              }}
+                              className="text-[8px] px-1 py-0.5 rounded bg-[#f0883e]/10 text-[#f0883e] hover:bg-[#f0883e]/20"
+                              title="Set as primary bound session"
+                            >
+                              bind
+                            </button>
+                          )}
                           <button
                             onClick={(e) => { e.stopPropagation(); createMonitorTask(project, s.sessionId); }}
                             className="text-[8px] px-1 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
@@ -450,7 +482,7 @@ export default function SessionView({
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[8px] text-[var(--text-secondary)] font-mono">{s.sessionId.slice(0, 8)}</span>
-                      {boundSessions[project] === s.sessionId && (
+                      {boundSessions[project]?.sessionId === s.sessionId && (
                         <span className="text-[7px] px-1 py-0 rounded bg-[#f0883e]/20 text-[#f0883e] font-medium">bound</span>
                       )}
                       {s.gitBranch && <span className="text-[8px] text-[var(--accent)]">{s.gitBranch}</span>}
