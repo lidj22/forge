@@ -2361,10 +2361,8 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
             inboxFailed: busLog.filter(m => m.to === agent.id && m.status === 'failed' && m.type !== 'ack').length,
             onOpenTerminal: async () => {
               if (!workspaceId) return;
-              // Use current state via setState callback to avoid stale closure
-              let alreadyOpen = false;
-              setFloatingTerminals(prev => { alreadyOpen = prev.some(t => t.agentId === agent.id); return prev; });
-              if (alreadyOpen) return;
+              // If terminal already open for this agent, close it first (config may have changed)
+              setFloatingTerminals(prev => prev.filter(t => t.agentId !== agent.id));
 
               const agentState = states[agent.id];
               const existingTmux = agentState?.tmuxSession;
