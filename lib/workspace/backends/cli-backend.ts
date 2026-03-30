@@ -115,6 +115,27 @@ export class CliBackend implements AgentBackend {
     // Use adapter to build spawn command (same as task-manager)
     // Model priority: workspace config > profile config > adapter default
     const effectiveModel = config.model || (adapter.config as any).model;
+
+    // If no session ID, try to find the latest session for this project (resume context)
+    if (!this.sessionId) {
+      try {
+        const nodefs = await import('node:fs');
+        const nodepath = await import('node:path');
+        const nodeos = await import('node:os');
+        const encoded = projectPath.replace(/\//g, '-');
+        const sessionDir = nodepath.join(nodeos.homedir(), '.claude', 'projects', encoded);
+        const files = nodefs.readdirSync(sessionDir)
+          .filter(f => f.endsWith('.jsonl'))
+          .map(f => ({ name: f, mtime: nodefs.statSync(nodepath.join(sessionDir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        if (files[0]) {
+          this.sessionId = files[0].name.replace('.jsonl', '');
+          console.log(`[cli-backend] No sessionId, using latest: ${this.sessionId.slice(0, 8)}`);
+          if (this.onSessionId) this.onSessionId(this.sessionId);
+        }
+      } catch {}
+    }
+
     const spawnOpts = adapter.buildTaskSpawn({
       projectPath,
       prompt,
