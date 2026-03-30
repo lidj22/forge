@@ -19,9 +19,14 @@ If MCP tools are available:
 
 ### Option 2: HTTP API (fallback)
 
-Check status (uses $FORGE_WORKSPACE_ID env var):
+Step 1 — Get workspace ID (env var first, then API fallback):
 ```bash
-curl -s -X POST "http://localhost:8403/api/workspace/$FORGE_WORKSPACE_ID/smith" -H "Content-Type: application/json" -d '{"action":"status","agentId":"'"$FORGE_AGENT_ID"'"}'
+WS_ID="${FORGE_WORKSPACE_ID:-$(curl -s "http://localhost:8405/resolve?projectPath=$(pwd)" | python3 -c "import sys,json; print(json.load(sys.stdin).get('workspaceId',''))" 2>/dev/null)}"
+```
+
+Step 2 — Check status:
+```bash
+curl -s -X POST "http://localhost:8403/api/workspace/$WS_ID/smith" -H "Content-Type: application/json" -d '{"action":"status","agentId":"'"$FORGE_AGENT_ID"'"}'
 ```
 
 Present the results as a clear status overview.

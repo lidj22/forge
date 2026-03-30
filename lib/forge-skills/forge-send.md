@@ -25,14 +25,15 @@ send_message(to: "TARGET_LABEL", content: "YOUR MESSAGE", action: "ACTION")
 
 ### Option 2: HTTP API (fallback if MCP not available)
 
-Step 1 — Get workspace ID (already set as env var):
+Step 1 — Get workspace ID (env var first, then API fallback):
 ```bash
-echo "$FORGE_WORKSPACE_ID"
+WS_ID="${FORGE_WORKSPACE_ID:-$(curl -s "http://localhost:8405/resolve?projectPath=$(pwd)" | python3 -c "import sys,json; print(json.load(sys.stdin).get('workspaceId',''))" 2>/dev/null)}"
+echo "$WS_ID"
 ```
 
-Step 2 — Send message (use $FORGE_WORKSPACE_ID directly):
+Step 2 — Send message:
 ```bash
-curl -s -X POST "http://localhost:8403/api/workspace/$FORGE_WORKSPACE_ID/smith" -H "Content-Type: application/json" -d '{"action":"send","agentId":"'"$FORGE_AGENT_ID"'","to":"TARGET_LABEL","msgAction":"ACTION","content":"YOUR MESSAGE"}'
+curl -s -X POST "http://localhost:8403/api/workspace/$WS_ID/smith" -H "Content-Type: application/json" -d '{"action":"send","agentId":"'"$FORGE_AGENT_ID"'","to":"TARGET_LABEL","msgAction":"ACTION","content":"YOUR MESSAGE"}'
 ```
 
 Replace:

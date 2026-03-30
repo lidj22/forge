@@ -17,7 +17,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { WorkspaceOrchestrator, type OrchestratorEvent } from './workspace/orchestrator';
-import { loadWorkspace, saveWorkspace } from './workspace/persistence';
+import { loadWorkspace, saveWorkspace, findWorkspaceByProject } from './workspace/persistence';
 import { installForgeSkills, applyProfileToProject } from './workspace/skill-installer';
 import {
   loadMemory, formatMemoryForDisplay, getMemoryStats,
@@ -739,6 +739,28 @@ const server = createServer(async (req, res) => {
         maxActive: MAX_ACTIVE,
         uptime: Math.floor((Date.now() - startTime) / 1000),
       });
+    }
+
+    // Resolve projectPath → workspaceId + agentId (walks up directories)
+    if (path === '/resolve' && method === 'GET') {
+      const projectPath = query.get('projectPath') || '';
+      if (!projectPath) return jsonError(res, 'projectPath required');
+      // Walk up directories to find workspace
+      let dir = projectPath;
+      while (dir && dir !== '/') {
+        const ws = findWorkspaceByProject(dir);
+        if (ws) {
+          const primary = ws.agents?.find((a: any) => a.primary);
+          return json(res, {
+            workspaceId: ws.id,
+            projectPath: ws.projectPath,
+            projectName: ws.projectName,
+            primaryAgentId: primary?.id || null,
+          });
+        }
+        dir = dir.replace(/\/[^/]+$/, '') || '/';
+      }
+      return json(res, { workspaceId: null });
     }
 
     // Active workspaces

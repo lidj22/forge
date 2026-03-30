@@ -20,14 +20,19 @@ If MCP tools are available, use them directly:
 
 ### Option 2: HTTP API (fallback)
 
-Check inbox (uses $FORGE_WORKSPACE_ID env var):
+Step 1 — Get workspace ID (env var first, then API fallback):
 ```bash
-curl -s -X POST "http://localhost:8403/api/workspace/$FORGE_WORKSPACE_ID/smith" -H "Content-Type: application/json" -d '{"action":"inbox","agentId":"'"$FORGE_AGENT_ID"'"}'
+WS_ID="${FORGE_WORKSPACE_ID:-$(curl -s "http://localhost:8405/resolve?projectPath=$(pwd)" | python3 -c "import sys,json; print(json.load(sys.stdin).get('workspaceId',''))" 2>/dev/null)}"
+```
+
+Step 2 — Check inbox:
+```bash
+curl -s -X POST "http://localhost:8403/api/workspace/$WS_ID/smith" -H "Content-Type: application/json" -d '{"action":"inbox","agentId":"'"$FORGE_AGENT_ID"'"}'
 ```
 
 ## Mark message as done
 ```bash
-curl -s -X POST "http://localhost:8403/api/workspace/$FORGE_WORKSPACE_ID/smith" -H "Content-Type: application/json" -d '{"action":"message_done","agentId":"'"$FORGE_AGENT_ID"'","messageId":"MESSAGE_ID"}'
+curl -s -X POST "http://localhost:8403/api/workspace/$WS_ID/smith" -H "Content-Type: application/json" -d '{"action":"message_done","agentId":"'"$FORGE_AGENT_ID"'","messageId":"MESSAGE_ID"}'
 ```
 
 After handling a message, always mark it as done or failed.
