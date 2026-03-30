@@ -1140,8 +1140,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
     for (const msg of log) {
       if (msg.type === 'ack' || msg.from === '_forge') continue;
       if (this.forgeActedMessages.has(msg.id)) continue;
-      // Skip messages from before daemon start (don't act on history)
-      if (msg.timestamp < this.forgeAgentStartTime) continue;
+      // Skip old done/failed messages (avoid re-notifying on history)
+      // But DO process old pending/pending_approval/running (need cleanup)
+      if (msg.timestamp < this.forgeAgentStartTime && (msg.status === 'done' || msg.status === 'failed')) continue;
 
       // Case 1: Message done but no reply from target → ask target to send summary
       if (msg.status === 'done') {
