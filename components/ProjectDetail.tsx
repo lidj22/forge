@@ -405,6 +405,10 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
     fetchGitInfo();
     fetchTree();
     // Fetch project-level fixed session
+    fetchBoundSession();
+  }, [projectPath, fetchGitInfo, fetchTree]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchBoundSession = useCallback(() => {
     fetch(`/api/project-sessions?projectPath=${encodeURIComponent(projectPath)}`)
       .then(r => r.json())
       .then(data => {
@@ -412,7 +416,14 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
         else setBoundSession(null);
       })
       .catch(() => {});
-  }, [projectPath, fetchGitInfo, fetchTree]);
+  }, [projectPath]);
+
+  // Listen for session binding changes (from SessionView or other components)
+  useEffect(() => {
+    const handler = () => fetchBoundSession();
+    window.addEventListener('forge:session-bound', handler);
+    return () => window.removeEventListener('forge:session-bound', handler);
+  }, [fetchBoundSession]);
 
   // Lazy load tab-specific data only when switching to that tab
   useEffect(() => {
@@ -504,6 +515,7 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
                           body: JSON.stringify({ projectPath, fixedSessionId: s.id }),
                         });
                         setBoundSession({ sessionId: s.id });
+                        window.dispatchEvent(new Event('forge:session-bound'));
                       } catch {}
                       setShowSessionPicker(false);
                     }}

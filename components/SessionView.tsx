@@ -440,6 +440,7 @@ export default function SessionView({
                                 });
                                 if (res.ok) {
                                   setBoundSessions(prev => ({ ...prev, [project]: { sessionId: s.sessionId } }));
+                                  window.dispatchEvent(new Event('forge:session-bound'));
                                 } else {
                                   console.error('[bind] Failed:', await res.text());
                                 }
