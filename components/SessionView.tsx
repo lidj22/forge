@@ -432,14 +432,17 @@ export default function SessionView({
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 const pp = projects.find(p => p.name === project)?.path || '';
-                                try {
-                                  await fetch('/api/project-sessions', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ projectPath: pp, fixedSessionId: s.sessionId }),
-                                  });
+                                if (!pp) { console.error('[bind] No project path found for:', project); return; }
+                                const res = await fetch('/api/project-sessions', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ projectPath: pp, fixedSessionId: s.sessionId }),
+                                });
+                                if (res.ok) {
                                   setBoundSessions(prev => ({ ...prev, [project]: { sessionId: s.sessionId } }));
-                                } catch {}
+                                } else {
+                                  console.error('[bind] Failed:', await res.text());
+                                }
                               }}
                               className="text-[8px] px-1 py-0.5 rounded bg-[#f0883e]/10 text-[#f0883e] hover:bg-[#f0883e]/20"
                               title="Set as fixed session for this project"
