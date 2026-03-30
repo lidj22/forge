@@ -686,7 +686,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
               disabled={isPrimary}
               className={`accent-[#3fb950] ${isPrimary ? 'opacity-50 cursor-not-allowed' : ''}`} />
             <label htmlFor="persistentSession" className={`text-[9px] text-gray-400 ${isPrimary ? 'opacity-50' : ''}`}>
-              Keep terminal session alive {isPrimary && '(forced for primary agent)'}
+              Terminal mode {isPrimary ? '(required for primary)' : '— run in terminal instead of headless (claude -p)'}
             </label>
           </div>
           {persistentSession && (
