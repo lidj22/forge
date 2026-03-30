@@ -13,6 +13,7 @@ import '@xyflow/react/dist/style.css';
 interface AgentConfig {
   id: string; label: string; icon: string; role: string;
   type?: 'agent' | 'input';
+  primary?: boolean;
   content?: string;
   entries?: { content: string; timestamp: number }[];
   backend: 'api' | 'cli';
@@ -405,7 +406,8 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
     (initial.steps || []).map(s => `${s.label}: ${s.prompt}`).join('\n') || ''
   );
   const [requiresApproval, setRequiresApproval] = useState(initial.requiresApproval || false);
-  const [persistentSession, setPersistentSession] = useState(initial.persistentSession || false);
+  const isPrimary = initial.primary || false;
+  const [persistentSession, setPersistentSession] = useState(initial.persistentSession || isPrimary || false);
   const [skipPermissions, setSkipPermissions] = useState(initial.skipPermissions !== false);
   const [watchEnabled, setWatchEnabled] = useState(initial.watch?.enabled || false);
   const [watchInterval, setWatchInterval] = useState(String(initial.watch?.interval || 60));
@@ -582,8 +584,9 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
           <div className="flex gap-2">
             <div className="flex flex-col gap-1 w-28">
               <label className="text-[9px] text-gray-500 uppercase">Work Dir</label>
-              <input value={workDirVal} onChange={e => setWorkDirVal(e.target.value)} placeholder={label ? `${label.toLowerCase().replace(/\s+/g, '-')}/` : 'engineer/'}
-                className="text-xs bg-[#161b22] border border-[#30363d] rounded px-2 py-1 text-white focus:outline-none focus:border-[#58a6ff]" />
+              <input value={isPrimary ? './' : workDirVal} onChange={e => !isPrimary && setWorkDirVal(e.target.value)} placeholder={label ? `${label.toLowerCase().replace(/\s+/g, '-')}/` : 'engineer/'}
+                disabled={isPrimary}
+                className={`text-xs bg-[#161b22] border border-[#30363d] rounded px-2 py-1 text-white focus:outline-none focus:border-[#58a6ff] ${isPrimary ? 'opacity-50 cursor-not-allowed' : ''}`} />
               <div className="text-[8px] text-gray-600 mt-0.5">
                 → {'{project}/'}{(workDirVal || (label ? `${label.toLowerCase().replace(/\s+/g, '-')}/` : '')).replace(/^\.?\//, '')}
               </div>
@@ -604,9 +607,12 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
 
           {/* Persistent Session */}
           <div className="flex items-center gap-2">
-            <input type="checkbox" id="persistentSession" checked={persistentSession} onChange={e => setPersistentSession(e.target.checked)}
-              className="accent-[#3fb950]" />
-            <label htmlFor="persistentSession" className="text-[9px] text-gray-400">Keep terminal session alive (messages inject directly, preserves context)</label>
+            <input type="checkbox" id="persistentSession" checked={persistentSession} onChange={e => !isPrimary && setPersistentSession(e.target.checked)}
+              disabled={isPrimary}
+              className={`accent-[#3fb950] ${isPrimary ? 'opacity-50 cursor-not-allowed' : ''}`} />
+            <label htmlFor="persistentSession" className={`text-[9px] text-gray-400 ${isPrimary ? 'opacity-50' : ''}`}>
+              Keep terminal session alive {isPrimary && '(forced for primary agent)'}
+            </label>
           </div>
           {persistentSession && (
             <div className="flex items-center gap-2 ml-4">
@@ -776,11 +782,12 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
             onConfirm({
               label: label.trim(), icon: icon.trim() || '🤖', role: role.trim(),
               backend, agentId, dependsOn: Array.from(selectedDeps),
-              workDir: workDirVal.trim() || label.trim().toLowerCase().replace(/\s+/g, '-') + '/',
+              workDir: isPrimary ? './' : (workDirVal.trim() || label.trim().toLowerCase().replace(/\s+/g, '-') + '/'),
               outputs: outputs.split(',').map(s => s.trim()).filter(Boolean),
               steps: parseSteps(),
+              primary: isPrimary || undefined,
               requiresApproval: requiresApproval || undefined,
-              persistentSession: persistentSession || undefined,
+              persistentSession: isPrimary ? true : (persistentSession || undefined),
               skipPermissions: persistentSession ? (skipPermissions ? undefined : false) : undefined,
               watch: watchEnabled && watchTargets.length > 0 ? {
                 enabled: true,
@@ -1800,6 +1807,9 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
       <Handle type="target" position={Position.Left} style={{ background: c.accent, width: 8, height: 8, border: 'none' }} />
       <Handle type="source" position={Position.Right} style={{ background: c.accent, width: 8, height: 8, border: 'none' }} />
 
+      {/* Primary badge */}
+      {config.primary && <div className="bg-[#f0883e]/20 text-[#f0883e] text-[7px] font-bold text-center py-0.5 rounded-t-lg">PRIMARY</div>}
+
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2">
         <span className="text-sm">{config.icon}</span>
@@ -2057,6 +2067,17 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
               const workDir = agent.workDir && agent.workDir !== './' && agent.workDir !== '.'
                 ? agent.workDir : undefined;
 
+              // Primary agent: always use fixed session, no dialog
+              if (agent.primary && existingTmux) {
+                setFloatingTerminals(prev => [...prev, {
+                  agentId: agent.id, label: agent.label, icon: agent.icon,
+                  cliId: agent.agentId || 'claude', workDir,
+                  tmuxSession: existingTmux, sessionName: sessName,
+                }]);
+                wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
+                return;
+              }
+
               // If tmux session exists, just attach
               if (existingTmux) {
                 setFloatingTerminals(prev => [...prev, {
@@ -2072,6 +2093,17 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
               // Resolve terminal launch info to determine supportsSession
               const resolveRes = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id, resolveOnly: true }).catch(() => ({})) as any;
               const supportsSession = resolveRes?.supportsSession ?? true;
+
+              // Primary agent without session yet — skip dialog, just open
+              if (agent.primary) {
+                const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id }).catch(() => ({})) as any;
+                setFloatingTerminals(prev => [...prev, {
+                  agentId: agent.id, label: agent.label, icon: agent.icon,
+                  cliId: agent.agentId || 'claude', workDir,
+                  tmuxSession: res?.tmuxSession || sessName, sessionName: sessName,
+                }]);
+                return;
+              }
 
               // Show launch dialog with resolved info
               setTermLaunchDialog({ agent, sessName, workDir, sessions: [], supportsSession });

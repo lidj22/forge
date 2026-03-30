@@ -285,6 +285,11 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
           return json(res, { ok: true, ...launchInfo });
         }
 
+        // Primary agent: always return its fixed session, no selection
+        if (agentConfig.primary && agentState.tmuxSession) {
+          return json(res, { ok: true, primary: true, tmuxSession: agentState.tmuxSession, fixedSession: true, ...launchInfo });
+        }
+
         if (agentState.tmuxSession) {
           return json(res, { ok: true, alreadyOpen: true, tmuxSession: agentState.tmuxSession, ...launchInfo });
         }
@@ -295,6 +300,8 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
 
         return json(res, {
           ok: true,
+          primary: agentConfig.primary || undefined,
+          fixedSession: agentConfig.primary || undefined,
           skillsInstalled: result.installed,
           agentId,
           label: agentConfig.label,
@@ -656,13 +663,25 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
       const snapshot = orch.getSnapshot();
       const states = orch.getAllAgentStates();
       const agents = snapshot.agents.map(a => ({
-        id: a.id, label: a.label, icon: a.icon, type: a.type,
+        id: a.id, label: a.label, icon: a.icon, type: a.type, primary: a.primary || undefined,
         smithStatus: states[a.id]?.smithStatus || 'down',
         taskStatus: states[a.id]?.taskStatus || 'idle',
         hasTmux: !!states[a.id]?.tmuxSession,
         currentStep: states[a.id]?.currentStep,
       }));
       return json(res, { agents });
+    }
+
+    case 'primary_session': {
+      // Get the primary agent's fixed tmux session — used by VibeCoding as default
+      const primary = orch.getPrimaryAgent();
+      if (!primary) return json(res, { ok: false, error: 'No primary agent configured' });
+      return json(res, {
+        ok: true,
+        agentId: primary.config.id,
+        label: primary.config.label,
+        tmuxSession: primary.state.tmuxSession || null,
+      });
     }
 
     default:

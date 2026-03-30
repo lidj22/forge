@@ -12,6 +12,8 @@ export interface WorkspaceAgentConfig {
   icon: string;
   // Node type: 'agent' (default) or 'input' (user-provided requirements)
   type?: 'agent' | 'input';
+  // Primary agent: one per workspace, terminal-only, root dir, fixed session
+  primary?: boolean;
   // Input node: append-only entries (latest is active, older are history)
   content?: string;                    // legacy single content (migrated to entries)
   entries?: InputEntry[];              // incremental input history

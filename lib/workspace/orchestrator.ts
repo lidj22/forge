@@ -201,6 +201,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
     return check(agentB);
   }
 
+  /** Get the primary agent for this workspace (if any) */
+  getPrimaryAgent(): { config: WorkspaceAgentConfig; state: AgentState } | null {
+    for (const [, entry] of this.agents) {
+      if (entry.config.primary) return entry;
+    }
+    return null;
+  }
+
   addAgent(config: WorkspaceAgentConfig): void {
     const conflict = this.validateOutputs(config);
     if (conflict) throw new Error(conflict);
@@ -209,12 +217,20 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const cycleErr = this.detectCycle(config.id, config.dependsOn);
     if (cycleErr) throw new Error(cycleErr);
 
+    // Primary agent validation
+    this.validatePrimaryRules(config);
+
     const state: AgentState = {
       smithStatus: 'down',
       taskStatus: 'idle',
       history: [],
       artifacts: [],
     };
+    // Primary agent: force terminal-only, root dir
+    if (config.primary) {
+      config.persistentSession = true;
+      config.workDir = './';
+    }
     this.agents.set(config.id, { config, worker: null, state });
     this.saveNow();
     this.emitAgentsChanged();
@@ -222,6 +238,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
   removeAgent(id: string): void {
     const entry = this.agents.get(id);
+    if (entry?.config.primary) throw new Error('Cannot remove the primary agent');
     if (entry?.worker) {
       entry.worker.stop();
     }
@@ -240,6 +257,28 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.emitAgentsChanged();
   }
 
+  /** Validate primary agent rules */
+  private validatePrimaryRules(config: WorkspaceAgentConfig, excludeId?: string): void {
+    if (config.primary) {
+      // Only one primary allowed
+      for (const [id, entry] of this.agents) {
+        if (id !== excludeId && entry.config.primary) {
+          throw new Error(`Only one primary agent allowed. "${entry.config.label}" is already primary.`);
+        }
+      }
+    }
+    // Non-primary agents cannot use root directory if a primary exists
+    if (!config.primary && config.type !== 'input') {
+      const workDir = config.workDir?.replace(/\/+$/, '') || '';
+      if (!workDir || workDir === '.' || workDir === './') {
+        const primary = this.getPrimaryAgent();
+        if (primary && primary.config.id !== excludeId) {
+          throw new Error(`Root directory is reserved for primary agent "${primary.config.label}". Choose a subdirectory.`);
+        }
+      }
+    }
+  }
+
   updateAgentConfig(id: string, config: WorkspaceAgentConfig): void {
     const entry = this.agents.get(id);
     if (!entry) return;
@@ -247,6 +286,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (conflict) throw new Error(conflict);
     const cycleErr = this.detectCycle(id, config.dependsOn);
     if (cycleErr) throw new Error(cycleErr);
+    this.validatePrimaryRules(config, id);
+    // Primary agent: force terminal-only, root dir
+    if (config.primary) {
+      config.persistentSession = true;
+      config.workDir = './';
+    }
     if (entry.worker && entry.state.taskStatus === 'running') {
       entry.worker.stop();
     }
