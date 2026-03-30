@@ -1610,7 +1610,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         let envExports = '';
         let modelFlag = '';
         try {
-          const { resolveTerminalLaunch } = await import('../agents/index.js') as any;
+          const { resolveTerminalLaunch } = await import('../agents/index') as any;
           const info = resolveTerminalLaunch(config.agentId);
           cliCmd = info.cliCmd || 'claude';
           if (info.env) {
