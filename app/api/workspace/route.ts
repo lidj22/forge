@@ -71,7 +71,7 @@ export async function POST(req: Request) {
         dependsOn: agent.dependsOn.map((d: string) => idMap.get(d) || d),
         entries: agent.type === 'input' ? [] : undefined,
       });
-      state.agentStates[idMap.get(agent.id) || agent.id] = { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', history: [], artifacts: [] };
+      state.agentStates[idMap.get(agent.id) || agent.id] = { smithStatus: 'down', taskStatus: 'idle', history: [], artifacts: [] };
     }
     if (template.nodePositions) {
       for (const [oldId, pos] of Object.entries(template.nodePositions)) {

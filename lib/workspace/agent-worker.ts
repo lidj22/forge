@@ -14,7 +14,6 @@ import type {
   AgentState,
   TaskStatus,
   SmithStatus,
-  AgentMode,
   AgentBackend,
   WorkerEvent,
   Artifact,
@@ -91,7 +90,6 @@ export class AgentWorker extends EventEmitter {
     this.onMessageFailed = opts.onMessageFailed;
     this.state = {
       smithStatus: 'down',
-      mode: 'auto',
       taskStatus: opts.initialTaskStatus || 'idle',
       history: [],
       artifacts: [],
@@ -532,10 +530,9 @@ export class AgentWorker extends EventEmitter {
     this.emitEvent({ type: 'task_status', agentId: this.config.id, taskStatus, error });
   }
 
-  private setSmithStatus(smithStatus: SmithStatus, mode?: AgentMode): void {
+  private setSmithStatus(smithStatus: SmithStatus): void {
     this.state.smithStatus = smithStatus;
-    if (mode) this.state.mode = mode;
-    this.emitEvent({ type: 'smith_status', agentId: this.config.id, smithStatus, mode: this.state.mode });
+    this.emitEvent({ type: 'smith_status', agentId: this.config.id, smithStatus });
   }
 
   private emitEvent(event: WorkerEvent): void {

@@ -87,7 +87,7 @@ async function runAll() {
     const s = getState(orch, 'a1');
     ok(s.smithStatus === 'down', `smithStatus = down (got ${s.smithStatus})`);
     ok(s.taskStatus === 'idle', `taskStatus = idle (got ${s.taskStatus})`);
-    ok(s.mode === 'auto', `mode = auto (got ${s.mode})`);
+    // mode field removed — execution method determined by tmuxSession presence
   });
 
   // Test 2: startDaemon sets all smiths to active
@@ -148,7 +148,7 @@ async function runAll() {
       }],
       agentStates: {
         'a1': {
-          smithStatus: 'active', mode: 'auto', taskStatus: 'running',
+          smithStatus: 'active', taskStatus: 'running',
           history: [], artifacts: [],
         } as AgentState,
       },

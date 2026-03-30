@@ -34,6 +34,8 @@ export interface WorkspaceAgentConfig {
   requiresApproval?: boolean;
   // Persistent terminal: keep a tmux+claude session alive, inject messages directly
   persistentSession?: boolean;
+  // Skip dangerous permissions check (default true when persistentSession is enabled)
+  skipPermissions?: boolean;
   // Watch: autonomous periodic monitoring
   watch?: WatchConfig;
 }
@@ -81,16 +83,12 @@ export type SmithStatus = 'down' | 'active';
 /** Task layer: current work execution */
 export type TaskStatus = 'idle' | 'running' | 'done' | 'failed';
 
-/** Agent execution mode */
-export type AgentMode = 'auto' | 'manual';
-
 /** @deprecated Use SmithStatus + TaskStatus instead */
 export type AgentStatus = SmithStatus | TaskStatus | 'paused' | 'waiting_approval' | 'listening' | 'interrupted';
 
 export interface AgentState {
   // ─── Smith layer (daemon lifecycle) ─────
   smithStatus: SmithStatus;           // down=not started, active=listening on bus
-  mode: AgentMode;                    // auto=respond to messages, manual=user in terminal
 
   // ─── Task layer (current work) ──────────
   taskStatus: TaskStatus;             // idle/running/done/failed
@@ -103,7 +101,7 @@ export interface AgentState {
   lastCheckpoint?: number;
   cliSessionId?: string;
   currentMessageId?: string;          // bus message that triggered current/last task execution
-  tmuxSession?: string;               // tmux session name for manual terminal reattach
+  tmuxSession?: string;               // tmux session name (persistent or user-opened terminal)
   startedAt?: number;
   completedAt?: number;
   error?: string;
@@ -226,7 +224,7 @@ export interface AgentBackend {
 // ─── Worker Events ───────────────────────────────────────
 
 export type WorkerEvent =
-  | { type: 'smith_status'; agentId: string; smithStatus: SmithStatus; mode: AgentMode }
+  | { type: 'smith_status'; agentId: string; smithStatus: SmithStatus }
   | { type: 'task_status'; agentId: string; taskStatus: TaskStatus; error?: string }
   | { type: 'log'; agentId: string; entry: TaskLogEntry }
   | { type: 'step'; agentId: string; stepIndex: number; stepLabel: string }

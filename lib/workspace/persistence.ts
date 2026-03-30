@@ -147,7 +147,6 @@ export function loadWorkspace(workspaceId: string): WorkspaceState | null {
       if ('status' in agentState && !('smithStatus' in agentState)) {
         const oldStatus = (agentState as any).status;
         (agentState as any).smithStatus = 'down';
-        (agentState as any).mode = (agentState as any).runMode || 'auto';
         (agentState as any).taskStatus = (oldStatus === 'running' || oldStatus === 'listening') ? 'idle' :
                        (oldStatus === 'interrupted') ? 'idle' :
                        (oldStatus === 'waiting_approval') ? 'idle' :

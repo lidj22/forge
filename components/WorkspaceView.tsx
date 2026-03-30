@@ -23,12 +23,12 @@ interface AgentConfig {
   steps: { id: string; label: string; prompt: string }[];
   requiresApproval?: boolean;
   persistentSession?: boolean;
+  skipPermissions?: boolean;
   watch?: { enabled: boolean; interval: number; targets: any[]; action?: 'log' | 'analyze' | 'approve' | 'send_message'; prompt?: string; sendTo?: string };
 }
 
 interface AgentState {
   smithStatus: 'down' | 'active';
-  mode: 'auto' | 'manual';
   taskStatus: 'idle' | 'running' | 'done' | 'failed';
   currentStep?: number;
   tmuxSession?: string;
@@ -238,7 +238,6 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
             [event.agentId]: {
               ...prev[event.agentId],
               smithStatus: event.smithStatus,
-              mode: event.mode,
             },
           }));
         }
@@ -407,6 +406,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
   );
   const [requiresApproval, setRequiresApproval] = useState(initial.requiresApproval || false);
   const [persistentSession, setPersistentSession] = useState(initial.persistentSession || false);
+  const [skipPermissions, setSkipPermissions] = useState(initial.skipPermissions !== false);
   const [watchEnabled, setWatchEnabled] = useState(initial.watch?.enabled || false);
   const [watchInterval, setWatchInterval] = useState(String(initial.watch?.interval || 60));
   const [watchAction, setWatchAction] = useState<'log' | 'analyze' | 'approve' | 'send_message'>(initial.watch?.action || 'log');
@@ -608,6 +608,13 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
               className="accent-[#3fb950]" />
             <label htmlFor="persistentSession" className="text-[9px] text-gray-400">Keep terminal session alive (messages inject directly, preserves context)</label>
           </div>
+          {persistentSession && (
+            <div className="flex items-center gap-2 ml-4">
+              <input type="checkbox" id="skipPermissions" checked={skipPermissions} onChange={e => setSkipPermissions(e.target.checked)}
+                className="accent-[#f0883e]" />
+              <label htmlFor="skipPermissions" className="text-[9px] text-gray-400">Skip permissions (auto-approve all tool calls)</label>
+            </div>
+          )}
 
           {/* Steps */}
           <div className="flex flex-col gap-1">
@@ -774,6 +781,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
               steps: parseSteps(),
               requiresApproval: requiresApproval || undefined,
               persistentSession: persistentSession || undefined,
+              skipPermissions: persistentSession ? (skipPermissions ? undefined : false) : undefined,
               watch: watchEnabled && watchTargets.length > 0 ? {
                 enabled: true,
                 interval: Math.max(10, parseInt(watchInterval) || 60),
@@ -1778,7 +1786,7 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
   const c = COLORS[colorIdx % COLORS.length];
   const smithStatus = state?.smithStatus || 'down';
   const taskStatus = state?.taskStatus || 'idle';
-  const mode = state?.mode || 'auto';
+  const hasTmux = !!state?.tmuxSession;
   const smithInfo = SMITH_STATUS[smithStatus] || SMITH_STATUS.down;
   const taskInfo = TASK_STATUS[taskStatus] || TASK_STATUS.idle;
   const currentStep = state?.currentStep;
@@ -1799,15 +1807,17 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
           <div className="text-xs font-semibold text-white truncate">{config.label}</div>
           <div className="text-[8px]" style={{ color: c.accent }}>{config.backend === 'api' ? config.provider || 'api' : config.agentId || 'cli'}</div>
         </div>
-        {/* Status: smith + mode + task */}
+        {/* Status: smith + terminal + task */}
         <div className="flex flex-col items-end gap-0.5">
           <div className="flex items-center gap-1">
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: smithInfo.color, boxShadow: smithInfo.glow ? `0 0 4px ${smithInfo.color}` : 'none' }} />
             <span className="text-[7px]" style={{ color: smithInfo.color }}>{smithInfo.label}</span>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: mode === 'manual' ? '#d2a8ff' : '#30363d' }} />
-            <span className="text-[7px]" style={{ color: mode === 'manual' ? '#d2a8ff' : '#6e7681' }}>{mode}</span>
+            <div className="w-1.5 h-1.5 rounded-full" style={{ background: hasTmux ? '#3fb950' : '#484f58' }} />
+            <span className="text-[7px] font-medium" style={{ color: hasTmux ? '#3fb950' : '#484f58' }}>
+              {hasTmux ? 'terminal' : 'headless'}
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <div className="w-1.5 h-1.5 rounded-full" style={{ background: taskInfo.color, boxShadow: taskInfo.glow ? `0 0 4px ${taskInfo.color}` : 'none' }} />
@@ -1873,7 +1883,7 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
         <div className="flex-1" />
         {taskStatus !== 'running' && (
           <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onOpenTerminal(); }}
-            className="text-[9px] text-gray-600 hover:text-green-400 px-1" title="Open terminal (manual mode)">⌨️</button>
+            className="text-[9px] text-gray-600 hover:text-green-400 px-1" title="Open terminal">⌨️</button>
         )}
         <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onShowInbox(); }}
           className="text-[9px] text-gray-600 hover:text-orange-400 px-1" title="Messages (inbox/outbox)">📨</button>
@@ -1954,7 +1964,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
     if (autoOpenDone.current || agents.length === 0 || Object.keys(states).length === 0) return;
     autoOpenDone.current = true;
     const manualAgents = agents.filter(a =>
-      a.type !== 'input' && states[a.id]?.mode === 'manual' && states[a.id]?.tmuxSession
+      a.type !== 'input' && states[a.id]?.tmuxSession
     );
     if (manualAgents.length > 0) {
       const safeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
@@ -1990,7 +2000,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
             type: 'input' as const,
             data: {
               config: agent,
-              state: states[agent.id] || { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', artifacts: [] },
+              state: states[agent.id] || { smithStatus: 'down', taskStatus: 'idle', artifacts: [] },
               onSubmit: (content: string) => {
                 // Optimistic update
                 wsApi(workspaceId!, 'complete_input', { agentId: agent.id, content });
@@ -2010,7 +2020,7 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           type: 'agent' as const,
           data: {
             config: agent,
-            state: states[agent.id] || { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', artifacts: [] },
+            state: states[agent.id] || { smithStatus: 'down', taskStatus: 'idle', artifacts: [] },
             colorIdx: i,
             previewLines: logPreview[agent.id] || [],
             onRun: () => {
@@ -2047,17 +2057,15 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
               const workDir = agent.workDir && agent.workDir !== './' && agent.workDir !== '.'
                 ? agent.workDir : undefined;
 
-              // If tmux session exists (manual mode or persistent session), just attach
+              // If tmux session exists, just attach
               if (existingTmux) {
                 setFloatingTerminals(prev => [...prev, {
                   agentId: agent.id, label: agent.label, icon: agent.icon,
                   cliId: agent.agentId || 'claude', workDir,
                   tmuxSession: existingTmux, sessionName: sessName,
                 }]);
-                if (agentState?.mode !== 'manual') {
-                  // Switch to manual mode so message loop pauses
-                  wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
-                }
+                // Register terminal open with backend
+                wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
                 return;
               }
 

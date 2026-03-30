@@ -285,12 +285,8 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
           return json(res, { ok: true, ...launchInfo });
         }
 
-        if (agentState.taskStatus === 'running') return jsonError(res, 'Cannot open terminal while agent is running. Wait for it to finish.');
-        const hasPending = orch.getBus().getPendingMessagesFor(agentId).length > 0;
-        if (hasPending) return jsonError(res, 'Agent has pending messages being processed. Wait for execution to complete.');
-
-        if (agentState.mode === 'manual') {
-          return json(res, { ok: true, mode: 'manual', alreadyManual: true, ...launchInfo });
+        if (agentState.tmuxSession) {
+          return json(res, { ok: true, alreadyOpen: true, tmuxSession: agentState.tmuxSession, ...launchInfo });
         }
 
         orch.setManualMode(agentId);
@@ -299,7 +295,6 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
 
         return json(res, {
           ok: true,
-          mode: 'manual',
           skillsInstalled: result.installed,
           agentId,
           label: agentConfig.label,
@@ -663,8 +658,8 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
       const agents = snapshot.agents.map(a => ({
         id: a.id, label: a.label, icon: a.icon, type: a.type,
         smithStatus: states[a.id]?.smithStatus || 'down',
-        mode: states[a.id]?.mode || 'auto',
         taskStatus: states[a.id]?.taskStatus || 'idle',
+        hasTmux: !!states[a.id]?.tmuxSession,
         currentStep: states[a.id]?.currentStep,
       }));
       return json(res, { agents });

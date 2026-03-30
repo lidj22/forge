@@ -20,7 +20,6 @@ import type {
   AgentState,
   SmithStatus,
   TaskStatus,
-  AgentMode,
   WorkerEvent,
   BusMessage,
   Artifact,
@@ -212,7 +211,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     const state: AgentState = {
       smithStatus: 'down',
-      mode: 'auto',
       taskStatus: 'idle',
       history: [],
       artifacts: [],
@@ -265,19 +263,22 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (this.daemonActive) {
       // Rebuild worker + message loop
       this.enterDaemonListening(id);
-      this.startMessageLoop(id);
       entry.state.smithStatus = 'active';
       // Restart watch if config changed
       this.watchManager.startWatch(id, config);
-      // Create persistent session if configured
+      // Create persistent session if configured (before message loop so inject works)
       if (config.persistentSession) {
-        this.ensurePersistentSession(id, config);
+        this.ensurePersistentSession(id, config).then(() => {
+          this.startMessageLoop(id);
+        });
+      } else {
+        this.startMessageLoop(id);
       }
     }
     this.saveNow();
     this.emitAgentsChanged();
     this.emit('event', { type: 'task_status', agentId: id, taskStatus: 'idle' } satisfies WorkerEvent);
-    this.emit('event', { type: 'smith_status', agentId: id, smithStatus: entry.state.smithStatus, mode: entry.state.mode } as any);
+    this.emit('event', { type: 'smith_status', agentId: id, smithStatus: entry.state.smithStatus } as any);
   }
 
   getAgentState(id: string): Readonly<AgentState> | undefined {
@@ -290,7 +291,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       const workerState = entry.worker?.getState();
       // Merge: worker state for task/smith, entry.state for mode (orchestrator controls mode)
       result[id] = workerState
-        ? { ...workerState, mode: entry.state.mode, tmuxSession: entry.state.tmuxSession, currentMessageId: entry.state.currentMessageId }
+        ? { ...workerState, tmuxSession: entry.state.tmuxSession, currentMessageId: entry.state.currentMessageId }
         : entry.state;
     }
     return result;
@@ -356,7 +357,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         console.log(`[workspace] Killed tmux session ${entry.state.tmuxSession}`);
       } catch {} // session might already be dead
     }
-    entry.state = { smithStatus: 'down', mode: 'auto', taskStatus: 'idle', history: entry.state.history, artifacts: [] };
+    entry.state = { smithStatus: 'down', taskStatus: 'idle', history: entry.state.history, artifacts: [] };
     this.emit('event', { type: 'task_status', agentId, taskStatus: 'idle' } satisfies WorkerEvent);
     this.emitAgentsChanged();
     this.saveNow();
@@ -374,7 +375,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       console.log(`[workspace] Resetting ${entry.config.label} (${id}) to idle (upstream ${agentId} changed)`);
       if (entry.worker) entry.worker.stop();
       entry.worker = null;
-      entry.state = { smithStatus: entry.state.smithStatus, mode: entry.state.mode, taskStatus: 'idle', history: entry.state.history, artifacts: [], cliSessionId: entry.state.cliSessionId };
+      entry.state = { smithStatus: entry.state.smithStatus, taskStatus: 'idle', history: entry.state.history, artifacts: [], cliSessionId: entry.state.cliSessionId };
       this.emit('event', { type: 'task_status', agentId: id, taskStatus: 'idle' } satisfies WorkerEvent);
       this.resetDownstream(id, visited);
     }
@@ -433,11 +434,10 @@ export class WorkspaceOrchestrator extends EventEmitter {
       if (entry.worker) entry.worker.stop();
       entry.worker = null;
       if (!resumeFromCheckpoint) {
-        entry.state = { smithStatus: entry.state.smithStatus, mode: entry.state.mode, taskStatus: 'idle', history: entry.state.history, artifacts: [], cliSessionId: entry.state.cliSessionId };
+        entry.state = { smithStatus: entry.state.smithStatus, taskStatus: 'idle', history: entry.state.history, artifacts: [], cliSessionId: entry.state.cliSessionId };
       } else {
         entry.state.taskStatus = 'idle';
         entry.state.error = undefined;
-        entry.state.mode = 'auto';
       }
     }
 
@@ -618,7 +618,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
       entry.worker = null;
       entry.state = {
         smithStatus: entry.state.smithStatus,
-        mode: entry.state.mode,
         taskStatus: 'idle',
         history: [],
         artifacts: [],
@@ -629,7 +628,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Ensure smith is active when daemon starts this agent
     if (this.daemonActive && entry.state.smithStatus !== 'active') {
       entry.state.smithStatus = 'active';
-      this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active', mode: entry.state.mode } satisfies WorkerEvent);
+      this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active' } satisfies WorkerEvent);
     }
 
     const { config } = entry;
@@ -721,7 +720,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
       if (event.type === 'smith_status') {
         entry.state.smithStatus = event.smithStatus;
-        entry.state.mode = event.mode;
       }
       if (event.type === 'log') {
         appendAgentLog(this.workspaceId, agentId, event.entry).catch(() => {});
@@ -808,33 +806,35 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
         // 3. Set smith status to active
         entry.state.smithStatus = 'active';
-        entry.state.mode = 'auto';
         entry.state.error = undefined;
 
-        // 4. Start message consumption loop
-        this.startMessageLoop(id);
+        // 4. Start message loop (delayed for persistent session agents — session must exist first)
+        if (!entry.config.persistentSession) {
+          this.startMessageLoop(id);
+        }
 
         // 5. Update liveness for bus routing
         this.updateAgentLiveness(id);
 
         // 6. Notify frontend
-        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active', mode: 'auto' } satisfies WorkerEvent);
+        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active' } satisfies WorkerEvent);
 
         started++;
         console.log(`[daemon] ✓ ${entry.config.label}: active (task=${entry.state.taskStatus})`);
       } catch (err: any) {
         entry.state.smithStatus = 'down';
         entry.state.error = `Failed to start: ${err.message}`;
-        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'down', mode: 'auto' } satisfies WorkerEvent);
+        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'down' } satisfies WorkerEvent);
         failed++;
         console.error(`[daemon] ✗ ${entry.config.label}: failed — ${err.message}`);
       }
     }
 
-    // Create persistent terminal sessions for configured agents
+    // Create persistent terminal sessions, then start their message loops
     for (const [id, entry] of this.agents) {
       if (entry.config.type === 'input' || !entry.config.persistentSession) continue;
-      this.ensurePersistentSession(id, entry.config);
+      await this.ensurePersistentSession(id, entry.config);
+      this.startMessageLoop(id);
     }
 
     // Start watch loops for agents with watch config
@@ -933,7 +933,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
       if (event.type === 'smith_status') {
         entry.state.smithStatus = event.smithStatus;
-        entry.state.mode = event.mode;
       }
       if (event.type === 'log') {
         appendAgentLog(this.workspaceId, agentId, event.entry).catch(() => {});
@@ -982,7 +981,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       entry.state.smithStatus = 'down';
       entry.state.error = undefined;
       this.updateAgentLiveness(id);
-      this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'down', mode: entry.state.mode } satisfies WorkerEvent);
+      this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'down' } satisfies WorkerEvent);
 
       console.log(`[daemon] ■ ${entry.config.label}: stopped`);
     }
@@ -991,6 +990,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.bus.markAllRunningAsFailed();
     this.emitAgentsChanged();
     this.watchManager.stop();
+    this.stopAllTerminalMonitors();
     this.stopHealthCheck();
     console.log('[workspace] Daemon stopped');
   }
@@ -1015,14 +1015,13 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     for (const [id, entry] of this.agents) {
       if (entry.config.type === 'input') continue;
-      if (entry.state.mode === 'manual') continue;
 
       // Check 1: Worker should exist for all active agents
       if (!entry.worker) {
         console.log(`[health] ${entry.config.label}: no worker — recreating`);
         this.enterDaemonListening(id);
         entry.state.smithStatus = 'active';
-        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active', mode: entry.state.mode } as any);
+        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active' } as any);
         continue;
       }
 
@@ -1030,7 +1029,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       if (entry.state.smithStatus !== 'active') {
         console.log(`[health] ${entry.config.label}: smith=${entry.state.smithStatus} — setting active`);
         entry.state.smithStatus = 'active';
-        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active', mode: entry.state.mode } as any);
+        this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'active' } as any);
       }
 
       // Check 3: Message loop should be running
@@ -1053,7 +1052,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
 
       // Check 5: Pending messages but agent idle — try wake
-      if (entry.state.taskStatus !== 'running' && entry.state.mode === 'auto') {
+      if (entry.state.taskStatus !== 'running') {
         const pending = this.bus.getPendingMessagesFor(id).filter(m => m.from !== id && m.type !== 'ack');
         if (pending.length > 0 && entry.worker.isListening()) {
           // Message loop should handle this, but if it didn't, log it
@@ -1079,8 +1078,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     if (action === 'analyze') {
       // Auto-wake agent to analyze changes (skip if busy/manual)
-      if (entry.state.mode === 'manual' || entry.state.taskStatus === 'running') {
-        console.log(`[watch] ${entry.config.label}: skipped analyze (mode=${entry.state.mode} task=${entry.state.taskStatus})`);
+      if (entry.state.taskStatus === 'running') {
+        console.log(`[watch] ${entry.config.label}: skipped analyze (task=${entry.state.taskStatus})`);
         return;
       }
       if (!entry.worker?.isListening()) {
@@ -1233,44 +1232,43 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.emitAgentsChanged();
   }
 
-  /** Switch an agent to manual mode (user operates in terminal) */
+  /** Record that an agent has an open terminal (tmux session tracking) */
   setManualMode(agentId: string): void {
     const entry = this.agents.get(agentId);
     if (!entry) return;
-    entry.state.mode = 'manual';
-    this.emit('event', { type: 'smith_status', agentId, smithStatus: entry.state.smithStatus, mode: 'manual' } satisfies WorkerEvent);
+    // tmuxSession is set separately when terminal opens
     this.emitAgentsChanged();
     this.saveNow();
-    console.log(`[workspace] Agent "${entry.config.label}" switched to manual mode`);
+    console.log(`[workspace] Agent "${entry.config.label}" terminal opened`);
   }
 
-  /** Re-enter daemon mode for an agent after manual terminal is closed */
+  /** Called when agent's terminal is closed */
   restartAgentDaemon(agentId: string): void {
     if (!this.daemonActive) return;
     const entry = this.agents.get(agentId);
     if (!entry || entry.config.type === 'input') return;
 
-    entry.state.mode = 'auto';
     entry.state.error = undefined;
+    // Don't clear tmuxSession here — it may still be alive (persistent session)
+    // Terminal close just means the UI panel is closed, not necessarily tmux killed
 
-    // Recreate worker if needed (resetAgent kills worker)
+    // Recreate worker if needed
     if (!entry.worker) {
       this.enterDaemonListening(agentId);
       this.startMessageLoop(agentId);
     }
 
     entry.state.smithStatus = 'active';
-    this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active', mode: 'auto' } satisfies WorkerEvent);
+    this.emit('event', { type: 'smith_status', agentId, smithStatus: 'active' } satisfies WorkerEvent);
     this.emitAgentsChanged();
   }
 
-  /** Complete a manual agent — called by forge-done skill from terminal */
+  /** Complete an agent from terminal — called by forge-done skill */
   completeManualAgent(agentId: string, changedFiles: string[]): void {
     const entry = this.agents.get(agentId);
     if (!entry) return;
 
     entry.state.taskStatus = 'done';
-    entry.state.mode = 'auto'; // clear manual mode
     entry.state.completedAt = Date.now();
     entry.state.artifacts = changedFiles.map(f => ({ type: 'file' as const, path: f }));
 
@@ -1366,13 +1364,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.agents.clear();
     this.daemonActive = false; // Reset daemon — user must click Start Daemon again after restart
     for (const config of data.agents) {
-      const state = data.agentStates[config.id] || { smithStatus: 'down' as const, mode: 'auto' as const, taskStatus: 'idle' as const, history: [], artifacts: [] };
+      const state = data.agentStates[config.id] || { smithStatus: 'down' as const, taskStatus: 'idle' as const, history: [], artifacts: [] };
 
       // Migrate old format if loading from pre-two-layer state
       if ('status' in state && !('smithStatus' in state)) {
         const oldStatus = (state as any).status;
         (state as any).smithStatus = 'down';
-        (state as any).mode = (state as any).runMode || 'auto';
         (state as any).taskStatus = (oldStatus === 'running' || oldStatus === 'listening') ? 'idle' :
                        (oldStatus === 'interrupted') ? 'idle' :
                        (oldStatus === 'waiting_approval') ? 'idle' :
@@ -1609,16 +1606,27 @@ export class WorkspaceOrchestrator extends EventEmitter {
       execSync(`tmux has-session -t "${sessionName}" 2>/dev/null`, { timeout: 3000 });
       console.log(`[daemon] ${config.label}: persistent session already exists (${sessionName})`);
     } catch {
-      // Create new session with claude
+      // Create new tmux session and start the CLI agent
       try {
-        // Resolve agent launch info
+        // Resolve agent launch info (cliCmd, flags, env, model, etc.)
         let cliCmd = 'claude';
+        let cliType = 'claude-code';
+        let supportsSession = true;
+        let resumeFlag = '-c';
+        let skipPermissionsFlag = '--dangerously-skip-permissions';
         let envExports = '';
         let modelFlag = '';
         try {
-          const { resolveTerminalLaunch } = await import('../agents/index') as any;
+          const { resolveTerminalLaunch, listAgents } = await import('../agents/index') as any;
           const info = resolveTerminalLaunch(config.agentId);
           cliCmd = info.cliCmd || 'claude';
+          cliType = info.cliType || 'claude-code';
+          supportsSession = info.supportsSession ?? true;
+          resumeFlag = info.resumeFlag || '';
+          // Resolve skip permissions flag from agent config
+          const agents = listAgents();
+          const agentDef = agents.find((a: any) => a.id === config.agentId);
+          if (agentDef?.skipPermissionsFlag) skipPermissionsFlag = agentDef.skipPermissionsFlag;
           if (info.env) {
             envExports = Object.entries(info.env)
               .filter(([k]) => k !== 'CLAUDE_MODEL')
@@ -1633,11 +1641,23 @@ export class WorkspaceOrchestrator extends EventEmitter {
           ? `${this.projectPath}/${config.workDir}` : this.projectPath;
 
         execSync(`tmux new-session -d -s "${sessionName}" -c "${workDir}"`, { timeout: 5000 });
-        // Start claude with -c to resume last session (preserve context)
-        const startCmd = `${envExports}${cliCmd} -c${modelFlag}`;
+
+        // Build CLI start command based on agent type
+        const parts: string[] = [];
+        if (envExports) parts.push(envExports.replace(/ && $/, ''));
+        let cmd = cliCmd;
+        // Resume flag: only for agents that support sessions (e.g., claude -c)
+        if (supportsSession && resumeFlag) cmd += ` ${resumeFlag}`;
+        // Model override
+        if (modelFlag) cmd += modelFlag;
+        // Skip permissions: default true, user can override to false
+        if (config.skipPermissions !== false && skipPermissionsFlag) cmd += ` ${skipPermissionsFlag}`;
+        parts.push(cmd);
+
+        const startCmd = parts.join(' && ');
         execSync(`tmux send-keys -t "${sessionName}" '${startCmd}' Enter`, { timeout: 5000 });
 
-        console.log(`[daemon] ${config.label}: persistent session created (${sessionName})`);
+        console.log(`[daemon] ${config.label}: persistent session created (${sessionName}) [${cliType}: ${cliCmd}]`);
       } catch (err: any) {
         console.error(`[daemon] ${config.label}: failed to create persistent session: ${err.message}`);
         return;
@@ -1656,8 +1676,15 @@ export class WorkspaceOrchestrator extends EventEmitter {
   /** Inject text into an agent's persistent terminal session */
   injectIntoSession(agentId: string, text: string): boolean {
     const entry = this.agents.get(agentId);
+    // Verify stored session is alive
+    if (entry?.state.tmuxSession) {
+      try { execSync(`tmux has-session -t "${entry.state.tmuxSession}" 2>/dev/null`, { timeout: 3000 }); }
+      catch { entry.state.tmuxSession = undefined; }
+    }
     const tmuxSession = entry?.state.tmuxSession || this.findTmuxSession(entry?.config.label || '');
     if (!tmuxSession) return false;
+    // Cache found session for future use
+    if (entry && !entry.state.tmuxSession) entry.state.tmuxSession = tmuxSession;
 
     try {
       const tmpFile = `/tmp/forge-inject-${Date.now()}.txt`;
@@ -1785,13 +1812,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // ── Store message in agent history ──
     target.state.history.push(logEntry);
 
-    // ── Manual mode → store in inbox (user handles in terminal) ──
-    if (target.state.mode === 'manual') {
-      ackAndDeliver();
-      console.log(`[bus] ${target.config.label}: received ${action} in manual mode — stored in inbox`);
-      return;
-    }
-
     // ── requiresApproval → set pending_approval on arrival ──
     if (target.config.requiresApproval) {
       msg.status = 'pending_approval';
@@ -1823,28 +1843,30 @@ export class WorkspaceOrchestrator extends EventEmitter {
       // (loop stays alive so it works when smith comes back)
       if (entry.state.smithStatus !== 'active') return;
 
-      // Skip if manual (user in terminal) or running (already busy)
-      if (entry.state.mode === 'manual') return;
+      // Skip if already busy
       if (entry.state.taskStatus === 'running') return;
-
-      // Skip if no worker ready — recreate if needed
-      if (!entry.worker) {
-        if (this.daemonActive) {
-          console.log(`[inbox] ${entry.config.label}: no worker, recreating...`);
-          this.enterDaemonListening(agentId);
-        }
-        return;
-      }
-      if (!entry.worker.isListening()) {
-        if (++debugTick % 15 === 0) {
-          console.log(`[inbox] ${entry.config.label}: not listening (smith=${entry.state.smithStatus} task=${entry.state.taskStatus})`);
-        }
-        return;
-      }
 
       // Skip if any message is already running for this agent
       const hasRunning = this.bus.getLog().some(m => m.to === agentId && m.status === 'running' && m.type !== 'ack');
       if (hasRunning) return;
+
+      // Has tmux session → will use terminal inject; otherwise need worker ready
+      const hasTmux = entry.state.tmuxSession && this.hasPersistentSession(agentId);
+      if (!hasTmux) {
+        if (!entry.worker) {
+          if (this.daemonActive) {
+            console.log(`[inbox] ${entry.config.label}: no worker, recreating...`);
+            this.enterDaemonListening(agentId);
+          }
+          return;
+        }
+        if (!entry.worker.isListening()) {
+          if (++debugTick % 15 === 0) {
+            console.log(`[inbox] ${entry.config.label}: not listening (smith=${entry.state.smithStatus} task=${entry.state.taskStatus})`);
+          }
+          return;
+        }
+      }
 
       // requiresApproval is handled at message arrival time (routeMessageToAgent),
       // not in the message loop. Approved messages come through as normal 'pending'.
@@ -1902,22 +1924,30 @@ export class WorkspaceOrchestrator extends EventEmitter {
         timestamp: new Date(nextMsg.timestamp).toISOString(),
       };
 
-      // Persistent session: inject directly into terminal instead of waking worker
-      if (entry.config.persistentSession && this.hasPersistentSession(agentId)) {
+      // Has tmux session → inject into terminal; otherwise → worker (claude -p)
+      if (hasTmux) {
         const injected = this.injectIntoSession(agentId, nextMsg.payload.content || nextMsg.payload.action);
         if (injected) {
-          // Mark message as done immediately (terminal handles execution)
-          nextMsg.status = 'done' as any;
-          this.emit('event', { type: 'bus_message_status', messageId: nextMsg.id, status: 'done' } as any);
-          console.log(`[inbox] ${entry.config.label}: injected into persistent session`);
+          this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '📺 Injected into terminal, monitoring for completion...', timestamp: new Date().toISOString() } } as any);
+          console.log(`[inbox] ${entry.config.label}: injected into terminal, starting completion monitor`);
+          entry.state.currentMessageId = nextMsg.id;
+          this.monitorTerminalCompletion(agentId, nextMsg.id, entry.state.tmuxSession!);
         } else {
-          // Fallback to worker
-          entry.worker.setProcessingMessage(nextMsg.id);
-          entry.worker.wake({ type: 'bus_message', messages: [logEntry] });
+          // Terminal inject failed — fall back to worker
+          entry.state.tmuxSession = undefined; // clear dead session
+          if (entry.worker) {
+            entry.worker.setProcessingMessage(nextMsg.id);
+            entry.worker.wake({ type: 'bus_message', messages: [logEntry] });
+            this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '⚡ Executed via claude -p (terminal inject failed)', timestamp: new Date().toISOString() } } as any);
+          } else {
+            console.log(`[inbox] ${entry.config.label}: terminal inject failed, no worker — message stays pending`);
+            this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '⚠️ Terminal inject failed, no worker available — message stays pending', timestamp: new Date().toISOString() } } as any);
+          }
         }
       } else {
-        entry.worker.setProcessingMessage(nextMsg.id);
-        entry.worker.wake({ type: 'bus_message', messages: [logEntry] });
+        entry.worker!.setProcessingMessage(nextMsg.id);
+        entry.worker!.wake({ type: 'bus_message', messages: [logEntry] });
+        this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '⚡ Executed via claude -p', timestamp: new Date().toISOString() } } as any);
       }
     };
 
@@ -1943,6 +1973,108 @@ export class WorkspaceOrchestrator extends EventEmitter {
     for (const [id] of this.messageLoopTimers) {
       this.stopMessageLoop(id);
     }
+  }
+
+  // ─── Terminal completion monitor ──────────────────────
+  private terminalMonitors = new Map<string, NodeJS.Timeout>();
+
+  /**
+   * Monitor a tmux session for completion after injecting a message.
+   * Detects CLI prompt patterns (❯, $, >) indicating the agent is idle.
+   * Requires 2 consecutive prompt detections (10s) to confirm completion.
+   */
+  private monitorTerminalCompletion(agentId: string, messageId: string, tmuxSession: string): void {
+    // Stop any existing monitor for this agent
+    const existing = this.terminalMonitors.get(agentId);
+    if (existing) clearInterval(existing);
+
+    // Prompt patterns that indicate the CLI is idle and waiting for input
+    // Claude Code: ❯  Codex: >  Aider: >  Generic shell: $ #
+    const PROMPT_PATTERNS = [
+      /^❯\s*$/,          // Claude Code idle prompt
+      /^>\s*$/,           // Codex / generic prompt
+      /^\$\s*$/,          // Shell prompt
+      /^#\s*$/,           // Root shell prompt
+      /^aider>\s*$/,      // Aider prompt
+    ];
+
+    let promptCount = 0;
+    let started = false;
+    const CONFIRM_CHECKS = 2;    // 2 consecutive prompt detections = done
+    const CHECK_INTERVAL = 5000; // 5s between checks
+
+    const timer = setInterval(() => {
+      try {
+        const output = execSync(`tmux capture-pane -t "${tmuxSession}" -p -S -30`, { timeout: 3000, encoding: 'utf-8' });
+
+        // Strip ANSI escape sequences for clean matching
+        const clean = output.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+        // Get last few non-empty lines
+        const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+        const tail = lines.slice(-5);
+
+        // First check: detect that agent started working (output changed from inject)
+        if (!started && lines.length > 3) {
+          started = true;
+        }
+        if (!started) return;
+
+        // Check if any of the last lines match a prompt pattern
+        const hasPrompt = tail.some(line => PROMPT_PATTERNS.some(p => p.test(line)));
+
+        if (hasPrompt) {
+          promptCount++;
+          if (promptCount >= CONFIRM_CHECKS) {
+            clearInterval(timer);
+            this.terminalMonitors.delete(agentId);
+
+            // Extract output summary (skip prompt lines)
+            const contentLines = lines.filter(l => !PROMPT_PATTERNS.some(p => p.test(l)));
+            const summary = contentLines.slice(-15).join('\n');
+
+            // Mark message done
+            const msg = this.bus.getLog().find(m => m.id === messageId);
+            if (msg && msg.status !== 'done') {
+              msg.status = 'done' as any;
+              this.emit('event', { type: 'bus_message_status', messageId, status: 'done' } as any);
+            }
+
+            // Emit output to log panel
+            this.emit('event', { type: 'log', agentId, entry: { type: 'assistant', subtype: 'terminal_output', content: `📺 Terminal completed:\n${summary.slice(0, 500)}`, timestamp: new Date().toISOString() } } as any);
+
+            // Trigger downstream notifications
+            const entry = this.agents.get(agentId);
+            if (entry) {
+              entry.state.currentMessageId = undefined;
+              this.handleAgentDone(agentId, entry, summary.slice(0, 300));
+            }
+            console.log(`[terminal-monitor] ${agentId}: prompt detected, completed`);
+          }
+        } else {
+          promptCount = 0; // reset — still working
+        }
+      } catch {
+        // Session died
+        clearInterval(timer);
+        this.terminalMonitors.delete(agentId);
+        const msg = this.bus.getLog().find(m => m.id === messageId);
+        if (msg && msg.status !== 'done' && msg.status !== 'failed') {
+          msg.status = 'failed' as any;
+          this.emit('event', { type: 'bus_message_status', messageId, status: 'failed' } as any);
+        }
+        const entry = this.agents.get(agentId);
+        if (entry) entry.state.currentMessageId = undefined;
+        console.error(`[terminal-monitor] ${agentId}: session died, marked message failed`);
+      }
+    }, CHECK_INTERVAL);
+    timer.unref();
+    this.terminalMonitors.set(agentId, timer);
+  }
+
+  /** Stop all terminal monitors (on daemon stop) */
+  private stopAllTerminalMonitors(): void {
+    for (const [, timer] of this.terminalMonitors) clearInterval(timer);
+    this.terminalMonitors.clear();
   }
 
   /** Check if all agents are done and no pending work remains */
