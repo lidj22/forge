@@ -2,7 +2,7 @@
  * Forge MCP Server — agent communication bus via Model Context Protocol.
  *
  * Each Claude Code session connects with context baked into the SSE URL:
- *   http://localhost:7830/sse?workspaceId=xxx&agentId=yyy
+ *   http://localhost:8406/sse?workspaceId=xxx&agentId=yyy
  *
  * The agent doesn't need to know IDs. It just calls:
  *   send_message(to: "Reviewer", content: "fixed the bug")
@@ -343,5 +343,5 @@ export function stopMcpServer(): void {
 }
 
 export function getMcpPort(): number {
-  return Number(process.env.MCP_PORT) || 7830;
+  return Number(process.env.MCP_PORT) || 8406;
 }

@@ -1728,7 +1728,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
         let mcpConfigFlag = '';
         if (cliType === 'claude-code') {
           try {
-            const mcpPort = Number(process.env.MCP_PORT) || 7830;
+            const mcpPort = Number(process.env.MCP_PORT) || 8406;
             const mcpConfigPath = join(workDir, '.forge', 'mcp.json');
             const mcpConfig = {
               mcpServers: {

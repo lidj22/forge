@@ -40,7 +40,7 @@ function ensureMcpConfig(projectPath: string): void {
   try {
     const forgeDir = join(projectPath, '.forge');
     const configPath = join(forgeDir, 'mcp.json');
-    const mcpPort = Number(process.env.MCP_PORT) || 7830;
+    const mcpPort = Number(process.env.MCP_PORT) || 8406;
 
     // Resolve workspace + primary agent for this project
     let wsParam = '';
