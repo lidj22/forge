@@ -1554,7 +1554,7 @@ function FloatingTerminal({ agentLabel, agentIcon, projectPath, agentCliId, cliC
             const cdCmd = `mkdir -p "${targetDir}" && cd "${targetDir}"`;
             const isClaude = (cliType || 'claude-code') === 'claude-code';
             const resumeFlag = isClaude
-              ? (resumeSessionId ? ` --resume ${resumeSessionId}` : resumeMode ? ' -c' : '')
+              ? (resumeSessionId ? ` --resume ${resumeSessionId}` : ' -c')
               : '';
             const modelFlag = isClaude && profileEnv?.CLAUDE_MODEL ? ` --model ${profileEnv.CLAUDE_MODEL}` : '';
             // Remove CLAUDE_MODEL from env exports (passed via --model flag instead)
