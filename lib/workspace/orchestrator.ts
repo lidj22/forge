@@ -1598,13 +1598,22 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     this.broadcastCompletion(agentId, causedBy);
 
-    // Nudge the original sender to check results (inject hint into their terminal)
+    // Forge agent: when agent B completes A's request but doesn't reply,
+    // automatically send a follow-up message to B asking for a summary.
     if (processedMsg && processedMsg.from !== agentId && processedMsg.from !== '_system') {
-      const senderEntry = this.agents.get(processedMsg.from);
-      if (senderEntry?.state.tmuxSession) {
-        const hint = `[Forge] ${entry.config.label} finished processing your request. Use check_outbox() or get_inbox() to see results.`;
-        this.injectIntoSession(processedMsg.from, hint);
-        console.log(`[bus] Nudged ${senderEntry.config.label} — ${entry.config.label} completed`);
+      // Check if B already sent a reply to A after the original message
+      const hasReply = this.bus.getLog().some(m =>
+        m.from === agentId && m.to === processedMsg.from &&
+        m.timestamp > processedMsg.timestamp && m.type !== 'ack'
+      );
+      if (!hasReply) {
+        const senderLabel = this.agents.get(processedMsg.from)?.config.label || processedMsg.from;
+        // Forge agent sends a follow-up request to the completed agent
+        this.bus.send('_forge', agentId, 'notify', {
+          action: 'info_request',
+          content: `You just finished processing a request from ${senderLabel}. Please send them a brief summary of what you did and the results using send_message.`,
+        });
+        console.log(`[forge-agent] Asked ${entry.config.label} to send results to ${senderLabel}`);
       }
     }
 
