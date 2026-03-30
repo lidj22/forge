@@ -437,28 +437,28 @@ export default function SessionView({
                       {/* Hover actions — hide in batch mode */}
                       {!batchMode && (
                         <span className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                          {/* Bind session — show if workspace has primary agent and this isn't already bound */}
-                          {boundSessions[project] && boundSessions[project].sessionId !== s.sessionId && (
+                          {/* Bind session — always show unless already bound */}
+                          {boundSessions[project]?.sessionId !== s.sessionId && (
                             <button
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                const b = boundSessions[project];
+                                const pp = projects.find(p => p.name === project)?.path || '';
                                 try {
-                                  const wsRes = await fetch(`/api/workspace?projectPath=${encodeURIComponent(projects.find(p => p.name === project)?.path || '')}`);
+                                  const wsRes = await fetch(`/api/workspace?projectPath=${encodeURIComponent(pp)}`);
                                   const ws = await wsRes.json();
-                                  const primary = ws?.agents?.find((a: any) => a.id === b.agentId);
-                                  if (primary) {
-                                    primary.fixedSessionId = s.sessionId;
-                                    await fetch(`/api/workspace/${b.workspaceId}/smith`, {
-                                      method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ action: 'update', agentId: b.agentId, config: primary }),
-                                    });
-                                    setBoundSessions(prev => ({ ...prev, [project]: { ...prev[project], sessionId: s.sessionId } }));
-                                  }
+                                  if (!ws?.agents) return; // no workspace for this project
+                                  const primary = ws.agents.find((a: any) => a.primary);
+                                  if (!primary) return; // no primary agent
+                                  primary.fixedSessionId = s.sessionId;
+                                  await fetch(`/api/workspace/${ws.id}/smith`, {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ action: 'update', agentId: primary.id, config: primary }),
+                                  });
+                                  setBoundSessions(prev => ({ ...prev, [project]: { sessionId: s.sessionId, workspaceId: ws.id, agentId: primary.id } }));
                                 } catch {}
                               }}
                               className="text-[8px] px-1 py-0.5 rounded bg-[#f0883e]/10 text-[#f0883e] hover:bg-[#f0883e]/20"
-                              title="Set as primary bound session"
+                              title="Set as fixed session for this project"
                             >
                               bind
                             </button>

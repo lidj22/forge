@@ -462,66 +462,78 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
           {gitInfo?.remote && (
             <span>{gitInfo.remote.replace(/^https?:\/\//, '').replace(/^git@github\.com:/, 'github.com/').replace(/\.git$/, '')}</span>
           )}
-          {boundSession && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded bg-[#f0883e]/10 text-[#f0883e] relative">
-              <span className="text-[8px]">session:</span>
+          {/* Fixed session: show current or "set session" */}
+          <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded bg-[#f0883e]/10 text-[#f0883e] relative">
+            {boundSession?.sessionId ? (
+              <>
+                <span className="text-[8px]">session:</span>
+                <button onClick={() => {
+                  fetch(`/api/claude-sessions/${encodeURIComponent(projectName)}`)
+                    .then(r => r.json())
+                    .then(data => { if (Array.isArray(data)) setAvailableSessions(data.map((s: any) => ({ id: s.sessionId || s.id, modified: s.modified || '', size: s.size || 0 }))); })
+                    .catch(() => {});
+                  setShowSessionPicker(!showSessionPicker);
+                }}
+                  className="font-mono text-[8px] hover:text-white underline decoration-dotted" title="Click to change">
+                  {boundSession.sessionId.slice(0, 8)}
+                </button>
+                <button onClick={() => navigator.clipboard.writeText(boundSession.sessionId)}
+                  className="text-[7px] hover:text-white" title={boundSession.sessionId}>copy</button>
+              </>
+            ) : (
               <button onClick={() => {
-                // Load sessions for picker
                 fetch(`/api/claude-sessions/${encodeURIComponent(projectName)}`)
                   .then(r => r.json())
                   .then(data => { if (Array.isArray(data)) setAvailableSessions(data.map((s: any) => ({ id: s.sessionId || s.id, modified: s.modified || '', size: s.size || 0 }))); })
                   .catch(() => {});
                 setShowSessionPicker(!showSessionPicker);
               }}
-                className="font-mono text-[8px] hover:text-white underline decoration-dotted" title="Click to change bound session">
-                {boundSession.sessionId.slice(0, 8)}
+                className="text-[8px] hover:text-white underline decoration-dotted">
+                set session
               </button>
-              <span className="text-[7px] opacity-70">({boundSession.agentLabel})</span>
-              <button onClick={() => navigator.clipboard.writeText(boundSession.sessionId)}
-                className="text-[7px] hover:text-white ml-0.5" title={boundSession.sessionId}>copy</button>
-              {/* Session picker dropdown */}
-              {showSessionPicker && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg shadow-xl p-2 min-w-[280px]"
-                  onClick={e => e.stopPropagation()}>
-                  <div className="text-[9px] text-[var(--text-secondary)] mb-1.5 font-medium">Change bound session</div>
-                  <div className="max-h-48 overflow-y-auto space-y-1">
-                    {availableSessions.map(s => (
-                      <button key={s.id} onClick={async () => {
-                        // Update via workspace API
-                        try {
-                          const ws = await fetch(`/api/workspace?projectPath=${encodeURIComponent(projectPath)}`).then(r => r.json());
-                          if (ws?.agents) {
-                            const primary = ws.agents.find((a: any) => a.primary);
-                            if (primary) {
-                              primary.fixedSessionId = s.id;
-                              await fetch(`/api/workspace/${ws.id}/smith`, {
-                                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ action: 'update', agentId: primary.id, config: primary }),
-                              });
-                              setBoundSession({ ...boundSession, sessionId: s.id });
-                            }
+            )}
+            {/* Session picker dropdown */}
+            {showSessionPicker && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg shadow-xl p-2 min-w-[280px]"
+                onClick={e => e.stopPropagation()}>
+                <div className="text-[9px] text-[var(--text-secondary)] mb-1.5 font-medium">{boundSession?.sessionId ? 'Change session' : 'Select session'}</div>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {availableSessions.map(s => (
+                    <button key={s.id} onClick={async () => {
+                      try {
+                        const ws = await fetch(`/api/workspace?projectPath=${encodeURIComponent(projectPath)}`).then(r => r.json());
+                        if (ws?.agents) {
+                          const primary = ws.agents.find((a: any) => a.primary);
+                          if (primary) {
+                            primary.fixedSessionId = s.id;
+                            await fetch(`/api/workspace/${ws.id}/smith`, {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'update', agentId: primary.id, config: primary }),
+                            });
+                            setBoundSession(prev => prev ? { ...prev, sessionId: s.id } : { agentLabel: primary.label, sessionId: s.id, workspaceId: ws.id, agentId: primary.id });
                           }
-                        } catch {}
-                        setShowSessionPicker(false);
-                      }}
-                        className={`w-full text-left px-2 py-1.5 rounded text-[9px] flex items-center gap-2 ${
-                          s.id === boundSession.sessionId
-                            ? 'bg-[#f0883e]/20 text-[#f0883e]'
-                            : 'hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
-                        }`}>
-                        <span className="font-mono">{s.id.slice(0, 8)}</span>
-                        {s.id === boundSession.sessionId && <span className="text-[7px]">current</span>}
-                        {s.modified && <span className="text-[8px] opacity-60">{(() => { const d = Date.now() - new Date(s.modified).getTime(); return d < 3600000 ? `${Math.floor(d/60000)}m ago` : d < 86400000 ? `${Math.floor(d/3600000)}h ago` : new Date(s.modified).toLocaleDateString(); })()}</span>}
-                        {s.size > 0 && <span className="text-[8px] opacity-60">{s.size < 1048576 ? `${(s.size/1024).toFixed(0)}KB` : `${(s.size/1048576).toFixed(1)}MB`}</span>}
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => setShowSessionPicker(false)}
-                    className="w-full mt-1.5 text-[8px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] pt-1 border-t border-[var(--border)]">Close</button>
+                        }
+                      } catch {}
+                      setShowSessionPicker(false);
+                    }}
+                      className={`w-full text-left px-2 py-1.5 rounded text-[9px] flex items-center gap-2 ${
+                        s.id === boundSession?.sessionId
+                          ? 'bg-[#f0883e]/20 text-[#f0883e]'
+                          : 'hover:bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
+                      }`}>
+                      <span className="font-mono">{s.id.slice(0, 8)}</span>
+                      {s.id === boundSession?.sessionId && <span className="text-[7px]">current</span>}
+                      {s.modified && <span className="text-[8px] opacity-60">{(() => { const d = Date.now() - new Date(s.modified).getTime(); return d < 3600000 ? `${Math.floor(d/60000)}m ago` : d < 86400000 ? `${Math.floor(d/3600000)}h ago` : new Date(s.modified).toLocaleDateString(); })()}</span>}
+                      {s.size > 0 && <span className="text-[8px] opacity-60">{s.size < 1048576 ? `${(s.size/1024).toFixed(0)}KB` : `${(s.size/1048576).toFixed(1)}MB`}</span>}
+                    </button>
+                  ))}
+                  {availableSessions.length === 0 && <div className="text-[9px] text-[var(--text-secondary)] px-2 py-1">No sessions found</div>}
                 </div>
-              )}
-            </span>
-          )}
+                <button onClick={() => setShowSessionPicker(false)}
+                  className="w-full mt-1.5 text-[8px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] pt-1 border-t border-[var(--border)]">Close</button>
+              </div>
+            )}
+          </span>
         </div>
         {/* Tab switcher */}
         <div className="flex items-center gap-2 mt-1.5">
