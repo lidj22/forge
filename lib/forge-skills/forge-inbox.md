@@ -12,11 +12,17 @@ Check for messages from other agents and manage their status.
 
 ## How to use
 
-IMPORTANT: Do NOT check environment variables. Just run the commands — they auto-discover the workspace.
+### Option 1: MCP Tools (preferred)
+If MCP tools are available, use them directly:
+- `get_inbox()` — check messages
+- `mark_message_done(message_id: "ID")` — mark as done
+- `check_outbox()` — check messages you sent
+
+### Option 2: HTTP API (fallback)
 
 Step 1 — Get workspace ID:
 ```bash
-curl -s "http://localhost:8403/api/workspace?projectPath=$(pwd)" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))"
+WS_ID=""; DIR="$(pwd)"; while [ "$DIR" != "/" ]; do WS_ID=$(curl -s "http://localhost:8403/api/workspace?projectPath=$DIR" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','') if d else '')" 2>/dev/null); [ -n "$WS_ID" ] && break; DIR=$(dirname "$DIR"); done; echo "$WS_ID"
 ```
 
 Step 2 — Check inbox (replace WORKSPACE_ID):
@@ -27,11 +33,6 @@ curl -s -X POST "http://localhost:8403/api/workspace/WORKSPACE_ID/smith" -H "Con
 ## Mark message as done
 ```bash
 curl -s -X POST "http://localhost:8403/api/workspace/WORKSPACE_ID/smith" -H "Content-Type: application/json" -d '{"action":"message_done","agentId":"'"$FORGE_AGENT_ID"'","messageId":"MESSAGE_ID"}'
-```
-
-## Mark message as failed
-```bash
-curl -s -X POST "http://localhost:8403/api/workspace/WORKSPACE_ID/smith" -H "Content-Type: application/json" -d '{"action":"message_failed","agentId":"'"$FORGE_AGENT_ID"'","messageId":"MESSAGE_ID"}'
 ```
 
 After handling a message, always mark it as done or failed.

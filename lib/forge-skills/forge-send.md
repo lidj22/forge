@@ -1,5 +1,5 @@
 ---
-description: Send a message to another Forge Workspace agent immediately via API (notify QA of a fix, ask PM a question, etc.)
+description: Send a message to another Forge Workspace agent immediately (notify QA of a fix, ask PM a question, etc.)
 ---
 
 # Forge Send
@@ -17,11 +17,17 @@ Send a message to another agent in the Forge Workspace.
 
 ## How to send
 
-IMPORTANT: Do NOT check environment variables first. Just run the command below — it auto-discovers everything.
+### Option 1: MCP Tool (preferred)
+If the `send_message` tool is available, use it directly:
+```
+send_message(to: "TARGET_LABEL", content: "YOUR MESSAGE", action: "ACTION")
+```
 
-Step 1 — Get workspace ID:
+### Option 2: HTTP API (fallback if MCP not available)
+
+Step 1 — Get workspace ID (tries current dir, then walks up to project root):
 ```bash
-curl -s "http://localhost:8403/api/workspace?projectPath=$(pwd)" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))"
+WS_ID=""; DIR="$(pwd)"; while [ "$DIR" != "/" ]; do WS_ID=$(curl -s "http://localhost:8403/api/workspace?projectPath=$DIR" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id','') if d else '')" 2>/dev/null); [ -n "$WS_ID" ] && break; DIR=$(dirname "$DIR"); done; echo "$WS_ID"
 ```
 
 Step 2 — Send message (replace WORKSPACE_ID with result from step 1):
