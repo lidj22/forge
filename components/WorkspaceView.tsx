@@ -1501,10 +1501,10 @@ function TerminalDock({ terminals, projectPath, workspaceId, onSessionReady, onC
         {/* Tabs */}
         <div className="flex items-center bg-[#161b22] border-b border-[#30363d] overflow-x-auto shrink-0">
           {terminals.map(t => (
-            <button
+            <div
               key={t.agentId}
               onClick={() => setActiveTab(t.agentId)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] border-r border-[#30363d] shrink-0 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] border-r border-[#30363d] shrink-0 cursor-pointer ${
                 t.agentId === activeTab
                   ? 'bg-[#0d1117] text-white border-b-2 border-b-[#58a6ff]'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-[#1c2128]'
@@ -1512,11 +1512,11 @@ function TerminalDock({ terminals, projectPath, workspaceId, onSessionReady, onC
             >
               <span>{t.icon}</span>
               <span className="font-medium">{t.label}</span>
-              <button
+              <span
                 onClick={(e) => { e.stopPropagation(); onClose(t.agentId); }}
-                className="ml-1 text-gray-600 hover:text-red-400 text-[8px]"
-              >✕</button>
-            </button>
+                className="ml-1 text-gray-600 hover:text-red-400 text-[8px] cursor-pointer"
+              >✕</span>
+            </div>
           ))}
         </div>
         {/* Active terminal */}
