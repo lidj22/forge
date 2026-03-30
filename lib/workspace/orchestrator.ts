@@ -11,7 +11,7 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { readFileSync, existsSync, writeFileSync, unlinkSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -1659,6 +1659,22 @@ export class WorkspaceOrchestrator extends EventEmitter {
     return null;
   }
 
+  /** Find the latest (most recently modified) CLI session file for this project */
+  private findLatestCliSession(): string | null {
+    try {
+      const dir = this.getCliSessionDir();
+      if (!existsSync(dir)) return null;
+      const files = readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+      if (files.length === 0) return null;
+      // Sort by mtime descending — latest modified first
+      const sorted = files
+        .map(f => ({ name: f, mtime: statSync(join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      return sorted[0].name.replace('.jsonl', '');
+    } catch {}
+    return null;
+  }
+
   /** Create a persistent tmux session with the CLI agent */
   private async ensurePersistentSession(agentId: string, config: WorkspaceAgentConfig): Promise<void> {
     const safeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
@@ -1716,11 +1732,17 @@ export class WorkspaceOrchestrator extends EventEmitter {
         if (envExports) parts.push(envExports.replace(/ && $/, ''));
         let cmd = cliCmd;
 
-        // Fixed session binding: use --resume <id> if we have a stored session ID
+        // Fixed session binding: use --resume <id> for deterministic session
+        if (supportsSession && !config.fixedSessionId) {
+          // No stored session — find the latest existing one to bind
+          config.fixedSessionId = this.findLatestCliSession() || undefined;
+          if (config.fixedSessionId) {
+            this.saveNow();
+            console.log(`[daemon] ${config.label}: auto-bound to latest CLI session ${config.fixedSessionId}`);
+          }
+        }
         if (supportsSession && config.fixedSessionId) {
           cmd += ` --resume ${config.fixedSessionId}`;
-        } else if (supportsSession) {
-          // No fixed session yet — start fresh (will detect and bind after)
         }
         if (modelFlag) cmd += modelFlag;
         if (config.skipPermissions !== false && skipPermissionsFlag) cmd += ` ${skipPermissionsFlag}`;
