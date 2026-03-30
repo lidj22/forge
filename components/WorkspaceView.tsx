@@ -2406,8 +2406,18 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id }).catch(() => ({})) as any;
                 setFloatingTerminals(prev => [...prev, {
                   agentId: agent.id, label: agent.label, icon: agent.icon,
-                  cliId: agent.agentId || 'claude', workDir,
+                  cliId: agent.agentId || 'claude',
+                  cliCmd: (resolveRes as any)?.cliCmd || 'claude',
+                  cliType: (resolveRes as any)?.cliType || 'claude-code',
+                  workDir,
                   tmuxSession: res?.tmuxSession || sessName, sessionName: sessName, isPrimary: true,
+                  profileEnv: {
+                    ...((resolveRes as any)?.env || {}),
+                    ...((resolveRes as any)?.model ? { CLAUDE_MODEL: (resolveRes as any).model } : {}),
+                    FORGE_AGENT_ID: agent.id,
+                    FORGE_WORKSPACE_ID: workspaceId!,
+                    FORGE_PORT: String(window.location.port || 8403),
+                  },
                 }]);
                 return;
               }

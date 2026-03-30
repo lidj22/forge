@@ -314,9 +314,9 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       const tree = makeTerminal(undefined, projectPath);
       const paneId = firstTerminalId(tree);
       const sf = skipPermissions ? ' --dangerously-skip-permissions' : '';
-      let mcpFlag = '';
-      try { const { getMcpFlag } = await import('@/lib/session-utils'); mcpFlag = await getMcpFlag(projectPath); } catch {}
-      const cmd = `cd "${projectPath}" && claude --resume ${sessionId}${sf}${mcpFlag}\n`;
+      let mcpFlag = '', forgeEnv = '';
+      try { const { getMcpFlag, getForgeEnvExports } = await import('@/lib/session-utils'); mcpFlag = await getMcpFlag(projectPath); forgeEnv = await getForgeEnvExports(projectPath); } catch {}
+      const cmd = `${forgeEnv}cd "${projectPath}" && claude --resume ${sessionId}${sf}${mcpFlag}\n`;
       pendingCommands.set(paneId, cmd);
       const projectName = projectPath.split('/').pop() || 'Terminal';
       const newTab: TabState = {
@@ -382,10 +382,15 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
       // Wait for fixedSession resolution before building command
       if (fixedSessionPending) await fixedSessionPending;
 
-      // MCP config flag for claude-code agents
+      // MCP + env vars for claude-code agents
       let mcpFlag = '';
+      let forgeEnv = '';
       if (agentCmd === 'claude' && projectPath) {
-        try { const { getMcpFlag } = await import('@/lib/session-utils'); mcpFlag = await getMcpFlag(projectPath); } catch {}
+        try {
+          const { getMcpFlag, getForgeEnvExports } = await import('@/lib/session-utils');
+          mcpFlag = await getMcpFlag(projectPath);
+          forgeEnv = await getForgeEnvExports(projectPath);
+        } catch {}
       }
 
       let targetTabId: number | null = null;
@@ -398,7 +403,7 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
         }
         const tree = makeTerminal(undefined, projectPath);
         const paneId = firstTerminalId(tree);
-        pendingCommands.set(paneId, `${envPrefix}cd "${projectPath}" && ${agentCmd}${resumeFlag}${modelFlag}${sf}${mcpFlag}\n`);
+        pendingCommands.set(paneId, `${forgeEnv}${envPrefix}cd "${projectPath}" && ${agentCmd}${resumeFlag}${modelFlag}${sf}${mcpFlag}\n`);
         const newTab: TabState = {
           id: nextId++,
           label: projectName,
@@ -937,13 +942,18 @@ const WebTerminal = forwardRef<WebTerminalHandle, WebTerminalProps>(function Web
                                               sf = cfg?.skipPermissionsFlag ? ` ${cfg.skipPermissionsFlag}` : (cliCmd === 'claude' ? ' --dangerously-skip-permissions' : '');
                                             }
 
-                                            // MCP config flag
+                                            // MCP + env vars
                                             let mcpFlag = '';
+                                            let forgeEnv = '';
                                             if (cliCmd === 'claude') {
-                                              try { const { getMcpFlag } = await import('@/lib/session-utils'); mcpFlag = await getMcpFlag(p.path); } catch {}
+                                              try {
+                                                const { getMcpFlag, getForgeEnvExports } = await import('@/lib/session-utils');
+                                                mcpFlag = await getMcpFlag(p.path);
+                                                forgeEnv = await getForgeEnvExports(p.path);
+                                              } catch {}
                                             }
 
-                                            cmd = `${envExports}cd "${p.path}" && ${cliCmd}${resumeFlag}${modelFlag}${sf}${mcpFlag}\n`;
+                                            cmd = `${forgeEnv}${envExports}cd "${p.path}" && ${cliCmd}${resumeFlag}${modelFlag}${sf}${mcpFlag}\n`;
                                           } catch {
                                             cmd = `cd "${p.path}" && ${a.id}\n`;
                                           }
@@ -1475,13 +1485,13 @@ const MemoTerminalPane = memo(function TerminalPane({
             if (isNewlyCreated && projectPathRef.current && !pendingCommands.has(id)) {
               isNewlyCreated = false;
               const pp = projectPathRef.current;
-              import('@/lib/session-utils').then(({ resolveFixedSession, buildResumeFlag, getMcpFlag }) => {
-                Promise.all([resolveFixedSession(pp), getMcpFlag(pp)]).then(([fixedId, mcpFlag]) => {
+              import('@/lib/session-utils').then(({ resolveFixedSession, buildResumeFlag, getMcpFlag, getForgeEnvExports }) => {
+                Promise.all([resolveFixedSession(pp), getMcpFlag(pp), getForgeEnvExports(pp)]).then(([fixedId, mcpFlag, forgeEnv]) => {
                   const resumeFlag = buildResumeFlag(fixedId, true);
                   const skipFlag = skipPermRef.current ? ' --dangerously-skip-permissions' : '';
                   setTimeout(() => {
                     if (!disposed && ws?.readyState === WebSocket.OPEN) {
-                      ws.send(JSON.stringify({ type: 'input', data: `cd "${pp}" && claude${resumeFlag}${skipFlag}${mcpFlag}\n` }));
+                      ws.send(JSON.stringify({ type: 'input', data: `${forgeEnv}cd "${pp}" && claude${resumeFlag}${skipFlag}${mcpFlag}\n` }));
                     }
                   }, 300);
                 });
