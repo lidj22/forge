@@ -58,6 +58,8 @@ export default function SessionView({
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Map<string, Set<string>>>(new Map());
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Workspace bound session: { projectPath → fixedSessionId }
+  const [boundSessions, setBoundSessions] = useState<Record<string, string>>({});
 
   // Load cached sessions tree
   const loadTree = useCallback(async (force = false) => {
@@ -84,6 +86,22 @@ export default function SessionView({
     } catch {}
   }, []);
 
+  // Load workspace bound sessions for all projects
+  const loadBoundSessions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/workspace');
+      const workspaces = await res.json();
+      if (!Array.isArray(workspaces)) return;
+      const bound: Record<string, string> = {};
+      for (const ws of workspaces) {
+        if (!ws.agents) continue;
+        const primary = ws.agents.find((a: any) => a.primary && a.fixedSessionId);
+        if (primary) bound[ws.projectName] = primary.fixedSessionId;
+      }
+      setBoundSessions(bound);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     // In single-project mode: load cached first (fast), then sync in background
     if (singleProject) {
@@ -92,7 +110,8 @@ export default function SessionView({
       loadTree(true);
     }
     loadWatchers();
-  }, [loadTree, loadWatchers, singleProject]);
+    loadBoundSessions();
+  }, [loadTree, loadWatchers, loadBoundSessions, singleProject]);
 
   // Auto-expand project if only one or if pre-selected
   useEffect(() => {
@@ -425,6 +444,9 @@ export default function SessionView({
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-[8px] text-[var(--text-secondary)] font-mono">{s.sessionId.slice(0, 8)}</span>
+                      {boundSessions[project] === s.sessionId && (
+                        <span className="text-[7px] px-1 py-0 rounded bg-[#f0883e]/20 text-[#f0883e] font-medium">bound</span>
+                      )}
                       {s.gitBranch && <span className="text-[8px] text-[var(--accent)]">{s.gitBranch}</span>}
                       {s.modified && (
                         <span className="text-[8px] text-[var(--text-secondary)]">

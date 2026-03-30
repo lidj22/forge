@@ -82,6 +82,7 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [pipelineBindings, setPipelineBindings] = useState<{ id: number; workflowName: string; enabled: boolean; config: any; lastRunAt: string | null; nextRunAt: string | null }[]>([]);
   const [pipelineRuns, setPipelineRuns] = useState<{ id: string; workflowName: string; pipelineId: string; status: string; summary: string; dedupKey: string | null; createdAt: string }[]>([]);
   const [availableWorkflows, setAvailableWorkflows] = useState<{ name: string; description?: string; builtin?: boolean; type?: string }[]>([]);
+  const [boundSession, setBoundSession] = useState<{ agentLabel: string; sessionId: string } | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedPipeline, setExpandedPipeline] = useState<any>(null);
   const [showAddPipeline, setShowAddPipeline] = useState(false);
@@ -401,6 +402,17 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
     // Fetch git info and file tree in parallel
     fetchGitInfo();
     fetchTree();
+    // Fetch workspace bound session
+    fetch(`/api/workspace?projectPath=${encodeURIComponent(projectPath)}`)
+      .then(r => r.json())
+      .then(ws => {
+        if (ws?.agents) {
+          const primary = ws.agents.find((a: any) => a.primary && a.fixedSessionId);
+          if (primary) setBoundSession({ agentLabel: primary.label, sessionId: primary.fixedSessionId });
+          else setBoundSession(null);
+        }
+      })
+      .catch(() => {});
   }, [projectPath, fetchGitInfo, fetchTree]);
 
   // Lazy load tab-specific data only when switching to that tab
@@ -443,10 +455,19 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
             </button>
           </div>
         </div>
-        <div className="text-[9px] text-[var(--text-secondary)] mt-0.5">
-          {projectPath}
+        <div className="text-[9px] text-[var(--text-secondary)] mt-0.5 flex items-center gap-2 flex-wrap">
+          <span>{projectPath}</span>
           {gitInfo?.remote && (
-            <span className="ml-2">{gitInfo.remote.replace(/^https?:\/\//, '').replace(/^git@github\.com:/, 'github.com/').replace(/\.git$/, '')}</span>
+            <span>{gitInfo.remote.replace(/^https?:\/\//, '').replace(/^git@github\.com:/, 'github.com/').replace(/\.git$/, '')}</span>
+          )}
+          {boundSession && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded bg-[#f0883e]/10 text-[#f0883e]">
+              <span className="text-[8px]">session:</span>
+              <span className="font-mono text-[8px]">{boundSession.sessionId.slice(0, 8)}</span>
+              <span className="text-[7px] opacity-70">({boundSession.agentLabel})</span>
+              <button onClick={() => navigator.clipboard.writeText(boundSession.sessionId)}
+                className="text-[7px] hover:text-white ml-0.5" title={boundSession.sessionId}>copy</button>
+            </span>
           )}
         </div>
         {/* Tab switcher */}
