@@ -1968,27 +1968,8 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
     }
   });
 
-  // Auto-open floating terminals for manual agents on page load
-  const autoOpenDone = useRef(false);
-  useEffect(() => {
-    if (autoOpenDone.current || agents.length === 0 || Object.keys(states).length === 0) return;
-    autoOpenDone.current = true;
-    const manualAgents = agents.filter(a =>
-      a.type !== 'input' && states[a.id]?.tmuxSession
-    );
-    if (manualAgents.length > 0) {
-      const safeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
-      setFloatingTerminals(manualAgents.map(a => ({
-        agentId: a.id,
-        label: a.label,
-        icon: a.icon,
-        cliId: a.agentId || 'claude',
-        workDir: a.workDir && a.workDir !== './' && a.workDir !== '.' ? a.workDir : undefined,
-        tmuxSession: states[a.id].tmuxSession,
-        sessionName: `mw-forge-${safeName(projectName)}-${safeName(a.label)}`,
-      })));
-    }
-  }, [agents, states]);
+  // Auto-open terminals removed — persistent sessions run in background tmux.
+  // User opens terminal via ⌨️ button when needed.
 
   // Rebuild nodes when agents/states/preview change — preserve existing positions + dimensions
   useEffect(() => {
