@@ -283,6 +283,10 @@ function useWorkspaceStream(workspaceId: string | null, onEvent?: (event: any) =
           ));
         }
 
+        if (event.type === 'bus_log_updated') {
+          setBusLog(event.log || []);
+        }
+
         // Server pushed updated agents list + states (after add/remove/update/reset)
         if (event.type === 'agents_changed') {
           const newAgents = event.agents || [];

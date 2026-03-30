@@ -374,10 +374,13 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         return json(res, { ok: true });
       }
       case 'delete_message': {
-        const { messageId } = body;
-        if (!messageId) return jsonError(res, 'messageId required');
-        orch.getBus().deleteMessage(messageId);
-        return json(res, { ok: true });
+        const { messageId, messageIds } = body;
+        const ids: string[] = messageIds || (messageId ? [messageId] : []);
+        if (ids.length === 0) return jsonError(res, 'messageId or messageIds required');
+        for (const id of ids) orch.getBus().deleteMessage(id);
+        // Push updated bus log to frontend
+        orch.emit('event', { type: 'bus_log_updated', log: orch.getBus().getLog() } as any);
+        return json(res, { ok: true, deleted: ids.length });
       }
       case 'start_daemon': {
         // Check active daemon count before starting
