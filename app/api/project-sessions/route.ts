@@ -52,7 +52,7 @@ function ensureMcpConfig(projectPath: string): void {
       }
     } catch {}
 
-    const config = { mcpServers: { forge: { url: `http://localhost:${mcpPort}/sse${wsParam}` } } };
+    const config = { mcpServers: { forge: { type: 'sse', url: `http://localhost:${mcpPort}/sse${wsParam}` } } };
 
     // Always rewrite (workspace context may have changed)
     mkdirSync(forgeDir, { recursive: true });

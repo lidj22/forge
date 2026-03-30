@@ -1733,6 +1733,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
             const mcpConfig = {
               mcpServers: {
                 forge: {
+                  type: 'sse',
                   url: `http://localhost:${mcpPort}/sse?workspaceId=${this.workspaceId}&agentId=${config.id}`,
                 },
               },
