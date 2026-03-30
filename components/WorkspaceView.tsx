@@ -1494,7 +1494,7 @@ function TerminalLaunchDialog({ agent, workDir, sessName, projectPath, workspace
     if (!isClaude) return;
     fetch(`/api/workspace/${workspaceId}/smith`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'sessions' }),
+      body: JSON.stringify({ action: 'sessions', agentId: agent.id }),
     }).then(r => r.json()).then(d => {
       if (d.sessions?.length) setSessions(d.sessions);
     }).catch(() => {});

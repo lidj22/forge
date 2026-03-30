@@ -644,9 +644,12 @@ async function handleSmith(id: string, body: any, res: ServerResponse): Promise<
 
     case 'sessions': {
       // List recent claude sessions for resume picker
-      // Uses the workspace's projectPath to find sessions in ~/.claude/projects/
+      // Uses the agent's workDir (or project root) to find sessions
       try {
-        const encoded = orch.projectPath.replace(/\//g, '-');
+        const agentConfig = agentId ? orch.getSnapshot().agents.find(a => a.id === agentId) : null;
+        const agentWorkDir = agentConfig?.workDir && agentConfig.workDir !== './' && agentConfig.workDir !== '.'
+          ? `${orch.projectPath}/${agentConfig.workDir}` : orch.projectPath;
+        const encoded = agentWorkDir.replace(/\//g, '-');
         const sessDir = join(homedir(), '.claude', 'projects', encoded);
         const entries = readdirSync(sessDir);
         const files = entries
