@@ -1172,6 +1172,42 @@ export class WorkspaceOrchestrator extends EventEmitter {
           this.forgeActedMessages.add(`running-${msg.id}`);
         }
       }
+
+      // Case 3: Pending too long (>2min) → agent not consuming
+      if (msg.status === 'pending') {
+        const age = now - msg.timestamp;
+        if (age > 120_000 && !this.forgeActedMessages.has(`pending-${msg.id}`)) {
+          const targetEntry = this.agents.get(msg.to);
+          const targetLabel = targetEntry?.config.label || msg.to;
+          console.log(`[forge-agent] Warning: ${targetLabel} has pending message ${msg.id.slice(0, 8)} for ${Math.round(age / 60000)}min`);
+          this.emit('event', { type: 'log', agentId: msg.to, entry: { type: 'system', subtype: 'warning', content: `Pending message from ${this.agents.get(msg.from)?.config.label || msg.from} waiting for ${Math.round(age / 60000)}min`, timestamp: new Date().toISOString() } } as any);
+          this.forgeActedMessages.add(`pending-${msg.id}`);
+        }
+      }
+
+      // Case 4: Failed → notify sender so they know
+      if (msg.status === 'failed' && !this.forgeActedMessages.has(`failed-${msg.id}`)) {
+        const senderEntry = this.agents.get(msg.from);
+        const targetLabel = this.agents.get(msg.to)?.config.label || msg.to;
+        if (senderEntry && msg.from !== '_forge' && msg.from !== '_system') {
+          this.bus.send('_forge', msg.from, 'notify', {
+            action: 'update_notify',
+            content: `Your message to ${targetLabel} has failed. You may want to retry or take a different approach.`,
+          });
+          console.log(`[forge-agent] Notified ${senderEntry.config.label} that message to ${targetLabel} failed`);
+        }
+        this.forgeActedMessages.add(`failed-${msg.id}`);
+      }
+
+      // Case 5: Pending approval too long (>5min) → log reminder
+      if (msg.status === 'pending_approval') {
+        const age = now - msg.timestamp;
+        if (age > 300_000 && !this.forgeActedMessages.has(`approval-${msg.id}`)) {
+          const targetLabel = this.agents.get(msg.to)?.config.label || msg.to;
+          this.emit('event', { type: 'log', agentId: msg.to, entry: { type: 'system', subtype: 'warning', content: `Message awaiting approval for ${Math.round(age / 60000)}min — requires manual action`, timestamp: new Date().toISOString() } } as any);
+          this.forgeActedMessages.add(`approval-${msg.id}`);
+        }
+      }
     }
   }
 
