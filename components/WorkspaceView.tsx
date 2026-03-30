@@ -2223,16 +2223,14 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
             className="text-[9px] px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/30">💬 Message</button>
         )}
         <div className="flex-1" />
-        {taskStatus !== 'running' && (
-          <span className="flex items-center">
+        <span className="flex items-center">
             <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onOpenTerminal(); }}
-              className="text-[9px] text-gray-600 hover:text-green-400 px-1" title="Open terminal">⌨️</button>
+              className={`text-[9px] px-1 ${hasTmux && taskStatus === 'running' ? 'text-green-400 animate-pulse' : 'text-gray-600 hover:text-green-400'}`} title="Open terminal">⌨️</button>
             {hasTmux && !config.primary && (
               <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onSwitchSession(); }}
                 className="text-[7px] text-gray-600 hover:text-yellow-400 -ml-1" title="Switch session">▾</button>
             )}
           </span>
-        )}
         <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onShowInbox(); }}
           className="text-[9px] text-gray-600 hover:text-orange-400 px-1" title="Messages (inbox/outbox)">📨</button>
         <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onShowMemory(); }}
