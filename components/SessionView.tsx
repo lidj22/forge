@@ -452,6 +452,18 @@ export default function SessionView({
                             </button>
                           )}
                           <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const pp = projects.find(p => p.name === project)?.path || '';
+                              if (pp && onOpenInTerminal) onOpenInTerminal(s.sessionId, pp);
+                              else if (pp) window.dispatchEvent(new CustomEvent('forge:open-terminal', { detail: { projectPath: pp, projectName: project, agentId: 'claude', resumeMode: true, sessionId: s.sessionId } }));
+                            }}
+                            className="text-[8px] px-1 py-0.5 rounded bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                            title="Open this session in terminal"
+                          >
+                            open
+                          </button>
+                          <button
                             onClick={(e) => { e.stopPropagation(); createMonitorTask(project, s.sessionId); }}
                             className="text-[8px] px-1 py-0.5 rounded bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20"
                             title="Create monitor task (notify via Telegram)"
