@@ -1109,11 +1109,11 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Start monitors for all agents with known session IDs
     for (const [id, entry] of this.agents) {
       if (entry.config.type === 'input') continue;
-      this.startAgentSessionMonitor(id, entry.config);
+      await this.startAgentSessionMonitor(id, entry.config);
     }
   }
 
-  private startAgentSessionMonitor(agentId: string, config: WorkspaceAgentConfig): void {
+  private async startAgentSessionMonitor(agentId: string, config: WorkspaceAgentConfig): Promise<void> {
     if (!this.sessionMonitor) return;
 
     // Determine session file path
@@ -1121,8 +1121,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     if (config.primary) {
       try {
-        const { getFixedSession } = require('../project-sessions');
-        sessionId = getFixedSession(this.projectPath);
+        const mod = await import('../project-sessions');
+        sessionId = (mod as any).getFixedSession(this.projectPath);
         console.log(`[session-monitor] ${config.label}: primary fixedSession=${sessionId || 'NONE'}`);
       } catch (err: any) {
         console.log(`[session-monitor] ${config.label}: failed to get fixedSession: ${err.message}`);
@@ -1137,7 +1137,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       return;
     }
 
-    const { SessionFileMonitor } = require('./session-monitor');
+    const { SessionFileMonitor } = await import('./session-monitor');
     const filePath = SessionFileMonitor.resolveSessionPath(this.projectPath, config.workDir, sessionId);
     this.sessionMonitor.startMonitoring(agentId, filePath);
   }
