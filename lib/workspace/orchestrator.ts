@@ -1150,8 +1150,28 @@ export class WorkspaceOrchestrator extends EventEmitter {
     }
 
     if (!sessionId) {
-      console.log(`[session-monitor] ${config.label}: no sessionId, skipping`);
-      return;
+      // Try to auto-bind from session files on disk
+      try {
+        const sessionDir = this.getCliSessionDir(config.workDir);
+        if (existsSync(sessionDir)) {
+          const files = require('node:fs').readdirSync(sessionDir).filter((f: string) => f.endsWith('.jsonl'));
+          if (files.length > 0) {
+            const sorted = files
+              .map((f: string) => ({ name: f, mtime: require('node:fs').statSync(join(sessionDir, f)).mtimeMs }))
+              .sort((a: any, b: any) => b.mtime - a.mtime);
+            sessionId = sorted[0].name.replace('.jsonl', '');
+            if (!config.primary) {
+              config.boundSessionId = sessionId;
+              this.saveNow();
+              console.log(`[session-monitor] ${config.label}: auto-bound to ${sessionId}`);
+            }
+          }
+        }
+      } catch {}
+      if (!sessionId) {
+        console.log(`[session-monitor] ${config.label}: no sessionId, skipping`);
+        return;
+      }
     }
 
     const { SessionFileMonitor } = await import('./session-monitor');
