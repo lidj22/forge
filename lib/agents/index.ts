@@ -27,9 +27,9 @@ export function listAgents(): AgentConfig[] {
 
   // Codex
   const codexConfig = settings.agents?.codex;
-  const codex = detectAgent('codex', 'OpenAI Codex', codexConfig?.path || 'codex');
+  const codex = detectAgent('codex', 'OpenAI Codex', codexConfig?.path || 'codex', ['exec']);
   if (codex) {
-    codex.capabilities.requiresTTY = true;
+    codex.capabilities.requiresTTY = false; // exec subcommand is non-interactive
     agents.push({ ...codex, enabled: codexConfig?.enabled !== false, detected: true, skipPermissionsFlag: codexConfig?.skipPermissionsFlag || '--full-auto', cliType: 'codex' } as any);
   }
 
