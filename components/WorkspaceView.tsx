@@ -2196,8 +2196,13 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
             {(() => {
               // Execution mode is determined by config, not tmux state
               const isTerminalMode = config.persistentSession;
-              const color = isTerminalMode ? (hasTmux ? '#3fb950' : '#f0883e') : '#484f58';
-              const label = isTerminalMode ? (hasTmux ? 'terminal' : 'terminal (down)') : 'headless';
+              const isActive = smithStatus === 'active';
+              const color = isTerminalMode
+                ? (hasTmux ? '#3fb950' : '#f0883e')         // terminal: green (up) / orange (down)
+                : (isActive ? '#58a6ff' : '#484f58');        // headless: blue (active) / gray (down)
+              const label = isTerminalMode
+                ? (hasTmux ? 'terminal' : 'terminal (down)')
+                : (isActive ? 'headless' : 'headless (down)');
               return (<>
                 <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
                 <span className="text-[7px] font-medium" style={{ color }}>{label}</span>
