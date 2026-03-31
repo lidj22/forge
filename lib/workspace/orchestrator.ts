@@ -1289,7 +1289,11 @@ export class WorkspaceOrchestrator extends EventEmitter {
       if (this.forgeActedMessages.has(msg.id)) continue;
 
       // Case 1: Message done but no reply from target → ask target to send summary (once per pair)
+      // Skip notification-only messages that don't need replies
       if (msg.status === 'done') {
+        const action = msg.payload?.action;
+        if (action === 'upstream_complete' || action === 'task_complete' || action === 'ack') { this.forgeActedMessages.add(msg.id); continue; }
+        if (msg.from === '_system' || msg.from === '_watch') { this.forgeActedMessages.add(msg.id); continue; }
         const age = now - msg.timestamp;
         if (age < 30_000) continue;
 
