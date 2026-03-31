@@ -2447,7 +2447,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
       } else {
         entry.worker!.setProcessingMessage(nextMsg.id);
         entry.worker!.wake({ type: 'bus_message', messages: [logEntry] });
-        this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '⚡ Executed via claude -p', timestamp: new Date().toISOString() } } as any);
+        this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: `⚡ Executed via headless (${entry.config.agentId || 'claude'} -p)`, timestamp: new Date().toISOString() } } as any);
       }
     };
 

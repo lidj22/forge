@@ -444,20 +444,11 @@ export class AgentWorker extends EventEmitter {
       this.state.history.push(msg);
     }
 
-    // Execute using the last step definition as template (or first if no steps)
+    // Execute using step template, or create one from the prompt if no steps defined
     const stepTemplate = this.config.steps[this.config.steps.length - 1] || this.config.steps[0];
-    if (!stepTemplate) {
-      // No steps defined — just log
-      this.state.history.push({
-        type: 'system', subtype: 'daemon',
-        content: `[Daemon] Wake: ${reason.type} — no steps defined to execute`,
-        timestamp: new Date().toISOString(),
-      });
-      return;
-    }
 
     const step = {
-      ...stepTemplate,
+      ...(stepTemplate || { id: '', label: '', prompt: '' }),
       id: `daemon-${this.state.daemonIteration}`,
       label: `Daemon iteration ${this.state.daemonIteration}`,
       prompt,
