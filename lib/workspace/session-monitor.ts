@@ -158,8 +158,9 @@ export class SessionFileMonitor extends EventEmitter {
           const tmux = this.tmuxSessions.get(agentId);
           if (tmux) {
             const probe = this.probeState.get(agentId) || { count: 0, lastTime: 0 };
-            // Increasing intervals: 10s, 20s, 30s, 60s, 60s, 60s...
-            const intervals = [10000, 20000, 30000, 60000];
+            // Increasing intervals: 30s, 60s, 120s, 300s — max 3 probes then stop
+            const intervals = [30000, 60000, 120000, 300000];
+            if (probe.count >= 3) return; // stop probing after 3 attempts
             const interval = intervals[Math.min(probe.count, intervals.length - 1)];
             const timeSinceProbe = Date.now() - probe.lastTime;
 
