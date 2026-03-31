@@ -1089,7 +1089,11 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Listen for state changes from session file monitor
     this.sessionMonitor.on('stateChange', (event: any) => {
       const entry = this.agents.get(event.agentId);
-      if (!entry) return;
+      if (!entry) {
+        console.log(`[session-monitor] stateChange: agent ${event.agentId} not found in map`);
+        return;
+      }
+      console.log(`[session-monitor] stateChange: ${entry.config.label} ${event.state} (current taskStatus=${entry.state.taskStatus})`);
 
       if (event.state === 'running' && entry.state.taskStatus !== 'running') {
         entry.state.taskStatus = 'running';
