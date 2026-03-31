@@ -2004,12 +2004,12 @@ export class WorkspaceOrchestrator extends EventEmitter {
         const unsetCmd = profileVarsToReset.map(v => `unset ${v}`).join(' && ');
         execSync(`tmux send-keys -t "${sessionName}" '${unsetCmd}' Enter`, { timeout: 5000 });
 
-        // Set FORGE env vars + profile env vars
-        const forgeVars = `export FORGE_WORKSPACE_ID="${this.workspaceId}" FORGE_AGENT_ID="${config.id}" FORGE_PORT="${Number(process.env.PORT) || 8403}"`;
+        // Set FORGE env vars (short, separate command)
+        execSync(`tmux send-keys -t "${sessionName}" 'export FORGE_WORKSPACE_ID="${this.workspaceId}" FORGE_AGENT_ID="${config.id}" FORGE_PORT="${Number(process.env.PORT) || 8403}"' Enter`, { timeout: 5000 });
+
+        // Set profile env vars if any (separate command to avoid truncation)
         if (envExports) {
-          execSync(`tmux send-keys -t "${sessionName}" '${forgeVars} && ${envExports.replace(/ && $/, '')}' Enter`, { timeout: 5000 });
-        } else {
-          execSync(`tmux send-keys -t "${sessionName}" '${forgeVars}' Enter`, { timeout: 5000 });
+          execSync(`tmux send-keys -t "${sessionName}" '${envExports.replace(/ && $/, '')}' Enter`, { timeout: 5000 });
         }
 
         // Build CLI start command
