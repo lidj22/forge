@@ -2105,28 +2105,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
       this.emitAgentsChanged();
     }
 
-    // Auto-bind session ID if not set (for both new and existing tmux sessions)
+    // Warn if non-primary agent has no boundSessionId — session monitor won't work
     if (!config.primary && !config.boundSessionId) {
-      const bindDelay = sessionAlreadyExists ? 500 : 5000; // existing: bind quickly, new: wait for session file
-      setTimeout(() => {
-        try {
-          const sessionDir = this.getCliSessionDir(config.workDir);
-          if (existsSync(sessionDir)) {
-            const { readdirSync, statSync: statS } = require('node:fs');
-            const files = readdirSync(sessionDir).filter((f: string) => f.endsWith('.jsonl'));
-            if (files.length > 0) {
-              const latest = files
-                .map((f: string) => ({ name: f, mtime: statS(join(sessionDir, f)).mtimeMs }))
-                .sort((a: any, b: any) => b.mtime - a.mtime)[0];
-              config.boundSessionId = latest.name.replace('.jsonl', '');
-              this.saveNow();
-              console.log(`[daemon] ${config.label}: auto-bound to session ${config.boundSessionId}`);
-              // Start session file monitor for this agent
-              this.startAgentSessionMonitor(agentId, config);
-            }
-          }
-        } catch {}
-      }, bindDelay);
+      console.warn(`[daemon] ${config.label}: no boundSessionId — session monitor inactive. Set via agent config or session list.`);
     }
   }
 
