@@ -1053,14 +1053,26 @@ export class WorkspaceOrchestrator extends EventEmitter {
         entry.worker = null;
       }
 
-      // 3. Kill tmux session
+      // 3. Kill tmux session (skip if user is attached to it)
       if (entry.state.tmuxSession) {
-        try { execSync(`tmux kill-session -t "${entry.state.tmuxSession}" 2>/dev/null`, { timeout: 3000 }); } catch {}
+        let isAttached = false;
+        try {
+          const info = execSync(`tmux display-message -t "${entry.state.tmuxSession}" -p "#{session_attached}" 2>/dev/null`, { timeout: 3000, encoding: 'utf-8' }).trim();
+          isAttached = info !== '0';
+        } catch {}
+        if (isAttached) {
+          console.log(`[daemon] ${entry.config.label}: tmux session attached by user, not killing`);
+        } else {
+          try { execSync(`tmux kill-session -t "${entry.state.tmuxSession}" 2>/dev/null`, { timeout: 3000 }); } catch {}
+        }
         entry.state.tmuxSession = undefined;
       }
 
-      // 4. Set smith down
+      // 4. Set smith down, reset running tasks
       entry.state.smithStatus = 'down';
+      if (entry.state.taskStatus === 'running') {
+        entry.state.taskStatus = 'idle';
+      }
       entry.state.error = undefined;
       this.updateAgentLiveness(id);
       this.emit('event', { type: 'smith_status', agentId: id, smithStatus: 'down' } satisfies WorkerEvent);
