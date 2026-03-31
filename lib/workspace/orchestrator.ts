@@ -1117,13 +1117,16 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.sessionMonitor = new SessionFileMonitor();
 
     // Listen for state changes from session file monitor
-    // Only 'done' is used — 'running' is set by message loop when inbox message is consumed.
-    // Session file activity alone doesn't mean "agent is executing a task" (user may be chatting).
     this.sessionMonitor.on('stateChange', (event: any) => {
       const entry = this.agents.get(event.agentId);
       if (!entry) return;
 
-      // Only handle done transitions (running → done)
+      if (event.state === 'running' && entry.state.taskStatus !== 'running') {
+        entry.state.taskStatus = 'running';
+        this.emit('event', { type: 'task_status', agentId: event.agentId, taskStatus: 'running' } as any);
+        this.emitAgentsChanged();
+      }
+
       if (event.state === 'done' && entry.state.taskStatus === 'running') {
         entry.state.taskStatus = 'done';
         this.emit('event', { type: 'task_status', agentId: event.agentId, taskStatus: 'done' } as any);
