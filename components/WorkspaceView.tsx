@@ -1357,11 +1357,19 @@ function InboxPanel({ agentId, agentLabel, busLog, agents, workspaceId, onClose 
                     </button>
                   </div>
                 )}
-                {msg.status === 'pending' && msg.type !== 'ack' && (
-                  <button onClick={() => wsApi(workspaceId, 'abort_message', { messageId: msg.id })}
-                    className="text-[7px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 ml-auto">
-                    ✕ Abort
-                  </button>
+                {(msg.status === 'pending' || msg.status === 'running') && msg.type !== 'ack' && (
+                  <div className="flex gap-1 ml-auto">
+                    <button onClick={() => wsApi(workspaceId, 'abort_message', { messageId: msg.id })}
+                      className="text-[7px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">
+                      ✕ Abort
+                    </button>
+                    {msg.status === 'running' && (
+                      <button onClick={() => wsApi(workspaceId, 'message_done', { messageId: msg.id })}
+                        className="text-[7px] px-1.5 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30">
+                        ✓ Done
+                      </button>
+                    )}
+                  </div>
                 )}
                 {(msg.status === 'done' || msg.status === 'failed') && msg.type !== 'ack' && (
                   <div className="flex gap-1 ml-auto">
