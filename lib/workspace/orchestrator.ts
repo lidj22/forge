@@ -1097,12 +1097,15 @@ export class WorkspaceOrchestrator extends EventEmitter {
 
     // Mark running messages as failed
     this.bus.markAllRunningAsFailed();
-    this.emitAgentsChanged();
     this.watchManager.stop();
     this.stopAllTerminalMonitors();
     if (this.sessionMonitor) { this.sessionMonitor.stopAll(); this.sessionMonitor = null; }
     this.stopHealthCheck();
     this.forgeActedMessages.clear();
+    this.forgeAgentStartTime = 0;
+    // Force save AFTER all state changes, before emitting events
+    this.saveNow();
+    this.emitAgentsChanged();
     console.log('[workspace] Daemon stopped');
   }
 
