@@ -2460,13 +2460,9 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
             inboxFailed: busLog.filter(m => m.to === agent.id && m.status === 'failed' && m.type !== 'ack').length,
             onOpenTerminal: async () => {
               if (!workspaceId) return;
-              // If any agent is active, daemon is running (fix stale daemonActiveFromStream)
+              // Sync stale daemonActiveFromStream from agent states
               const anyActive = Object.values(states).some(s => s?.smithStatus === 'active');
               if (anyActive && !daemonActiveFromStream) setDaemonActiveFromStream(true);
-              if (!anyActive && !daemonActiveFromStream) {
-                alert('Start daemon first before opening terminal.');
-                return;
-              }
               // Close existing terminal (config may have changed)
               setFloatingTerminals(prev => prev.filter(t => t.agentId !== agent.id));
 
