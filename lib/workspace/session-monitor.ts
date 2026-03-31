@@ -160,7 +160,12 @@ export class SessionFileMonitor extends EventEmitter {
             const probe = this.probeState.get(agentId) || { count: 0, lastTime: 0 };
             // Increasing intervals: 30s, 60s, 120s, 300s — max 3 probes then stop
             const intervals = [30000, 60000, 120000, 300000];
-            if (probe.count >= 3) return; // stop probing after 3 attempts
+            if (probe.count >= 3) {
+              // 3 probes sent, no response → mark done
+              this.setState(agentId, 'done', filePath, 'no heartbeat response');
+              this.probeState.delete(agentId);
+              return;
+            }
             const interval = intervals[Math.min(probe.count, intervals.length - 1)];
             const timeSinceProbe = Date.now() - probe.lastTime;
 
