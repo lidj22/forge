@@ -914,7 +914,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.watchManager.start();
 
     // Start session file monitors for agents with known session IDs
-    this.startSessionMonitors();
+    this.startSessionMonitors().catch(err => console.error('[session-monitor] Failed to start:', err.message));
 
     // Start health check — monitor all agents every 10s, auto-heal
     this.startHealthCheck();
@@ -1082,6 +1082,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
   // ─── Session File Monitor ──────────────────────────────
 
   private async startSessionMonitors(): Promise<void> {
+    console.log('[session-monitor] Initializing...');
     const { SessionFileMonitor } = await import('./session-monitor');
     this.sessionMonitor = new SessionFileMonitor();
 
@@ -1119,16 +1120,22 @@ export class WorkspaceOrchestrator extends EventEmitter {
     let sessionId: string | undefined;
 
     if (config.primary) {
-      // Primary: from project-sessions
       try {
         const { getFixedSession } = require('../project-sessions');
         sessionId = getFixedSession(this.projectPath);
-      } catch {}
+        console.log(`[session-monitor] ${config.label}: primary fixedSession=${sessionId || 'NONE'}`);
+      } catch (err: any) {
+        console.log(`[session-monitor] ${config.label}: failed to get fixedSession: ${err.message}`);
+      }
     } else {
       sessionId = config.boundSessionId;
+      console.log(`[session-monitor] ${config.label}: boundSession=${sessionId || 'NONE'}`);
     }
 
-    if (!sessionId) return; // no session to monitor
+    if (!sessionId) {
+      console.log(`[session-monitor] ${config.label}: no sessionId, skipping`);
+      return;
+    }
 
     const { SessionFileMonitor } = require('./session-monitor');
     const filePath = SessionFileMonitor.resolveSessionPath(this.projectPath, config.workDir, sessionId);
