@@ -697,6 +697,11 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
                   className="accent-[#f0883e]" />
                 <label htmlFor="skipPermissions" className="text-[9px] text-gray-400">Skip permissions (auto-approve all tool calls)</label>
               </div>
+              {agentId !== 'claude' && !availableAgents.find(a => a.id === agentId && (a as any).backendType !== 'cli')?.isProfile && (
+                <div className="text-[8px] text-yellow-400/80 bg-yellow-400/10 px-2 py-1 rounded">
+                  ⚠ Terminal mode with {agentId} has limited status detection. Headless mode recommended.
+                </div>
+              )}
             </div>
           )}
 
