@@ -131,6 +131,10 @@ export class SessionFileMonitor extends EventEmitter {
         if (prevState !== 'running') {
           this.setState(agentId, 'running', filePath);
         }
+        // Check for FORGE_DONE on every file change (instant detection)
+        if (prevState === 'running' && this.checkForForgeDone(filePath)) {
+          this.setState(agentId, 'done', filePath, 'FORGE_DONE marker detected');
+        }
         return;
       }
 
@@ -159,6 +163,20 @@ export class SessionFileMonitor extends EventEmitter {
     }
   }
 
+  /** Quick check for FORGE_DONE marker in last 2KB of session file */
+  private checkForForgeDone(filePath: string): boolean {
+    try {
+      const stat = statSync(filePath);
+      const readSize = Math.min(2048, stat.size);
+      const fd = require('node:fs').openSync(filePath, 'r');
+      const buf = Buffer.alloc(readSize);
+      require('node:fs').readSync(fd, buf, 0, readSize, Math.max(0, stat.size - readSize));
+      require('node:fs').closeSync(fd);
+      const tail = buf.toString('utf-8');
+      return tail.includes('FORGE_DONE') || tail.includes('[FORGE_DONE]');
+    } catch { return false; }
+  }
+
   /**
    * Check the last few lines of the session file for a 'result' type entry.
    * Claude Code writes this when a turn completes.
@@ -174,11 +192,6 @@ export class SessionFileMonitor extends EventEmitter {
       require('node:fs').closeSync(fd);
 
       const tail = buf.toString('utf-8');
-
-      // Priority 1: Check for FORGE_DONE marker (from CLAUDE.md instruction)
-      if (tail.includes('FORGE_DONE') || tail.includes('[FORGE_DONE]')) {
-        return 'FORGE_DONE marker detected';
-      }
 
       const lines = tail.split('\n').filter(l => l.trim());
 
