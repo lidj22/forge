@@ -464,7 +464,7 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
   const [outputs, setOutputs] = useState((initial.outputs || []).join(', '));
   const [selectedDeps, setSelectedDeps] = useState<Set<string>>(new Set(initial.dependsOn || []));
   const [stepsText, setStepsText] = useState(
-    (initial.steps || []).map(s => s.label === s.prompt ? s.prompt : `${s.label}: ${s.prompt}`).join('\n') || ''
+    (initial.steps || []).map(s => `${s.label}: ${s.prompt}`).join('\n') || ''
   );
   const [requiresApproval, setRequiresApproval] = useState(initial.requiresApproval || false);
   const [isPrimary, setIsPrimary] = useState(initial.primary || false);
