@@ -1146,14 +1146,11 @@ export class WorkspaceOrchestrator extends EventEmitter {
     // Determine session file path
     let sessionId: string | undefined;
 
+    // Skip session monitor for primary agent — user interacts directly,
+    // session file changes from user chat would cause false running/done detections.
     if (config.primary) {
-      try {
-        const mod = await import('../project-sessions');
-        sessionId = (mod as any).getFixedSession(this.projectPath);
-        console.log(`[session-monitor] ${config.label}: primary fixedSession=${sessionId || 'NONE'}`);
-      } catch (err: any) {
-        console.log(`[session-monitor] ${config.label}: failed to get fixedSession: ${err.message}`);
-      }
+      console.log(`[session-monitor] ${config.label}: primary agent, skipping monitor (user-controlled)`);
+      return;
     } else {
       sessionId = config.boundSessionId;
       console.log(`[session-monitor] ${config.label}: boundSession=${sessionId || 'NONE'}`);
