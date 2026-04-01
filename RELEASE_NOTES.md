@@ -1,13 +1,14 @@
-# Forge v0.5.12
+# Forge v0.5.14
 
 Released: 2026-03-31
 
-## Changes since v0.5.11
+## Changes since v0.5.13
 
 ### Bug Fixes
-- fix: correct bin paths in package.json
-- fix: merge pending upstream_complete — auto-complete older ones before sending new
-- fix: upstream_complete notification tells agent to ignore if busy or duplicate
+- fix: dedup forge failed notifications by sender→target pair
+- fix: TerminalLaunchDialog also uses daemon to create session
+- fix: FloatingTerminal only attaches, daemon creates all sessions
+- fix: write launch script to file to avoid tmux send-keys truncation
 
 
-**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.5.11...v0.5.12
+**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.5.13...v0.5.14
