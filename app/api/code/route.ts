@@ -96,10 +96,16 @@ export async function GET(req: Request) {
       const { execSync } = require('node:child_process');
       const safeQuery = searchQuery.replace(/['"\\]/g, '\\$&');
       // Use grep -rn with limits to prevent huge output
-      const result = execSync(
-        `grep -rn --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.py' --include='*.java' --include='*.go' --include='*.rs' --include='*.md' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.css' --include='*.html' --include='*.vue' --include='*.svelte' -m 5 '${safeQuery}' . 2>/dev/null | head -100`,
-        { cwd: resolvedDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
-      ).trim();
+      let result = '';
+      try {
+        result = execSync(
+          `grep -rn --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.py' --include='*.java' --include='*.go' --include='*.rs' --include='*.md' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.css' --include='*.html' --include='*.vue' --include='*.svelte' -m 5 '${safeQuery}' . | head -100`,
+          { cwd: resolvedDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+      } catch (e: any) {
+        // grep exit code 1 = no match (not an error)
+        result = e.stdout?.trim() || '';
+      }
       const matches = result ? result.split('\n').map((line: string) => {
         const match = line.match(/^\.\/(.+?):(\d+):(.*)$/);
         if (!match) return null;

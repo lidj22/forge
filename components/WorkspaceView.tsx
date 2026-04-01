@@ -379,6 +379,109 @@ function SessionTargetSelector({ target, agents, projectPath, onChange }: {
   );
 }
 
+// ─── Watch Path Picker (file/directory browser) ─────────
+
+function WatchPathPicker({ value, projectPath, onChange }: { value: string; projectPath: string; onChange: (v: string) => void }) {
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [tree, setTree] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
+  const [flatFiles, setFlatFiles] = useState<string[]>([]);
+
+  const loadTree = useCallback(() => {
+    if (!projectPath) return;
+    fetch(`/api/code?dir=${encodeURIComponent(projectPath)}`)
+      .then(r => r.json())
+      .then(data => {
+        setTree(data.tree || []);
+        // Build flat list for search
+        const files: string[] = [];
+        const walk = (nodes: any[], prefix = '') => {
+          for (const n of nodes || []) {
+            const path = prefix ? `${prefix}/${n.name}` : n.name;
+            files.push(n.type === 'dir' ? path + '/' : path);
+            if (n.children) walk(n.children, path);
+          }
+        };
+        walk(data.tree || []);
+        setFlatFiles(files);
+      })
+      .catch(() => {});
+  }, [projectPath]);
+
+  const filtered = search ? flatFiles.filter(f => f.toLowerCase().includes(search.toLowerCase())).slice(0, 30) : [];
+
+  return (
+    <div className="flex-1 flex items-center gap-1 relative">
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="./ (project root)"
+        className="text-[10px] bg-[#161b22] border border-[#30363d] rounded px-1 py-0.5 text-white flex-1"
+      />
+      <button onClick={() => { setShowBrowser(!showBrowser); if (!showBrowser) loadTree(); }}
+        className="text-[9px] px-1 py-0.5 rounded bg-[#30363d] text-gray-400 hover:text-white shrink-0">📂</button>
+
+      {showBrowser && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[#0d1117] border border-[#30363d] rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col" style={{ minWidth: 250 }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search files & dirs..."
+            autoFocus
+            className="text-[10px] bg-[#161b22] border-b border-[#30363d] px-2 py-1 text-white focus:outline-none"
+          />
+          <div className="overflow-y-auto flex-1">
+            {search ? (
+              // Search results
+              filtered.length > 0 ? filtered.map(f => (
+                <div key={f} onClick={() => { onChange(f); setShowBrowser(false); setSearch(''); }}
+                  className="px-2 py-0.5 text-[9px] text-gray-300 hover:bg-[#161b22] cursor-pointer truncate font-mono">
+                  {f.endsWith('/') ? `📁 ${f}` : `📄 ${f}`}
+                </div>
+              )) : <div className="px-2 py-1 text-[9px] text-gray-500">No matches</div>
+            ) : (
+              // Tree view (first 2 levels)
+              tree.map(n => <PathTreeNode key={n.name} node={n} prefix="" onSelect={p => { onChange(p); setShowBrowser(false); }} />)
+            )}
+          </div>
+          <div className="flex items-center justify-between px-2 py-0.5 border-t border-[#30363d] bg-[#161b22]">
+            <span className="text-[8px] text-gray-600">{flatFiles.length} items</span>
+            <button onClick={() => setShowBrowser(false)} className="text-[8px] text-gray-500 hover:text-white">Close</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PathTreeNode({ node, prefix, onSelect, depth = 0 }: { node: any; prefix: string; onSelect: (path: string) => void; depth?: number }) {
+  const [expanded, setExpanded] = useState(depth < 1);
+  const path = prefix ? `${prefix}/${node.name}` : node.name;
+  const isDir = node.type === 'dir';
+
+  if (!isDir && depth > 1) return null; // only show files at top 2 levels
+
+  return (
+    <div>
+      <div
+        onClick={() => isDir ? setExpanded(!expanded) : onSelect(path)}
+        className="flex items-center px-2 py-0.5 text-[9px] hover:bg-[#161b22] cursor-pointer"
+        style={{ paddingLeft: 8 + depth * 12 }}
+      >
+        <span className="text-gray-500 mr-1 w-3">{isDir ? (expanded ? '▼' : '▶') : ''}</span>
+        <span className={isDir ? 'text-[var(--accent)]' : 'text-gray-400'}>{isDir ? '📁' : '📄'} {node.name}</span>
+        {isDir && (
+          <button onClick={e => { e.stopPropagation(); onSelect(path + '/'); }}
+            className="ml-auto text-[8px] text-gray-600 hover:text-[var(--accent)]">select</button>
+        )}
+      </div>
+      {isDir && expanded && node.children && depth < 2 && (
+        node.children.map((c: any) => <PathTreeNode key={c.name} node={c} prefix={path} onSelect={onSelect} depth={depth + 1} />)
+      )}
+    </div>
+  );
+}
+
 // ─── Fixed Session Picker ────────────────────────────────
 
 function FixedSessionPicker({ projectPath, value, onChange }: { projectPath?: string; value: string; onChange: (v: string) => void }) {
@@ -487,14 +590,14 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
     fetch(`/api/code?dir=${encodeURIComponent(projectPath)}`)
       .then(r => r.json())
       .then(data => {
-        // Flatten directory tree (type='dir') to list of paths
+        // Collect directories with depth limit (max 2 levels for readability)
         const dirs: string[] = [];
-        const walk = (nodes: any[], prefix = '') => {
+        const walk = (nodes: any[], prefix = '', depth = 0) => {
           for (const n of nodes || []) {
             if (n.type === 'dir') {
               const path = prefix ? `${prefix}/${n.name}` : n.name;
               dirs.push(path);
-              if (n.children) walk(n.children, path);
+              if (n.children && depth < 2) walk(n.children, path, depth + 1);
             }
           }
         };
@@ -785,14 +888,15 @@ function AgentConfigModal({ initial, mode, existingAgents, projectPath, onConfir
                       <option value="agent_status">Agent Status</option>
                     </select>
                     {t.type === 'directory' && (
-                      <select value={t.path || ''} onChange={e => {
-                        const next = [...watchTargets];
-                        next[i] = { ...t, path: e.target.value };
-                        setWatchTargets(next);
-                      }} className="text-[10px] bg-[#161b22] border border-[#30363d] rounded px-1 py-0.5 text-white flex-1">
-                        <option value="">Project root</option>
-                        {projectDirs.map(d => <option key={d} value={d + '/'}>{d}/</option>)}
-                      </select>
+                      <WatchPathPicker
+                        value={t.path || ''}
+                        projectPath={projectPath || ''}
+                        onChange={v => {
+                          const next = [...watchTargets];
+                          next[i] = { ...t, path: v };
+                          setWatchTargets(next);
+                        }}
+                      />
                     )}
                     {t.type === 'agent_status' && (<>
                       <select value={t.path || ''} onChange={e => {
