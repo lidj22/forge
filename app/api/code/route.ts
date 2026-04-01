@@ -89,6 +89,28 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Directory not under any project root' }, { status: 403 });
   }
 
+  // Code search (grep)
+  const searchQuery = searchParams.get('search');
+  if (searchQuery) {
+    try {
+      const { execSync } = require('node:child_process');
+      const safeQuery = searchQuery.replace(/['"\\]/g, '\\$&');
+      // Use grep -rn with limits to prevent huge output
+      const result = execSync(
+        `grep -rn --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' --include='*.py' --include='*.java' --include='*.go' --include='*.rs' --include='*.md' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.css' --include='*.html' --include='*.vue' --include='*.svelte' -m 5 '${safeQuery}' . 2>/dev/null | head -100`,
+        { cwd: resolvedDir, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+      ).trim();
+      const matches = result ? result.split('\n').map((line: string) => {
+        const match = line.match(/^\.\/(.+?):(\d+):(.*)$/);
+        if (!match) return null;
+        return { file: match[1], line: parseInt(match[2]), content: match[3].trim().slice(0, 200) };
+      }).filter(Boolean) : [];
+      return NextResponse.json({ matches });
+    } catch {
+      return NextResponse.json({ matches: [] });
+    }
+  }
+
   // Git diff for a specific file
   const diffFile = searchParams.get('diff');
   if (diffFile) {

@@ -74,6 +74,9 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
   const [fileLoading, setFileLoading] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [changesExpanded, setChangesExpanded] = useState(false);
+  const [codeSearch, setCodeSearch] = useState('');
+  const [codeSearchResults, setCodeSearchResults] = useState<{ file: string; line: number; content: string }[]>([]);
+  const [codeSearching, setCodeSearching] = useState(false);
   const [changesHeight, setChangesHeight] = useState(120);
   const changesResizeRef = useRef<{ startY: number; origH: number } | null>(null);
   const [diffContent, setDiffContent] = useState<string | null>(null);
@@ -667,11 +670,51 @@ export default memo(function ProjectDetail({ projectPath, projectName, hasGit }:
 
       {/* Code content area */}
       {projectTab === 'code' && <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* File tree */}
-        <div style={{ width: sidebarWidth }} className="overflow-y-auto p-1 shrink-0">
-          {fileTree.map((node: any) => (
-            <FileTreeNode key={node.path} node={node} depth={0} selected={selectedFile} onSelect={openFile} />
-          ))}
+        {/* File tree + search */}
+        <div style={{ width: sidebarWidth }} className="flex flex-col shrink-0">
+          {/* Search input */}
+          <div className="p-1 border-b border-[var(--border)]">
+            <input
+              value={codeSearch}
+              onChange={e => setCodeSearch(e.target.value)}
+              onKeyDown={async e => {
+                if (e.key === 'Enter' && codeSearch.trim()) {
+                  setCodeSearching(true);
+                  try {
+                    const res = await fetch(`/api/code?dir=${encodeURIComponent(projectPath)}&search=${encodeURIComponent(codeSearch.trim())}`);
+                    const data = await res.json();
+                    setCodeSearchResults(data.matches || []);
+                  } catch { setCodeSearchResults([]); }
+                  setCodeSearching(false);
+                }
+                if (e.key === 'Escape') { setCodeSearch(''); setCodeSearchResults([]); }
+              }}
+              placeholder="Search code... (Enter)"
+              className="w-full text-[10px] bg-[var(--bg-tertiary)] border border-[var(--border)] rounded px-2 py-1 text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] placeholder-[var(--text-secondary)]"
+            />
+          </div>
+          {/* Search results */}
+          {codeSearchResults.length > 0 && (
+            <div className="overflow-y-auto border-b border-[var(--border)] max-h-60">
+              <div className="px-2 py-0.5 text-[8px] text-[var(--text-secondary)] bg-[var(--bg-tertiary)] sticky top-0 flex items-center justify-between">
+                <span>{codeSearchResults.length} results for "{codeSearch}"</span>
+                <button onClick={() => { setCodeSearch(''); setCodeSearchResults([]); }} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)]">✕</button>
+              </div>
+              {codeSearchResults.map((r, i) => (
+                <div key={i} onClick={() => openFile(r.file)} className="px-2 py-0.5 cursor-pointer hover:bg-[var(--bg-tertiary)] border-b border-[var(--border)]/30">
+                  <div className="text-[9px] text-[var(--accent)] truncate">{r.file}:{r.line}</div>
+                  <div className="text-[8px] text-[var(--text-secondary)] font-mono truncate">{r.content}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {codeSearching && <div className="px-2 py-1 text-[9px] text-[var(--text-secondary)]">Searching...</div>}
+          {/* File tree */}
+          <div className="overflow-y-auto flex-1 p-1">
+            {fileTree.map((node: any) => (
+              <FileTreeNode key={node.path} node={node} depth={0} selected={selectedFile} onSelect={openFile} />
+            ))}
+          </div>
         </div>
 
         {/* Sidebar resize handle */}
