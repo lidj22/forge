@@ -117,14 +117,14 @@ export class SessionFileMonitor extends EventEmitter {
       const mtime = stat.mtimeMs;
       const size = stat.size;
 
-      // Warmup: skip first 4 polls (~12s) to avoid false running during startup
+      // Warmup: skip first 6 polls (~18s) to avoid false running during startup
       const count = (this.warmupCount.get(agentId) || 0) + 1;
       this.warmupCount.set(agentId, count);
-      if (count <= 4) {
+      if (count <= 6) {
         this.lastMtime.set(agentId, mtime);
         this.lastSize.set(agentId, size);
         this.lastStableTime.set(agentId, Date.now());
-        if (count === 1) console.log(`[session-monitor] ${agentId}: warmup (${count}/4)`);
+        if (count === 1) console.log(`[session-monitor] ${agentId}: warmup (${count}/6)`);
         return;
       }
 
