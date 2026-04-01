@@ -1353,16 +1353,20 @@ export class WorkspaceOrchestrator extends EventEmitter {
         }
       }
 
-      // Case 4: Failed → notify sender so they know
-      if (msg.status === 'failed' && !this.forgeActedMessages.has(`failed-${msg.id}`)) {
-        const senderEntry = this.agents.get(msg.from);
-        const targetLabel = this.agents.get(msg.to)?.config.label || msg.to;
-        if (senderEntry && msg.from !== '_forge' && msg.from !== '_system') {
-          this.bus.send('_forge', msg.from, 'notify', {
-            action: 'update_notify',
-            content: `Your message to ${targetLabel} has failed. You may want to retry or take a different approach.`,
-          });
-          console.log(`[forge-agent] Notified ${senderEntry.config.label} that message to ${targetLabel} failed`);
+      // Case 4: Failed → notify sender (once per sender→target pair)
+      if (msg.status === 'failed') {
+        const failKey = `failed-${msg.from}->${msg.to}`;
+        if (!this.forgeActedMessages.has(failKey)) {
+          const senderEntry = this.agents.get(msg.from);
+          const targetLabel = this.agents.get(msg.to)?.config.label || msg.to;
+          if (senderEntry && msg.from !== '_forge' && msg.from !== '_system') {
+            this.bus.send('_forge', msg.from, 'notify', {
+              action: 'update_notify',
+              content: `Your message to ${targetLabel} has failed. You may want to retry or take a different approach.`,
+            });
+            console.log(`[forge-agent] Notified ${senderEntry.config.label} that message to ${targetLabel} failed (once)`);
+          }
+          this.forgeActedMessages.add(failKey);
         }
         this.forgeActedMessages.add(`failed-${msg.id}`);
       }
