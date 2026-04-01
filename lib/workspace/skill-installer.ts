@@ -63,6 +63,9 @@ export function installForgeSkills(
     ensureForgePermissions(projectClaudeDir);
   }
 
+  // Install Stop hook in user-level settings (for agent completion detection)
+  installForgeStopHook(forgePort);
+
   return { installed };
 }
 
@@ -160,6 +163,75 @@ export function applyProfileToProject(
   } catch (err: any) {
     console.error('[skills] Failed to apply profile config:', err.message);
   }
+}
+
+const FORGE_HOOK_MARKER = '# forge-stop-hook';
+
+/**
+ * Install a Stop hook in user-level ~/.claude/settings.json.
+ * When Claude Code finishes a turn, the hook notifies Forge via HTTP.
+ * Preserves existing user hooks. Creates backup before modifying.
+ */
+function installForgeStopHook(forgePort: number): void {
+  const settingsFile = join(homedir(), '.claude', 'settings.json');
+  const backupFile = join(homedir(), '.claude', 'settings.json.forge-backup');
+  const daemonPort = forgePort + 2; // 8403 → 8405
+
+  const hookCommand = `${FORGE_HOOK_MARKER}\nif [ -n "$FORGE_WORKSPACE_ID" ] && [ -n "$FORGE_AGENT_ID" ]; then curl -s -X POST "http://localhost:${daemonPort}/workspace/$FORGE_WORKSPACE_ID/agents" -H "Content-Type: application/json" -d "{\\"action\\":\\"agent_done\\",\\"agentId\\":\\"$FORGE_AGENT_ID\\"}" > /dev/null 2>&1 & fi`;
+
+  try {
+    let settings: any = {};
+    if (existsSync(settingsFile)) {
+      const raw = readFileSync(settingsFile, 'utf-8');
+      settings = JSON.parse(raw);
+
+      // Check if hook already installed
+      const existingHooks = settings.hooks?.Stop || [];
+      const alreadyInstalled = existingHooks.some((h: any) =>
+        h.command?.includes(FORGE_HOOK_MARKER) || h.command?.includes('agent_done')
+      );
+      if (alreadyInstalled) return; // already installed, skip
+
+      // Backup before modifying
+      writeFileSync(backupFile, raw, 'utf-8');
+    }
+
+    if (!settings.hooks) settings.hooks = {};
+    if (!settings.hooks.Stop) settings.hooks.Stop = [];
+
+    // Add forge hook
+    settings.hooks.Stop.push({
+      command: hookCommand,
+      timeout: 5000,
+    });
+
+    mkdirSync(join(homedir(), '.claude'), { recursive: true });
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    console.log('[skills] Installed Forge Stop hook in ~/.claude/settings.json');
+  } catch (err: any) {
+    console.error('[skills] Failed to install Stop hook:', err.message);
+  }
+}
+
+/**
+ * Remove Forge Stop hook from user-level settings (cleanup).
+ */
+export function removeForgeStopHook(): void {
+  const settingsFile = join(homedir(), '.claude', 'settings.json');
+  try {
+    if (!existsSync(settingsFile)) return;
+    const settings = JSON.parse(readFileSync(settingsFile, 'utf-8'));
+    if (!settings.hooks?.Stop) return;
+
+    settings.hooks.Stop = settings.hooks.Stop.filter((h: any) =>
+      !h.command?.includes(FORGE_HOOK_MARKER) && !h.command?.includes('agent_done')
+    );
+    if (settings.hooks.Stop.length === 0) delete settings.hooks.Stop;
+    if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+
+    writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    console.log('[skills] Removed Forge Stop hook from ~/.claude/settings.json');
+  } catch {}
 }
 
 /**

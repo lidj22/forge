@@ -1103,6 +1103,30 @@ export class WorkspaceOrchestrator extends EventEmitter {
     console.log('[workspace] Daemon stopped');
   }
 
+  // ─── Hook-based completion ─────────────────────────────
+
+  /** Called by Claude Code Stop hook via HTTP — agent finished a turn */
+  handleHookDone(agentId: string): void {
+    const entry = this.agents.get(agentId);
+    if (!entry) return;
+    if (!this.daemonActive) return;
+
+    // Only transition running → done (ignore if already idle/done)
+    if (entry.state.taskStatus !== 'running') {
+      console.log(`[hook] ${entry.config.label}: Stop hook fired but task=${entry.state.taskStatus}, ignoring`);
+      return;
+    }
+
+    console.log(`[hook] ${entry.config.label}: Stop hook → done`);
+    entry.state.taskStatus = 'done';
+    entry.state.completedAt = Date.now();
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'done' } as any);
+    this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'hook_done', content: 'Claude Code Stop hook: turn completed', timestamp: new Date().toISOString() } } as any);
+    this.handleAgentDone(agentId, entry, 'Stop hook');
+    this.saveNow();
+    this.emitAgentsChanged();
+  }
+
   // ─── Session File Monitor ──────────────────────────────
 
   private async startSessionMonitors(): Promise<void> {

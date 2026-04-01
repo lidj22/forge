@@ -190,6 +190,12 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
           return jsonError(res, err.message);
         }
       }
+      case 'agent_done': {
+        // Called by Claude Code Stop hook — agent finished a turn
+        if (!agentId) return jsonError(res, 'agentId required');
+        orch.handleHookDone(agentId);
+        return json(res, { ok: true });
+      }
       case 'run': {
         if (!agentId) return jsonError(res, 'agentId required');
         if (!orch.isDaemonActive()) return jsonError(res, 'Start daemon first before running agents');
