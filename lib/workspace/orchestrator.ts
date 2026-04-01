@@ -1111,13 +1111,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
     if (!this.daemonActive) return;
 
-    // Ignore if already done/failed (avoid re-triggering)
-    if (entry.state.taskStatus === 'done' || entry.state.taskStatus === 'failed') {
-      console.log(`[hook] ${entry.config.label}: Stop hook fired but task=${entry.state.taskStatus}, ignoring`);
-      return;
-    }
-
-    console.log(`[hook] ${entry.config.label}: Stop hook → done`);
+    console.log(`[hook] ${entry.config.label}: Stop hook → done (was ${entry.state.taskStatus})`);
     entry.state.taskStatus = 'done';
     entry.state.completedAt = Date.now();
     this.emit('event', { type: 'task_status', agentId, taskStatus: 'done' } as any);
