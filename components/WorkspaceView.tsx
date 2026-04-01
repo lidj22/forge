@@ -2911,28 +2911,19 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
           onLaunch={async (resumeMode, sessionId) => {
             const { agent, sessName, workDir } = termLaunchDialog;
             setTermLaunchDialog(null);
-            const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
-            if (res.ok) {
-              // Save selected session as boundSessionId if user chose a specific one
-              if (sessionId) {
-                wsApi(workspaceId, 'update', { agentId: agent.id, config: { ...agent, boundSessionId: sessionId } }).catch(() => {});
-              }
-              setFloatingTerminals(prev => [...prev, {
-                agentId: agent.id, label: agent.label, icon: agent.icon,
-                cliId: agent.agentId || 'claude',
-                cliCmd: res.cliCmd || 'claude',
-                cliType: res.cliType || 'claude-code',
-                workDir,
-                sessionName: sessName, resumeMode, resumeSessionId: sessionId, isPrimary: false, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession, boundSessionId: sessionId || agent.boundSessionId, initialPos: termLaunchDialog.initialPos,
-                profileEnv: {
-                  ...(res.env || {}),
-                  ...(res.model ? { CLAUDE_MODEL: res.model } : {}),
-                  FORGE_AGENT_ID: agent.id,
-                  FORGE_WORKSPACE_ID: workspaceId,
-                  FORGE_PORT: String(window.location.port || 8403),
-                },
-              }]);
+            // Save selected session as boundSessionId
+            if (sessionId) {
+              await wsApi(workspaceId, 'update', { agentId: agent.id, config: { ...agent, boundSessionId: sessionId } }).catch(() => {});
             }
+            // Daemon creates session (launch script), then attach
+            const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id }).catch(() => ({})) as any;
+            const tmux = res?.tmuxSession || sessName;
+            setFloatingTerminals(prev => [...prev, {
+              agentId: agent.id, label: agent.label, icon: agent.icon,
+              cliId: agent.agentId || 'claude', workDir,
+              tmuxSession: tmux, sessionName: sessName,
+              isPrimary: false, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession, boundSessionId: sessionId || agent.boundSessionId, initialPos: termLaunchDialog.initialPos,
+            }]);
           }}
           onCancel={() => setTermLaunchDialog(null)}
         />
