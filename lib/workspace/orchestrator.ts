@@ -1111,8 +1111,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
     if (!this.daemonActive) return;
 
-    // Only transition running → done (ignore if already idle/done)
-    if (entry.state.taskStatus !== 'running') {
+    // Ignore if already done/failed (avoid re-triggering)
+    if (entry.state.taskStatus === 'done' || entry.state.taskStatus === 'failed') {
       console.log(`[hook] ${entry.config.label}: Stop hook fired but task=${entry.state.taskStatus}, ignoring`);
       return;
     }
