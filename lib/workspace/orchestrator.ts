@@ -1526,21 +1526,59 @@ export class WorkspaceOrchestrator extends EventEmitter {
   }
 
   /** Stop a running agent */
-  stopAgent(agentId: string): void {
+  /** Mark agent task as done (user manually confirms completion) */
+  markAgentDone(agentId: string, notify: boolean): void {
     const entry = this.agents.get(agentId);
     if (!entry) return;
 
+    // Mark running inbox messages as done
+    const runningMsgs = this.bus.getLog().filter(m => m.to === agentId && m.status === 'running' && m.type !== 'ack');
+    for (const m of runningMsgs) {
+      m.status = 'done' as any;
+      this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'done' } as any);
+    }
+
+    entry.state.taskStatus = notify ? 'done' : 'idle';
+    entry.state.completedAt = Date.now();
+    this.emit('event', { type: 'task_status', agentId, taskStatus: entry.state.taskStatus } as any);
+    if (notify) {
+      this.handleAgentDone(agentId, entry, 'Manually marked done');
+    }
+    this.saveNow();
+    this.emitAgentsChanged();
+    console.log(`[workspace] ${entry.config.label}: manually marked ${notify ? 'done' : 'idle'} (${runningMsgs.length} messages completed)`);
+  }
+
+  /** Mark agent task as failed (user manually marks failure) */
+  markAgentFailed(agentId: string, notify: boolean): void {
+    const entry = this.agents.get(agentId);
+    if (!entry) return;
+
+    // Mark running inbox messages as failed
+    const runningMsgs = this.bus.getLog().filter(m => m.to === agentId && m.status === 'running' && m.type !== 'ack');
+    for (const m of runningMsgs) {
+      m.status = 'failed' as any;
+      this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'failed' } as any);
+    }
+
+    entry.state.taskStatus = 'failed';
+    entry.state.error = 'Manually marked as failed';
+    this.emit('event', { type: 'task_status', agentId, taskStatus: 'failed' } as any);
+    if (notify) {
+      this.bus.notifyTaskComplete(agentId, [], 'Task failed');
+    }
+    this.saveNow();
+    this.emitAgentsChanged();
+    console.log(`[workspace] ${entry.config.label}: manually marked failed (${runningMsgs.length} messages failed)`);
+  }
+
+  /** Legacy stop — for headless mode */
+  stopAgent(agentId: string): void {
+    const entry = this.agents.get(agentId);
+    if (!entry) return;
     if (entry.config.persistentSession) {
-      // Terminal mode: just reset task status, don't touch smith or worker
-      if (entry.state.taskStatus === 'running') {
-        entry.state.taskStatus = 'idle';
-        this.emit('event', { type: 'task_status', agentId, taskStatus: 'idle' } as any);
-        this.saveNow();
-        this.emitAgentsChanged();
-        console.log(`[workspace] ${entry.config.label}: stop → task idle (terminal stays active)`);
-      }
+      this.markAgentDone(agentId, false);
     } else {
-      // Headless mode: stop worker process
       entry.worker?.stop();
     }
   }

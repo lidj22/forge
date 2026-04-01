@@ -2212,6 +2212,9 @@ interface AgentNodeData {
   onShowInbox: () => void;
   onOpenTerminal: () => void;
   onSwitchSession: () => void;
+  onMarkIdle?: () => void;
+  onMarkDone?: (notify: boolean) => void;
+  onMarkFailed?: (notify: boolean) => void;
   inboxPending?: number;
   inboxFailed?: number;
   [key: string]: unknown;
@@ -2325,8 +2328,14 @@ function AgentFlowNode({ data }: NodeProps<Node<AgentNodeData>>) {
       {/* Actions */}
       <div className="flex items-center gap-1 px-2 py-1.5" style={{ borderTop: `1px solid ${c.border}15` }}>
         {taskStatus === 'running' && (
-          <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onStop(); }}
-            className="text-[9px] px-1.5 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30">■ Stop</button>
+          <>
+            <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); data.onMarkIdle?.(); }}
+              className="text-[9px] px-1 py-0.5 rounded bg-gray-600/20 text-gray-400 hover:bg-gray-600/30" title="Silent stop — no notifications">■</button>
+            <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); data.onMarkDone?.(true); }}
+              className="text-[9px] px-1 py-0.5 rounded bg-green-600/20 text-green-400 hover:bg-green-600/30" title="Mark done + notify">✓</button>
+            <button onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); data.onMarkFailed?.(true); }}
+              className="text-[9px] px-1 py-0.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30" title="Mark failed + notify">✕</button>
+          </>
         )}
         {/* Message button — send instructions to agent */}
         {smithStatus === 'active' && taskStatus !== 'running' && (
@@ -2469,6 +2478,9 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
             },
             onPause: () => wsApi(workspaceId!, 'pause', { agentId: agent.id }),
             onStop: () => wsApi(workspaceId!, 'stop', { agentId: agent.id }),
+            onMarkIdle: () => wsApi(workspaceId!, 'mark_done', { agentId: agent.id, notify: false }),
+            onMarkDone: (notify: boolean) => wsApi(workspaceId!, 'mark_done', { agentId: agent.id, notify }),
+            onMarkFailed: (notify: boolean) => wsApi(workspaceId!, 'mark_failed', { agentId: agent.id, notify }),
             onRetry: () => wsApi(workspaceId!, 'retry', { agentId: agent.id }),
             onEdit: () => setModal({ mode: 'edit', initial: agent, editId: agent.id }),
             onRemove: () => {

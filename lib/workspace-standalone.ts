@@ -232,6 +232,16 @@ async function handleAgentsPost(id: string, body: any, res: ServerResponse): Pro
         orch.stopAgent(agentId);
         return json(res, { ok: true });
       }
+      case 'mark_done': {
+        if (!agentId) return jsonError(res, 'agentId required');
+        orch.markAgentDone(agentId, body.notify !== false);
+        return json(res, { ok: true });
+      }
+      case 'mark_failed': {
+        if (!agentId) return jsonError(res, 'agentId required');
+        orch.markAgentFailed(agentId, body.notify !== false);
+        return json(res, { ok: true });
+      }
       case 'retry': {
         if (!agentId) return jsonError(res, 'agentId required');
         if (!orch.isDaemonActive()) return jsonError(res, 'Start daemon first before retrying agents');
