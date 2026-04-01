@@ -1123,6 +1123,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     this.emit('event', { type: 'task_status', agentId, taskStatus: 'done' } as any);
     this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'hook_done', content: 'Claude Code Stop hook: turn completed', timestamp: new Date().toISOString() } } as any);
     this.handleAgentDone(agentId, entry, 'Stop hook');
+    this.sessionMonitor?.resetState(agentId);
     this.saveNow();
     this.emitAgentsChanged();
   }
@@ -1544,6 +1545,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (notify) {
       this.handleAgentDone(agentId, entry, 'Manually marked done');
     }
+    this.sessionMonitor?.resetState(agentId);
     this.saveNow();
     this.emitAgentsChanged();
     console.log(`[workspace] ${entry.config.label}: manually marked ${notify ? 'done' : 'idle'} (${runningMsgs.length} messages completed)`);
@@ -1567,6 +1569,7 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (notify) {
       this.bus.notifyTaskComplete(agentId, [], 'Task failed');
     }
+    this.sessionMonitor?.resetState(agentId);
     this.saveNow();
     this.emitAgentsChanged();
     console.log(`[workspace] ${entry.config.label}: manually marked failed (${runningMsgs.length} messages failed)`);

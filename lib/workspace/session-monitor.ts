@@ -87,6 +87,14 @@ export class SessionFileMonitor extends EventEmitter {
   }
 
   /**
+   * Reset monitor state to idle (call when orchestrator manually changes taskStatus).
+   */
+  resetState(agentId: string): void {
+    this.currentState.set(agentId, 'idle');
+    this.lastStableTime.set(agentId, Date.now());
+  }
+
+  /**
    * Resolve session file path for a project + session ID.
    */
   static resolveSessionPath(projectPath: string, workDir: string | undefined, sessionId: string): string {
