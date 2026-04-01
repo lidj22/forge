@@ -1633,6 +1633,8 @@ export class WorkspaceOrchestrator extends EventEmitter {
     const entry = this.agents.get(agentId);
     if (!entry) return;
     entry.state.tmuxSession = undefined;
+    // Reset session monitor warmup so it doesn't immediately trigger running on restart
+    this.sessionMonitor?.resetState(agentId);
     this.saveNow();
     this.emitAgentsChanged();
   }
@@ -2261,6 +2263,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
       this.saveNow();
       this.emitAgentsChanged();
     }
+
+    // Always (re-)start session monitor with fresh warmup
+    this.startAgentSessionMonitor(agentId, config);
 
     // Ensure boundSessionId is set (required for session monitor + --resume)
     if (!config.primary && !config.boundSessionId) {
