@@ -2517,43 +2517,20 @@ function WorkspaceViewInner({ projectPath, projectName, onClose }: {
                 },
               };
 
-              // If tmux session exists → attach (primary or non-primary)
-              if (existingTmux) {
-                wsApi(workspaceId, 'open_terminal', { agentId: agent.id });
+              // All paths: let daemon create/ensure session, then attach
+              if (existingTmux || agent.primary || agent.persistentSession || agent.boundSessionId) {
+                // Daemon creates session via ensurePersistentSession (launch script, no truncation)
+                const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id }).catch(() => ({})) as any;
+                const tmux = existingTmux || res?.tmuxSession || sessName;
                 setFloatingTerminals(prev => [...prev, {
                   agentId: agent.id, label: agent.label, icon: agent.icon,
-                  cliId: agent.agentId || 'claude', ...launchInfo, workDir,
-                  tmuxSession: existingTmux, sessionName: sessName,
+                  cliId: agent.agentId || 'claude', workDir,
+                  tmuxSession: tmux, sessionName: sessName,
                   isPrimary: agent.primary, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession, boundSessionId: agent.boundSessionId, initialPos,
                 }]);
                 return;
               }
-
-              // Primary without session → open directly (no dialog)
-              if (agent.primary) {
-                const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id }).catch(() => ({})) as any;
-                setFloatingTerminals(prev => [...prev, {
-                  agentId: agent.id, label: agent.label, icon: agent.icon,
-                  cliId: agent.agentId || 'claude', ...launchInfo, workDir,
-                  tmuxSession: res?.tmuxSession || sessName, sessionName: sessName,
-                  isPrimary: true, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession, boundSessionId: agent.boundSessionId, initialPos,
-                }]);
-                return;
-              }
-
-              // Non-primary: has boundSessionId → use it directly; no bound → show dialog
-              if (agent.boundSessionId) {
-                const res = await wsApi(workspaceId, 'open_terminal', { agentId: agent.id }).catch(() => ({})) as any;
-                setFloatingTerminals(prev => [...prev, {
-                  agentId: agent.id, label: agent.label, icon: agent.icon,
-                  cliId: agent.agentId || 'claude', ...launchInfo, workDir,
-                  tmuxSession: res?.tmuxSession || sessName, sessionName: sessName,
-                  resumeSessionId: agent.boundSessionId,
-                  isPrimary: false, skipPermissions: agent.skipPermissions !== false, persistentSession: agent.persistentSession, boundSessionId: agent.boundSessionId, initialPos,
-                }]);
-                return;
-              }
-              // No bound session → show launch dialog (New / Resume / Select)
+              // No persistent session, no bound session → show launch dialog
               setTermLaunchDialog({ agent, sessName, workDir, sessions: [], supportsSession: resolveRes?.supportsSession ?? true, initialPos });
             },
             onSwitchSession: async () => {
