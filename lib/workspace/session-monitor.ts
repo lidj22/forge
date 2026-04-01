@@ -47,6 +47,7 @@ export class SessionFileMonitor extends EventEmitter {
     this.stopMonitoring(agentId);
     this.currentState.set(agentId, 'idle');
     this.lastStableTime.set(agentId, Date.now());
+    this.warmupCount.set(agentId, 0); // reset warmup for fresh start
 
     const timer = setInterval(() => {
       this.checkFile(agentId, sessionFilePath);
@@ -96,6 +97,7 @@ export class SessionFileMonitor extends EventEmitter {
   resetState(agentId: string): void {
     this.currentState.set(agentId, 'idle');
     this.lastStableTime.set(agentId, Date.now());
+    this.warmupCount.set(agentId, 0); // re-warmup after reset
     // Suppress state changes for 10s after manual reset
     this.suppressUntil.set(agentId, Date.now() + 10_000);
   }
