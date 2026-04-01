@@ -1900,6 +1900,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
         continue;
       }
 
+      // Merge: auto-complete older pending upstream_complete from same sender
+      for (const m of this.bus.getLog()) {
+        if (m.from === completedAgentId && m.to === id && m.status === 'pending' && m.payload?.action === 'upstream_complete') {
+          m.status = 'done' as any;
+          this.emit('event', { type: 'bus_message_status', messageId: m.id, status: 'done' } as any);
+        }
+      }
+
       this.bus.send(completedAgentId, id, 'notify', {
         action: 'upstream_complete',
         content,
