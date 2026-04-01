@@ -1,11 +1,12 @@
-# Forge v0.5.19
+# Forge v0.5.20
 
 Released: 2026-04-01
 
-## Changes since v0.5.18
+## Changes since v0.5.19
 
 ### Bug Fixes
-- fix: session monitor also reads fixedSession from file, not dynamic import
+- fix: hook done always sets done, no state check
+- fix: hook done accepts idle→done, not just running→done
 
 
-**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.5.18...v0.5.19
+**Full Changelog**: https://github.com/aiwatching/forge/compare/v0.5.19...v0.5.20

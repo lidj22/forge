@@ -1,6 +1,6 @@
 {
   "name": "@aion0/forge",
-  "version": "0.5.19",
+  "version": "0.5.20",
   "description": "Unified AI workflow platform — multi-model task orchestration, persistent sessions, web terminal, remote access",
   "type": "module",
   "scripts": {
