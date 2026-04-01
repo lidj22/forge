@@ -177,7 +177,10 @@ function installForgeStopHook(forgePort: number): void {
   const backupFile = join(homedir(), '.claude', 'settings.json.forge-backup');
   const daemonPort = forgePort + 2; // 8403 → 8405
 
-  const hookCommand = `${FORGE_HOOK_MARKER}\nif [ -n "$FORGE_WORKSPACE_ID" ] && [ -n "$FORGE_AGENT_ID" ]; then curl -s -X POST "http://localhost:${daemonPort}/workspace/$FORGE_WORKSPACE_ID/agents" -H "Content-Type: application/json" -d "{\\"action\\":\\"agent_done\\",\\"agentId\\":\\"$FORGE_AGENT_ID\\"}" > /dev/null 2>&1 & fi`;
+  // Hook reads agent context from .forge/agent-context.json in the project dir.
+  // This file is written by ensurePersistentSession for each agent's workDir.
+  // Falls back to env vars if file doesn't exist.
+  const hookCommand = `${FORGE_HOOK_MARKER}\nCTX_FILE="$(pwd)/.forge/agent-context.json"; if [ -f "$CTX_FILE" ]; then WS_ID=$(python3 -c "import json;print(json.load(open('$CTX_FILE')).get('workspaceId',''))" 2>/dev/null); AG_ID=$(python3 -c "import json;print(json.load(open('$CTX_FILE')).get('agentId',''))" 2>/dev/null); elif [ -n "$FORGE_WORKSPACE_ID" ]; then WS_ID="$FORGE_WORKSPACE_ID"; AG_ID="$FORGE_AGENT_ID"; fi; if [ -n "$WS_ID" ] && [ -n "$AG_ID" ]; then curl -s -X POST "http://localhost:${daemonPort}/workspace/$WS_ID/agents" -H "Content-Type: application/json" -d "{\\"action\\":\\"agent_done\\",\\"agentId\\":\\"$AG_ID\\"}" > /dev/null 2>&1 & fi`;
 
   try {
     let settings: any = {};
@@ -186,11 +189,12 @@ function installForgeStopHook(forgePort: number): void {
       settings = JSON.parse(raw);
 
       // Check if hook already installed
-      const existingHooks = settings.hooks?.Stop || [];
-      const alreadyInstalled = existingHooks.some((h: any) =>
-        h.command?.includes(FORGE_HOOK_MARKER) || h.command?.includes('agent_done')
-      );
-      if (alreadyInstalled) return; // already installed, skip
+      // Remove old forge hook if present (will re-add with latest version)
+      if (settings.hooks?.Stop) {
+        settings.hooks.Stop = settings.hooks.Stop.filter((h: any) =>
+          !h.command?.includes(FORGE_HOOK_MARKER) && !h.command?.includes('agent_done')
+        );
+      }
 
       // Backup before modifying
       writeFileSync(backupFile, raw, 'utf-8');

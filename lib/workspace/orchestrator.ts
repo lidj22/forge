@@ -1991,12 +1991,34 @@ export class WorkspaceOrchestrator extends EventEmitter {
       }
     }
 
+    // Write agent context file for hooks to read (workDir/.forge/agent-context.json)
+    try {
+      const forgeDir = join(workDir, '.forge');
+      const { mkdirSync: mkdirS } = require('node:fs');
+      mkdirS(forgeDir, { recursive: true });
+      writeFileSync(join(forgeDir, 'agent-context.json'), JSON.stringify({
+        workspaceId: this.workspaceId,
+        agentId: config.id,
+        agentLabel: config.label,
+        forgePort: Number(process.env.PORT) || 8403,
+      }, null, 2));
+    } catch {}
+
     // Check if tmux session already exists
     let sessionAlreadyExists = false;
     try {
       execSync(`tmux has-session -t "${sessionName}" 2>/dev/null`, { timeout: 3000 });
       sessionAlreadyExists = true;
       console.log(`[daemon] ${config.label}: persistent session already exists (${sessionName})`);
+      // Ensure FORGE env vars are set in the tmux session environment
+      // (for hooks that read them — set-environment makes them available to new processes in this session)
+      try {
+        execSync(`tmux set-environment -t "${sessionName}" FORGE_WORKSPACE_ID "${this.workspaceId}"`, { timeout: 3000 });
+        execSync(`tmux set-environment -t "${sessionName}" FORGE_AGENT_ID "${config.id}"`, { timeout: 3000 });
+        execSync(`tmux set-environment -t "${sessionName}" FORGE_PORT "${Number(process.env.PORT) || 8403}"`, { timeout: 3000 });
+      } catch {}
+      // Note: set-environment affects new processes in this tmux session.
+      // Claude Code hooks run as child processes of the shell, which inherits tmux environment.
     } catch {
       // Create new tmux session and start the CLI agent
       try {
