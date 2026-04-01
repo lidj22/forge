@@ -1111,13 +1111,18 @@ export class WorkspaceOrchestrator extends EventEmitter {
     if (!entry) return;
     if (!this.daemonActive) return;
 
+    const wasRunning = entry.state.taskStatus === 'running';
     console.log(`[hook] ${entry.config.label}: Stop hook → done (was ${entry.state.taskStatus})`);
     entry.state.taskStatus = 'done';
     entry.state.completedAt = Date.now();
     this.emit('event', { type: 'task_status', agentId, taskStatus: 'done' } as any);
     this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'hook_done', content: 'Claude Code Stop hook: turn completed', timestamp: new Date().toISOString() } } as any);
-    this.handleAgentDone(agentId, entry, 'Stop hook');
-    this.sessionMonitor?.resetState(agentId);
+    // Only broadcast and suppress if transitioning from running (actual task completion)
+    // Skip if was idle (just user chatting — don't suppress session monitor)
+    if (wasRunning) {
+      this.handleAgentDone(agentId, entry, 'Stop hook');
+      this.sessionMonitor?.resetState(agentId);
+    }
     this.saveNow();
     this.emitAgentsChanged();
   }
