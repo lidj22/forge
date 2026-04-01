@@ -77,3 +77,10 @@ Example: find /Users/zliu/MyDocuments/obsidian-project -name "*.md" | head -20
 When I ask about my notes, use bash to search and read files from the vault directory.
 Example: find <vault_path> -name "*.md" | head -20
 <!-- /forge:template:obsidian-vault -->
+
+
+<!-- FORGE:BEGIN -->
+## Forge Workspace Integration
+When you finish processing a task or message from Forge, end your final response with the marker: [FORGE_DONE]
+This helps Forge detect task completion. Do not include this marker if you are still working.
+<!-- FORGE:END -->
