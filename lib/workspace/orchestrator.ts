@@ -2530,7 +2530,14 @@ export class WorkspaceOrchestrator extends EventEmitter {
           return true;
         }
 
-        // System messages (from _watch, _system, user) bypass causedBy rules
+        // System messages: _forge failure notifications are log-only (don't trigger agent execution)
+        if (m.from === '_forge' && m.payload?.action === 'update_notify') {
+          console.log(`[inbox] ${entry.config.label}: _forge notification logged, not executed`);
+          m.status = 'done' as any;
+          return false;
+        }
+
+        // Other system messages (from _watch, _system, user) bypass causedBy rules
         if (m.from.startsWith('_') || m.from === 'user') return true;
 
         // Notifications: check causedBy for loop prevention
@@ -2556,10 +2563,6 @@ export class WorkspaceOrchestrator extends EventEmitter {
       const fromLabel = this.agents.get(nextMsg.from)?.config.label || nextMsg.from;
       console.log(`[inbox] ${entry.config.label}: consuming message from ${fromLabel} (${nextMsg.payload.action})`);
 
-      // Mark message as running (being processed)
-      nextMsg.status = 'running' as any;
-      this.emit('event', { type: 'bus_message_status', messageId: nextMsg.id, status: 'running' } as any);
-
       const logEntry = {
         type: 'system' as const,
         subtype: 'bus_message',
@@ -2567,12 +2570,21 @@ export class WorkspaceOrchestrator extends EventEmitter {
         timestamp: new Date(nextMsg.timestamp).toISOString(),
       };
 
-      // Terminal mode → inject; headless → worker (claude -p)
+      // Terminal mode → notify (agent pulls via /forge-inbox); headless → worker (claude -p)
       if (isTerminalMode) {
-        const injected = this.injectIntoSession(agentId, nextMsg.payload.content || nextMsg.payload.action);
+        // "You have mail" approach: inject a short notification, not the message content.
+        // The agent calls /forge-inbox to read the actual message when ready.
+        const pendingCount = pending.length;
+        const notification = pendingCount > 1
+          ? `You have ${pendingCount} new messages in your inbox (latest from ${fromLabel}). Use /forge-inbox to read them.`
+          : `You have a new message from ${fromLabel}. Use /forge-inbox to read it.`;
+        const injected = this.injectIntoSession(agentId, notification);
         if (injected) {
-          this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: '📺 Injected into terminal, monitoring for completion...', timestamp: new Date().toISOString() } } as any);
-          console.log(`[inbox] ${entry.config.label}: injected into terminal, starting completion monitor`);
+          // Mark as running so the message loop doesn't re-notify
+          nextMsg.status = 'running' as any;
+          this.emit('event', { type: 'bus_message_status', messageId: nextMsg.id, status: 'running' } as any);
+          this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: `📬 Notified agent: ${notification}`, timestamp: new Date().toISOString() } } as any);
+          console.log(`[inbox] ${entry.config.label}: notified of message from ${fromLabel}, monitoring for completion`);
           entry.state.currentMessageId = nextMsg.id;
           this.monitorTerminalCompletion(agentId, nextMsg.id, entry.state.tmuxSession!);
         } else {
@@ -2586,6 +2598,9 @@ export class WorkspaceOrchestrator extends EventEmitter {
           this.emitAgentsChanged();
         }
       } else {
+        // Headless mode: mark running and push content directly
+        nextMsg.status = 'running' as any;
+        this.emit('event', { type: 'bus_message_status', messageId: nextMsg.id, status: 'running' } as any);
         entry.worker!.setProcessingMessage(nextMsg.id);
         entry.worker!.wake({ type: 'bus_message', messages: [logEntry] });
         this.emit('event', { type: 'log', agentId, entry: { type: 'system', subtype: 'execution_method', content: `⚡ Executed via headless (agent: ${entry.config.agentId || 'claude'})`, timestamp: new Date().toISOString() } } as any);
