@@ -179,9 +179,11 @@ function createTmuxSession(cols: number, rows: number): string {
       throw e;
     }
   }
-  // Enable mouse scrolling and set large scrollback buffer
+  // Disable tmux mouse mode (xterm.js handles scrolling/selection natively;
+  // tmux mouse mode intercepts clicks and breaks browser text selection)
+  // and set large scrollback buffer
   try {
-    execSync(`${TMUX} set-option -t ${name} mouse on 2>/dev/null`);
+    execSync(`${TMUX} set-option -t ${name} mouse off 2>/dev/null`);
     execSync(`${TMUX} set-option -t ${name} history-limit 50000 2>/dev/null`);
   } catch {}
   return name;
@@ -293,9 +295,9 @@ wss.on('connection', (ws: WebSocket) => {
       term = null;
     }
 
-    // Ensure mouse and scrollback are enabled (for old sessions too)
+    // Ensure mouse mode is off and scrollback is set (for old sessions too)
     try {
-      execSync(`${TMUX} set-option -t ${name} mouse on 2>/dev/null`);
+      execSync(`${TMUX} set-option -t ${name} mouse off 2>/dev/null`);
       execSync(`${TMUX} set-option -t ${name} history-limit 50000 2>/dev/null`);
     } catch {}
 
@@ -363,7 +365,7 @@ wss.on('connection', (ws: WebSocket) => {
                 env: { ...process.env, TERM: 'xterm-256color' },
               });
               try {
-                execSync(`${TMUX} set-option -t ${name} mouse on 2>/dev/null`);
+                execSync(`${TMUX} set-option -t ${name} mouse off 2>/dev/null`);
                 execSync(`${TMUX} set-option -t ${name} history-limit 50000 2>/dev/null`);
               } catch {}
             } else {
